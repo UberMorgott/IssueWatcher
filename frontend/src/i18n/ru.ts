@@ -8,6 +8,7 @@ const ru: Messages = {
     retry: 'Повторить',
     close: 'Закрыть',
     cancel: 'Отмена',
+    save: 'Сохранить',
     never: 'никогда',
     unknown: 'неизвестно',
     none: 'Нет',

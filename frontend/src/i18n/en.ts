@@ -7,6 +7,7 @@ const en = {
     retry: 'Retry',
     close: 'Close',
     cancel: 'Cancel',
+    save: 'Save',
     never: 'never',
     unknown: 'unknown',
     none: 'None',
