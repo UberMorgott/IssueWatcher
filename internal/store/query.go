@@ -157,21 +157,22 @@ type IssueFilter struct {
 
 // Issue is a table row.
 type Issue struct {
-	ID        int64    `json:"id"`
-	RepoID    int64    `json:"repoId"`
-	Repo      string   `json:"repo"`
-	Number    int      `json:"number"`
-	Title     string   `json:"title"`
-	URL       string   `json:"url"`
-	Author    string   `json:"author"`
-	State     string   `json:"state"`
-	RawStatus string   `json:"rawStatus"`
-	Labels    []string `json:"labels"`
-	Comments  int      `json:"comments"`
-	Unread    bool     `json:"unread"`
-	CreatedAt string   `json:"createdAt"`
-	UpdatedAt string   `json:"updatedAt"`
-	ClosedAt  string   `json:"closedAt"`
+	ID        int64     `json:"id"`
+	RepoID    int64     `json:"repoId"`
+	Repo      string    `json:"repo"`
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	Author    string    `json:"author"`
+	State     string    `json:"state"`
+	RawStatus string    `json:"rawStatus"`
+	Labels    []string  `json:"labels"`
+	Comments  int       `json:"comments"`
+	Unread    bool      `json:"unread"`
+	CreatedAt string    `json:"createdAt"`
+	UpdatedAt string    `json:"updatedAt"`
+	ClosedAt  string    `json:"closedAt"`
+	Job       *JobBadge `json:"job,omitempty"` // newest agent job of the item
 }
 
 // IssueChunk is one slice of the issue list.
@@ -286,6 +287,9 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	if len(chunk.Items) > limit {
 		chunk.Items, chunk.More = chunk.Items[:limit], true
 	}
+	if err := s.attachJobs(ctx, chunk.Items); err != nil {
+		return chunk, err
+	}
 	if n := len(chunk.Items); n > 0 {
 		first, last := chunk.Items[0], chunk.Items[n-1]
 		chunk.HeadCursor = encodeCursor(first.UpdatedAt, first.ID)
@@ -323,7 +327,30 @@ func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 		return d, fmt.Errorf("store: issue %d: %w", id, err)
 	}
 	d.Issue, d.Body = is, body
+	one := []Issue{d.Issue}
+	if err := s.attachJobs(ctx, one); err != nil {
+		return d, err
+	}
+	d.Issue = one[0]
 	return d, nil
+}
+
+// attachJobs fills Issue.Job with each item's newest job.
+func (s *Store) attachJobs(ctx context.Context, list []Issue) error {
+	ids := make([]int64, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	jobs, err := s.LatestJobs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		if b, ok := jobs[list[i].ID]; ok {
+			list[i].Job = &b
+		}
+	}
+	return nil
 }
 
 // CommentChunk is one slice of an item's comments, oldest first.

@@ -1,0 +1,415 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Job states (docs/ARCHITECTURE.md → Runner).
+const (
+	JobQueued      = "queued"
+	JobRunning     = "running"
+	JobNeedsReview = "needs_review"
+	JobDone        = "done"
+	JobFailed      = "failed"
+	JobCancelled   = "cancelled"
+)
+
+// ActiveJobStates are the unfinished states; an item has at most one such job per flow.
+var ActiveJobStates = []string{JobQueued, JobRunning, JobNeedsReview}
+
+// ErrJobState means the job is not in a state that allows the change.
+var ErrJobState = errors.New("store: job state does not allow this")
+
+// ErrJobExists means the item already has an unfinished job of that flow.
+var ErrJobExists = errors.New("store: item already has an unfinished job of this flow")
+
+// Job is a queued or finished agent run (API shape).
+type Job struct {
+	ID         int64           `json:"id"`
+	ItemID     int64           `json:"itemId"`
+	ProjectID  int64           `json:"projectId"`
+	Flow       string          `json:"flow"`
+	State      string          `json:"state"`
+	ProfileID  string          `json:"profileId"`
+	Attempt    int             `json:"attempt"`
+	Phase      string          `json:"phase"`
+	Branch     string          `json:"branch"`
+	Worktree   string          `json:"worktree"`
+	BaseSHA    string          `json:"baseSha"`
+	Error      string          `json:"error"`
+	Result     json.RawMessage `json:"result"`
+	CreatedAt  string          `json:"createdAt"`
+	StartedAt  string          `json:"startedAt"`
+	FinishedAt string          `json:"finishedAt"`
+	UpdatedAt  string          `json:"updatedAt"`
+	// From the item and project.
+	Repo    string `json:"repo"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	ItemURL string `json:"itemUrl"`
+}
+
+const jobColumns = `j.id, j.item_id, j.project_id, j.flow, j.state, j.profile_id, j.attempt, j.phase, j.branch,
+	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
+	p.name, i.number, i.title, i.url`
+
+const jobFrom = ` FROM jobs j JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id`
+
+func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
+	var (
+		j      Job
+		result string
+	)
+	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
+		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
+		&j.Repo, &j.Number, &j.Title, &j.ItemURL)
+	if err != nil {
+		return j, err
+	}
+	if !json.Valid([]byte(result)) {
+		result = "{}"
+	}
+	j.Result = json.RawMessage(result)
+	return j, nil
+}
+
+// CreateJob queues a job for item itemID. An unfinished job of the same flow
+// for that item → ErrJobExists (with that job).
+func (s *Store) CreateJob(ctx context.Context, itemID int64, flow, profileID string) (Job, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, profile_id)
+		SELECT id, project_id, ?, ? FROM items WHERE id = ?
+		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, itemID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		var n int
+		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE id = ?`, itemID).Scan(&n); err != nil {
+			return Job{}, fmt.Errorf("store: create job: %w", err)
+		}
+		if n == 0 {
+			return Job{}, ErrNotFound
+		}
+		existing, err := s.activeJob(ctx, itemID, flow)
+		if err != nil {
+			return Job{}, err
+		}
+		return existing, ErrJobExists
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("store: create job: %w", err)
+	}
+	return s.Job(ctx, id)
+}
+
+func (s *Store) activeJob(ctx context.Context, itemID int64, flow string) (Job, error) {
+	j, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
+		` WHERE j.item_id = ? AND j.flow = ? AND j.state IN ('queued', 'running', 'needs_review')`, itemID, flow))
+	if errors.Is(err, sql.ErrNoRows) {
+		return j, ErrNotFound
+	}
+	if err != nil {
+		return j, fmt.Errorf("store: active job: %w", err)
+	}
+	return j, nil
+}
+
+// Job returns job id.
+func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
+	j, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return j, ErrNotFound
+	}
+	if err != nil {
+		return j, fmt.Errorf("store: job %d: %w", id, err)
+	}
+	return j, nil
+}
+
+// JobFilter selects jobs for the Jobs page (newest first).
+type JobFilter struct {
+	State     string // a job state, "active" (queued/running/needs_review) or "" (all)
+	Flow      string // fix | reply | ""
+	ProjectID int64
+	ItemID    int64
+	Cursor    string // older than this row
+	Limit     int
+}
+
+// JobChunk is one slice of the job list.
+type JobChunk struct {
+	Items      []Job  `json:"items"`
+	NextCursor string `json:"nextCursor"`
+	More       bool   `json:"more"`
+	Total      *int   `json:"total,omitempty"` // first chunk only
+}
+
+// Jobs returns a chunk of jobs, newest first.
+func (s *Store) Jobs(ctx context.Context, f JobFilter) (JobChunk, error) {
+	limit := clampLimit(f.Limit)
+	var (
+		where []string
+		args  []any
+	)
+	switch {
+	case f.State == "active":
+		where = append(where, "j.state IN ('queued', 'running', 'needs_review')")
+	case f.State != "":
+		where, args = append(where, "j.state = ?"), append(args, f.State)
+	}
+	if f.Flow != "" {
+		where, args = append(where, "j.flow = ?"), append(args, f.Flow)
+	}
+	if f.ProjectID != 0 {
+		where, args = append(where, "j.project_id = ?"), append(args, f.ProjectID)
+	}
+	if f.ItemID != 0 {
+		where, args = append(where, "j.item_id = ?"), append(args, f.ItemID)
+	}
+	cond := ""
+	if len(where) > 0 {
+		cond = " WHERE " + strings.Join(where, " AND ")
+	}
+	chunk := JobChunk{Items: []Job{}}
+	if f.Cursor == "" {
+		var n int
+		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs j"+cond, args...).Scan(&n); err != nil {
+			return chunk, fmt.Errorf("store: count jobs: %w", err)
+		}
+		chunk.Total = &n
+	} else {
+		k, err := decodeCursor(f.Cursor)
+		if err != nil {
+			return chunk, err
+		}
+		if cond == "" {
+			cond = " WHERE j.id < ?"
+		} else {
+			cond += " AND j.id < ?"
+		}
+		args = append(args, k.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+cond+" ORDER BY j.id DESC LIMIT ?", append(args, limit+1)...)
+	if err != nil {
+		return chunk, fmt.Errorf("store: jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return chunk, fmt.Errorf("store: scan job: %w", err)
+		}
+		chunk.Items = append(chunk.Items, j)
+	}
+	if err := rows.Err(); err != nil {
+		return chunk, fmt.Errorf("store: jobs: %w", err)
+	}
+	if len(chunk.Items) > limit {
+		chunk.Items, chunk.More = chunk.Items[:limit], true
+	}
+	if n := len(chunk.Items); n > 0 {
+		chunk.NextCursor = encodeCursor(chunk.Items[n-1].ID, chunk.Items[n-1].ID)
+	}
+	return chunk, nil
+}
+
+// JobsInState lists the jobs in any of states, oldest first (the runner's queue).
+func (s *Store) JobsInState(ctx context.Context, states ...string) ([]Job, error) {
+	if len(states) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(states))
+	for i, st := range states {
+		args[i] = st
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.state IN (?"+strings.Repeat(",?", len(states)-1)+") ORDER BY j.id", args...) //nolint:gosec // G202: placeholders only
+	if err != nil {
+		return nil, fmt.Errorf("store: jobs in state: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan job: %w", err)
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// JobChange is a partial update of a job row; nil fields stay.
+type JobChange struct {
+	State    *string
+	Phase    *string
+	Branch   *string
+	Worktree *string
+	BaseSHA  *string
+	Error    *string
+	Result   json.RawMessage // nil = keep
+	// NextAttempt increments attempt and clears the run fields (retry).
+	NextAttempt bool
+	Started     bool // started_at = now, finished_at = ''
+	Finished    bool // finished_at = now
+}
+
+// UpdateJob applies c to job id when its state is one of from (none = any) and
+// returns the new row; otherwise ErrJobState (with the current row).
+func (s *Store) UpdateJob(ctx context.Context, id int64, from []string, c JobChange) (Job, error) {
+	now := ts(time.Now())
+	set := []string{"updated_at = ?"}
+	args := []any{now}
+	add := func(col string, v any) {
+		set = append(set, col+" = ?")
+		args = append(args, v)
+	}
+	for col, v := range map[string]*string{
+		"state": c.State, "phase": c.Phase, "branch": c.Branch, "worktree": c.Worktree, "base_sha": c.BaseSHA, "error": c.Error,
+	} {
+		if v != nil {
+			add(col, *v)
+		}
+	}
+	if c.Result != nil {
+		add("result", string(c.Result))
+	}
+	if c.NextAttempt {
+		set = append(set, "attempt = attempt + 1")
+	}
+	if c.Started {
+		add("started_at", now)
+		add("finished_at", "")
+	}
+	if c.Finished {
+		add("finished_at", now)
+	}
+	q := "UPDATE jobs SET " + strings.Join(set, ", ") + " WHERE id = ?" //nolint:gosec // G202: fixed column names, bound values
+	args = append(args, id)
+	if len(from) > 0 {
+		q += " AND state IN (?" + strings.Repeat(",?", len(from)-1) + ")"
+		for _, st := range from {
+			args = append(args, st)
+		}
+	}
+	res, err := s.db.ExecContext(ctx, q, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return Job{}, ErrJobExists
+		}
+		return Job{}, fmt.Errorf("store: update job: %w", err)
+	}
+	j, gerr := s.Job(ctx, id)
+	if gerr != nil {
+		return j, gerr
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return j, ErrJobState
+	}
+	return j, nil
+}
+
+// RecoverJobs marks jobs left running by a previous process as failed
+// ("interrupted"): an agent may have been half way, so nothing restarts on its
+// own. Queued jobs stay queued.
+func (s *Store) RecoverJobs(ctx context.Context) ([]Job, error) {
+	running, err := s.JobsInState(ctx, JobRunning)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Job, 0, len(running))
+	for _, j := range running {
+		nj, err := s.UpdateJob(ctx, j.ID, []string{JobRunning}, JobChange{
+			State: new(JobFailed), Phase: new(""), Error: new("interrupted: the app stopped while the job was running"), Finished: true,
+		})
+		if err != nil && !errors.Is(err, ErrJobState) {
+			return out, err
+		}
+		out = append(out, nj)
+	}
+	return out, nil
+}
+
+// LatestJobs maps item id → its newest job (issue row badges).
+func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobBadge, error) {
+	out := map[int64]JobBadge{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	ids := slices.Compact(slices.Sorted(slices.Values(itemIDs)))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	q := `SELECT j.item_id, j.id, j.flow, j.state FROM jobs j WHERE j.id IN (SELECT max(id) FROM jobs WHERE item_id IN (?` + //nolint:gosec // G202: placeholders only
+		strings.Repeat(",?", len(ids)-1) + `) GROUP BY item_id)`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: latest jobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			item int64
+			b    JobBadge
+		)
+		if err := rows.Scan(&item, &b.ID, &b.Flow, &b.State); err != nil {
+			return nil, fmt.Errorf("store: latest jobs: %w", err)
+		}
+		out[item] = b
+	}
+	return out, rows.Err()
+}
+
+// JobBadge is the newest job of an item, shown on its row.
+type JobBadge struct {
+	ID    int64  `json:"id"`
+	Flow  string `json:"flow"`
+	State string `json:"state"`
+}
+
+// JobInput is what a job needs to build its prompt and workspace.
+type JobInput struct {
+	ItemExternalID string
+	Platform       string
+	Number         int
+	Title          string
+	Body           string
+	URL            string
+	Author         string
+	ProjectName    string // owner/repo
+	ProjectURL     string
+	LocalPath      string
+	Comments       []Comment
+}
+
+// JobInput loads item itemID with its project and every comment.
+func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
+	var in JobInput
+	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author,
+		p.name, p.url, p.local_path FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id
+		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author,
+		&in.ProjectName, &in.ProjectURL, &in.LocalPath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return in, ErrNotFound
+	}
+	if err != nil {
+		return in, fmt.Errorf("store: job input: %w", err)
+	}
+	cursor := ""
+	for {
+		c, err := s.Comments(ctx, itemID, cursor, 200)
+		if err != nil {
+			return in, err
+		}
+		in.Comments = append(in.Comments, c.Items...)
+		if !c.More {
+			return in, nil
+		}
+		cursor = c.NextCursor
+	}
+}
