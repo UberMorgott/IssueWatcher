@@ -294,12 +294,12 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, _ *http.Request) {
 }
 
 var manifestPage = template.Must(template.New("m").Parse(`<!doctype html>
-<meta charset="utf-8"><title>IssueWatcher — create GitHub App</title>
+<html lang="ru"><meta charset="utf-8"><title>IssueWatcher — создание GitHub App</title>
 <body style="font-family:system-ui;margin:2rem">
-<p>Creating your private IssueWatcher GitHub App on github.com…</p>
+<p>Создаём ваш приватный GitHub App для IssueWatcher на github.com…</p>
 <form id="f" method="post" action="{{.Action}}">
 <input type="hidden" name="manifest" value="{{.Manifest}}">
-<noscript><button type="submit">Continue to GitHub</button></noscript>
+<noscript><button type="submit">Перейти на GitHub</button></noscript>
 </form>
 <script>document.getElementById('f').submit()</script>
 </body>`))
@@ -307,7 +307,7 @@ var manifestPage = template.Must(template.New("m").Parse(`<!doctype html>
 func (s *Server) handleManifestPage(w http.ResponseWriter, r *http.Request) {
 	st := r.URL.Query().Get("state")
 	if _, ok := s.gh.takeState(st, stateManifest, false); !ok {
-		authPage(w, http.StatusForbidden, "This sign-in link expired. Click “Войти” in the dashboard again.")
+		authPage(w, http.StatusForbidden, "Ссылка для входа устарела. Нажмите «Подключить GitHub» в панели ещё раз.")
 		return
 	}
 	m, err := github.Manifest(github.AppName(), s.port)
@@ -323,14 +323,14 @@ func (s *Server) handleManifestPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAppCreated(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if _, ok := s.gh.takeState(q.Get("state"), stateManifest, true); !ok {
-		authPage(w, http.StatusForbidden, "Unknown or expired request. Click “Войти” in the dashboard again.")
+		authPage(w, http.StatusForbidden, "Неизвестный или устаревший запрос. Нажмите «Подключить GitHub» в панели ещё раз.")
 		return
 	}
 	app, err := s.opts.GitHub.ConvertManifest(r.Context(), q.Get("code"), s.port)
 	if err != nil {
 		s.opts.Log.Error("github: manifest conversion failed", "err", err)
-		s.setAuthError("GitHub app registration failed")
-		authPage(w, http.StatusBadGateway, "GitHub did not return the app credentials. Try “Войти” again.")
+		s.setAuthError("не удалось зарегистрировать GitHub App")
+		authPage(w, http.StatusBadGateway, "GitHub не вернул данные приложения. Попробуйте «Подключить GitHub» ещё раз.")
 		return
 	}
 	s.opts.Log.Info("github: app registered", "app_id", app.ID, "slug", app.Slug, "port", app.RegisteredPort)
@@ -341,7 +341,7 @@ func (s *Server) handleAppCreated(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	app, err := s.opts.GitHub.App()
 	if err != nil {
-		authPage(w, http.StatusConflict, "IssueWatcher has no GitHub App yet. Click “Войти” in the dashboard.")
+		authPage(w, http.StatusConflict, "У IssueWatcher ещё нет GitHub App. Нажмите «Подключить GitHub» в панели.")
 		return
 	}
 	s.opts.Log.Info("github: app installed", "setup_action", r.URL.Query().Get("setup_action"))
@@ -352,24 +352,24 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	st, ok := s.gh.takeState(q.Get("state"), stateLogin, true)
 	if !ok {
-		authPage(w, http.StatusForbidden, "Unknown or expired sign-in. Click “Войти” in the dashboard again.")
+		authPage(w, http.StatusForbidden, "Неизвестный или устаревший вход. Нажмите «Подключить GitHub» в панели ещё раз.")
 		return
 	}
 	if e := q.Get("error"); e != "" {
-		s.setAuthError("sign-in cancelled on GitHub (" + e + ")")
-		authPage(w, http.StatusForbidden, "GitHub sign-in was cancelled ("+e+").")
+		s.setAuthError("вход отменён на GitHub (" + e + ")")
+		authPage(w, http.StatusForbidden, "Вход в GitHub отменён ("+e+").")
 		return
 	}
 	tok, err := s.opts.GitHub.Exchange(r.Context(), q.Get("code"), st.verifier, s.callbackURL())
 	if err != nil {
 		s.opts.Log.Error("github: token exchange failed", "err", err)
-		s.setAuthError("GitHub token exchange failed")
-		authPage(w, http.StatusBadGateway, "GitHub sign-in failed. Try “Войти” again.")
+		s.setAuthError("не удалось получить токен GitHub")
+		authPage(w, http.StatusBadGateway, "Не удалось войти в GitHub. Попробуйте «Подключить GitHub» ещё раз.")
 		return
 	}
 	s.signedIn(tok.Login)
 	if s.navigate("") { // a dashboard tab is open: focus it, this tab is done
-		authPage(w, http.StatusOK, "Signed in to GitHub as "+tok.Login+". You can close this tab.")
+		authPage(w, http.StatusOK, "Вход в GitHub выполнен как "+tok.Login+". Эту вкладку можно закрыть.")
 		return
 	}
 	// A fresh launch URL: the session cookie is not sent on this cross-site redirect chain.
@@ -395,7 +395,7 @@ func (s *Server) handleDeviceStart(w http.ResponseWriter, r *http.Request) {
 		var oe *github.OAuthError
 		msg := err.Error()
 		if errors.As(err, &oe) && oe.Code == "device_flow_disabled" {
-			msg = "device flow is disabled: enable it in the GitHub App settings"
+			msg = "Device Flow выключен: включите его в настройках GitHub App"
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
 		return
@@ -442,7 +442,7 @@ func (s *Server) stopDevice() {
 }
 
 var messagePage = template.Must(template.New("p").Parse(`<!doctype html>
-<meta charset="utf-8"><title>IssueWatcher</title>
+<html lang="ru"><meta charset="utf-8"><title>IssueWatcher</title>
 <body style="font-family:system-ui;margin:2rem"><p>{{.}}</p></body>`))
 
 func authPage(w http.ResponseWriter, status int, msg string) {

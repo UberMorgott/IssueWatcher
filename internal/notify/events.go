@@ -19,11 +19,12 @@ type Balloon struct {
 	ItemID string
 }
 
-// Balloons turns sync events into tray notifications.
+// Balloons turns sync events into tray notifications (UI text is Russian).
 func Balloons(events []store.Event) []Balloon {
 	if len(events) > MaxBalloons {
+		n := len(events)
 		return []Balloon{{
-			Title: strconv.Itoa(len(events)) + " updates",
+			Title: strconv.Itoa(n) + " " + ruPlural(n, "обновление", "обновления", "обновлений"),
 			Text:  summary(events),
 		}}
 	}
@@ -33,11 +34,11 @@ func Balloons(events []store.Event) []Balloon {
 		b := Balloon{ItemID: strconv.FormatInt(e.ItemID, 10)}
 		switch e.Kind {
 		case store.EventNewIssue:
-			b.Title, b.Text = "New issue · "+ref, clip(e.Title, 120)+" — "+e.Actor
+			b.Title, b.Text = "Новый issue · "+ref, clip(e.Title, 120)+" — "+e.Actor
 		case store.EventNewComment:
-			b.Title, b.Text = "New comment · "+ref, e.Actor+": "+clip(oneLine(e.Body), 160)
+			b.Title, b.Text = "Новый комментарий · "+ref, e.Actor+": "+clip(oneLine(e.Body), 160)
 		case store.EventClosed:
-			b.Title, b.Text = "Closed · "+ref, clip(e.Title, 160)
+			b.Title, b.Text = "Закрыт · "+ref, clip(e.Title, 160)
 		default:
 			b.Title, b.Text = string(e.Kind)+" · "+ref, clip(e.Title, 160)
 		}
@@ -60,14 +61,33 @@ func summary(events []store.Event) string {
 	}
 	var parts []string
 	for _, p := range []struct {
-		n    int
-		what string
-	}{{issues, "new issues"}, {comments, "new comments"}, {closed, "closed"}} {
+		n     int
+		forms [3]string
+	}{
+		{issues, [3]string{"новый issue", "новых issue", "новых issue"}},
+		{comments, [3]string{"новый комментарий", "новых комментария", "новых комментариев"}},
+		{closed, [3]string{"закрыт", "закрыто", "закрыто"}},
+	} {
 		if p.n > 0 {
-			parts = append(parts, strconv.Itoa(p.n)+" "+p.what)
+			parts = append(parts, strconv.Itoa(p.n)+" "+ruPlural(p.n, p.forms[0], p.forms[1], p.forms[2]))
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// ruPlural picks the Russian form for n: one (1, 21), few (2–4, 22–24), many (0, 5–20, 25…).
+func ruPlural(n int, one, few, many string) string {
+	if n < 0 {
+		n = -n
+	}
+	switch d, dd := n%10, n%100; {
+	case d == 1 && dd != 11:
+		return one
+	case d >= 2 && d <= 4 && (dd < 12 || dd > 14):
+		return few
+	default:
+		return many
+	}
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

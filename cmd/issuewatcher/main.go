@@ -46,7 +46,7 @@ const (
 func main() {
 	if err := run(); err != nil {
 		// Release builds have no console: show the reason.
-		msgBox("IssueWatcher failed to start", err.Error())
+		msgBox("IssueWatcher не запустился", err.Error())
 		os.Exit(1)
 	}
 }
@@ -178,15 +178,15 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
 		Menu: []notify.MenuItem{
-			{Title: "Open dashboard", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
-			{Title: "Test notification", OnClick: func() {
+			{Title: "Открыть панель", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
+			{Title: "Тестовое уведомление", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
 				id := strconv.FormatInt(n%5+1, 10) // mock rows 1..5
-				notifyItem(id, "Test notification #"+strconv.FormatInt(n, 10), "Click to open item "+id)
+				notifyItem(id, "Тестовое уведомление #"+strconv.FormatInt(n, 10), "Нажмите, чтобы открыть issue "+id)
 			}},
 			{},
-			{Title: "Quit", OnClick: func() { tray.Quit() }},
+			{Title: "Выход", OnClick: func() { tray.Quit() }},
 		},
 		OnClick: func() {
 			log.Info("tray click")
@@ -231,7 +231,7 @@ func runDemo(log *slog.Logger, t *notify.Tray, setBadge func(int64)) {
 	log.Info("demo: start")
 	time.Sleep(time.Second)
 	setBadge(150)
-	err := t.Notify("Demo issue #42", "Simulated click follows", "42")
+	err := t.Notify("Демо issue #42", "Следом будет имитирован клик", "42")
 	log.Info("demo: notification shown", "err", err)
 	time.Sleep(2 * time.Second)
 	log.Info("demo: simulating notification click")

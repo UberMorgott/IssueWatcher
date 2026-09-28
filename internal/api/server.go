@@ -199,7 +199,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
 			}
-			http.Error(w, "Not signed in. Open IssueWatcher from its tray icon.", http.StatusUnauthorized)
+			http.Error(w, "Вход не выполнен. Откройте IssueWatcher через значок в трее.", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -223,7 +223,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	delete(s.launches, t) // single use
 	s.mu.Unlock()
 	if !ok || time.Now().After(l.expires) {
-		http.Error(w, "Link expired. Open IssueWatcher from its tray icon.", http.StatusForbidden)
+		http.Error(w, "Ссылка устарела. Откройте IssueWatcher через значок в трее.", http.StatusForbidden)
 		return
 	}
 	// No Secure flag: plain-HTTP loopback, a Secure cookie would never be sent back.
