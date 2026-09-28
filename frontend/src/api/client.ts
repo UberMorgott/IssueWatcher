@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   Comment,
   Health,
   IssueDetail,
@@ -129,6 +130,9 @@ export const api = {
     if (repo) p.set('project', String(repo))
     return call<Stats>('GET', '/api/stats?' + p.toString())
   },
+
+  settings: () => call<AppSettings>('GET', '/api/settings'),
+  saveSettings: (patch: Partial<Pick<AppSettings, 'startWithWindows' | 'startMinimized'>>) => call<AppSettings>('PUT', '/api/settings', patch),
 
   syncStatus: () => call<SyncStatus>('GET', '/api/sync'),
   syncNow: () => call<void>('POST', '/api/sync'),

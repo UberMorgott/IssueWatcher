@@ -11,9 +11,10 @@ dispatch local AI agents (Claude Code, Codex CLI) manually, in batches, or by au
 | Shell | single Go exe: loopback HTTP server (`127.0.0.1`, OS-chosen free port; optional `IW_PORT` only if free) serving the embedded Vue app, opened in the default browser; no embedded webview | no WebView2 profile, no Wails beta; user runs many local servers, so never a fixed port |
 | Loopback auth | per-run bearer token + port in `data\runtime.json`; browser always opened via one-time `/auth?t=` link → `HttpOnly SameSite=Strict` session cookie; Host header must be `127.0.0.1`/`localhost` | other local processes/pages can't drive the API; DNS-rebinding guard |
 | Single instance | named mutex `Local\IssueWatcher-<hash(data dir)>`; second launch reads `runtime.json`, `POST /api/open` → running instance opens the browser, exits | portable copies in different folders stay independent; mutex dies with the process (no stale lock) |
-| Portable | all state in `data\` next to exe (config, SQLite, logs, worktrees). No registry/AppData | user requirement |
+| Portable | all state in `data\` next to exe (config, SQLite, logs, worktrees). No registry/AppData — **one exception**: Settings → «Запускать вместе с Windows» writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IssueWatcher` = `"<exe>" --minimized` (`internal/autostart`), only while on, deleted when off, rewritten at startup if the exe moved (`config.json startWithWindows` remembers the choice) | user requirement; autostart has no portable alternative |
+| Start / focus | `--minimized` (or Settings → «Запускать свёрнутым», flag wins) = tray only, no browser tab. Tray/notification click: SSE `navigate` to the open tab, then `EnumWindows` finds the browser window whose title starts with the locale-independent marker `IssueWatcher · ` (the SPA's `document.title`) and restores + `SetForegroundWindow`s it (our process holds foreground rights right after the click; `AttachThreadInput` fallback). Tab not active in its window → title not visible → navigate + title flash only. Web app manifest lets the user install the dashboard as an app window, which makes the match reliable | browsers ignore `window.focus()` from a background tab |
 | Notifications | tray balloon (`Shell_NotifyIcon` `NIF_INFO`); click (`NIN_BALLOONUSERCLICK`) opens browser at `/item/:id`. Win10/11 render it as a toast | no AUMID/shortcut/registry needed (portable); `fyne.io/systray` exposes neither balloons nor that click → own small Win32 tray (`golang.org/x/sys/windows`) |
-| Tray | own Win32 tray: PNG icon rendered in Go with badge count (`99+`) (+ status dots later); menu Open dashboard / Test notification / Quit; left-click opens browser; re-added on `TaskbarCreated` | quick status |
+| Tray | own Win32 tray: PNG icon rendered in Go with badge count (`99+`) (+ status dots later); menu Открыть / Тестовое уведомление / Выход; left-click opens browser; re-added on `TaskbarCreated` | quick status |
 | DB | SQLite via `modernc.org/sqlite` (no cgo), embedded SQL migrations | reuse `E:\DEV\1сEPD\internal\store\sqlite.go` |
 | GitHub API | GraphQL (explicit queries over `net/http`) for sync; REST (`go-github`) where simpler | rate limit 5000/h per token |
 | GitHub auth | GitHub App created by **manifest flow** (browser: confirm create → install on all repos) → user token via web flow + PKCE + loopback `127.0.0.1:<port>`. Client secret stays in local `data\secrets\` (generated for this user, never shipped). Fallback: device flow. Details + sources: [GitHub auth](#github-auth) | "click Login → Accept, Accept → works", no shipped secret, no broker |
@@ -33,11 +34,12 @@ internal/provider/github  auth (manifest, web flow+PKCE, device, refresh), REST/
 internal/provider/github/githubtest  in-memory fake GitHub for tests (no network)
 internal/syncer         poller: cursors, diff → events, unread badge, replies (named syncer: avoids clash with std sync)
 internal/secret         owner-only JSON files (protected DACL = current user) for app keys + tokens
-internal/config         data\config.json (pollIntervalMinutes)
+internal/config         data\config.json (pollIntervalMinutes, startWithWindows, startMinimized)
 internal/runner         job queue, worktrees, claude/codex adapters, result check
 internal/store          SQLite + migrations
 internal/api            loopback HTTP server: SPA, JSON API, auth (browser + MCP bridge)
 internal/notify         Win32 tray icon, badge rendering, balloon notifications
+internal/autostart      HKCU Run entry for «start with Windows» (the only registry write)
 internal/instance       single-instance mutex + data\runtime.json
 internal/paths          portable data dir resolver (IW_DATA_DIR override)
 frontend/               Vue app
@@ -100,6 +102,7 @@ JSON over the loopback server; session cookie or bearer required (except the Git
 - `POST /api/items/{id}/comments {body}` → 201 comment; 400 empty, 404, 409 not signed in, 429 rate limited, 502 GitHub error.
 - `GET /api/stats?project=&weeks=` → `{open, closed, weekly:[{start, opened, closed}], projects?}` (Monday-start UTC weeks, default 26; `projects` = per-project totals when `project` omitted).
 - `GET /api/sync` → `{running, signedIn, lastSync, lastError, rateLimitedUntil, interval}`; `POST /api/sync` → 202.
+- `GET /api/settings` → `{startWithWindows, startMinimized, pollIntervalMinutes}` (`startWithWindows` = Run value exists and starts this exe); `PUT /api/settings {startWithWindows?, startMinimized?}` writes the Run value and `config.json`, returns the new state.
 - `GET /api/events` (SSE, owned by the SPA/tray side, `internal/api/events.go`): `item.new`, `comment.new`, `item.closed` `{id, repo, number, title, actor?, body?}`, `sync.status {state: started|progress|done|error, repo?, done, total, changed, unread, error?}` (every cycle, first/silent sync included), `data.changed {reason: sync|read|reply, itemId?, repo?}` (any write that changes items, comments, projects or read state), `auth.changed {provider, state, login}`, `navigate {path}`.
 - SPA reactivity: one store (`frontend/src/stores/app.ts`) turns `data.changed` / `auth.changed` / item events into a debounced (300 ms) `dataVersion` bump; every view refetches quietly on it (no loading overlay; selection, filters, scroll kept). SSE reconnect = full refetch. The top bar shows `sync.status` progress (project N/M).
 ## Domain

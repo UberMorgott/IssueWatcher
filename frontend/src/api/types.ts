@@ -111,6 +111,13 @@ export interface SyncProgress {
   error?: string
 }
 
+/** GET/PUT /api/settings (config.json + autostart entry). */
+export interface AppSettings {
+  startWithWindows: boolean
+  startMinimized: boolean
+  pollIntervalMinutes: number
+}
+
 export interface Health {
   version: string
   port: number

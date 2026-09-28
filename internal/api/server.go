@@ -50,6 +50,7 @@ type Options struct {
 	Store          *store.Store   // data endpoints (need Sync too)
 	Sync           *syncer.Syncer // poller status, sync now, replies
 	OnUnreadChange func()         // called after the user marks an item read
+	Settings       SettingsStore  // GET/PUT /api/settings
 }
 
 // Server serves the SPA and the loopback API.
@@ -107,6 +108,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	if opts.Store != nil && opts.Sync != nil {
 		s.registerData(mux)
 		opts.Sync.OnProgress(s.syncProgress)
+	}
+	if opts.Settings != nil {
+		s.registerSettings(mux)
 	}
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", s.spa())
@@ -263,6 +267,9 @@ func (s *Server) spa() http.Handler {
 			if st, err := fs.Stat(s.opts.Assets, p); err == nil && !st.IsDir() {
 				if strings.HasPrefix(p, "assets/") { // Vite content-hashed names
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				if path.Ext(p) == ".webmanifest" { // not in Go's built-in MIME table
+					w.Header().Set("Content-Type", "application/manifest+json")
 				}
 				http.ServeFileFS(w, r, s.opts.Assets, p)
 				return

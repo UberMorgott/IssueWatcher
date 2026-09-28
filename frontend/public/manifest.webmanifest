@@ -1,0 +1,11 @@
+{
+  "name": "IssueWatcher",
+  "short_name": "IssueWatcher",
+  "description": "Issues and comments from all your projects in one place",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1017",
+  "theme_color": "#0b1017",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

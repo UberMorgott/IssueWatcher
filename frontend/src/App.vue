@@ -33,7 +33,7 @@ function flashTitle() {
   let n = 0
   flashTimer = window.setInterval(() => {
     on = !on
-    document.title = on ? '● IssueWatcher' : base
+    document.title = on ? '● ' + base : base // keeps the "IssueWatcher · " marker
     if (document.hasFocus() || ++n > 30) {
       window.clearInterval(flashTimer)
       document.title = base

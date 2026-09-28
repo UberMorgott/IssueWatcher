@@ -30,6 +30,13 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] PrimeUI license: `VITE_PRIMEUI_LICENSE` in gitignored `frontend/.env` → `registerLicense` (as in `E:\DEV\1сEPD\web`); `frontend/.env.example` documents it
 - [ ] Drop legacy `/api/repos`, `/api/issues`, `/api/auth/{start,logout,device}` aliases (SPA no longer uses them)
 - [ ] Manual check with a real GitHub account: onboarding → connect → live toasts; tray click focusing the existing tab in a real (non-headless) browser
+- [x] Russian UI (vue-i18n, ru default + en switch), Russian tray/balloons/auth pages
+- [x] Live reactivity: `sync.status` progress + `data.changed` → quiet refetch in every view
+- [x] Settings → start with Windows (HKCU Run `"<exe>" --minimized`, rewritten when the folder moves) + start minimized; `--minimized` flag; `GET/PUT /api/settings`
+- [x] Tray / notification click brings the dashboard's browser window to the front (EnumWindows by the `IssueWatcher · ` title marker); falls back to navigate + title flash
+- [ ] **Manual (user, real desktop)**: Settings → «Запускать вместе с Windows» on → `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IssueWatcher` = `"<exe>" --minimized`; sign out/in → tray only, no tab; off → value gone. Move the folder, start once → value points to the new exe.
+- [ ] **Manual (user)**: dashboard tab open but window minimised / behind other windows → tray left-click, menu «Открыть» and a balloon click each restore it and bring it to the front. Dashboard tab open but not the active tab in its window → only navigate + title flash (log: `dashboard window not found by title`). Installed as an app window (browser menu → Install IssueWatcher) → always found.
+- [ ] Installed app window after an app restart: the session cookie is per run, so the old window shows «Вход не выполнен»; the tray then opens a new browser tab. Consider a persistent (per data dir) session secret.
 - [ ] Repo ↔ local folder mapping + auto-discovery
 - [ ] Optional: revoke token on logout (`DELETE /applications/{client_id}/token`)
 

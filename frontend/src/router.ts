@@ -25,9 +25,12 @@ export function routeTitle(r: RouteLocationNormalizedLoaded): string {
   return k ? t('title.' + k) : ''
 }
 
+/**
+ * "IssueWatcher · <page>": the prefix is the locale-independent marker the tray
+ * uses to find this tab's browser window (internal/notify IsDashboardTitle).
+ */
 export function updateDocumentTitle() {
-  const title = routeTitle(router.currentRoute.value)
-  document.title = title ? `${title} · IssueWatcher` : 'IssueWatcher'
+  document.title = 'IssueWatcher · ' + (routeTitle(router.currentRoute.value) || 'IssueWatcher')
 }
 
 router.afterEach(() => updateDocumentTitle())

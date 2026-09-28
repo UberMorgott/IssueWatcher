@@ -24,6 +24,7 @@ import (
 
 	issuewatcher "github.com/UberMorgott/issuewatcher"
 	"github.com/UberMorgott/issuewatcher/internal/api"
+	"github.com/UberMorgott/issuewatcher/internal/autostart"
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 	"github.com/UberMorgott/issuewatcher/internal/notify"
@@ -64,6 +65,10 @@ func run() error {
 
 	lock, err := instance.Acquire(dataDir)
 	if errors.Is(err, instance.ErrAlreadyRunning) {
+		if startMinimized(os.Args[1:], false) {
+			log.Info("second launch with --minimized: already running, nothing to show")
+			return nil
+		}
 		return handOff(log, dataDir)
 	}
 	if err != nil {
@@ -82,10 +87,27 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return serve(log, dataDir, cfg, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")))
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	// Portable folder moved: keep the autostart entry pointing at this exe.
+	if wrote, err := autostart.Default.Refresh(cfg.StartWithWindows, exe); err != nil {
+		log.Error("autostart refresh", "err", err)
+	} else if wrote {
+		log.Info("autostart entry updated", "exe", exe)
+	}
+	settings := &appSettings{dataDir: dataDir, exe: exe, entry: autostart.Default}
+	minimized := startMinimized(os.Args[1:], cfg.StartMinimized)
+	return serve(log, dataDir, cfg, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized)
 }
 
-func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store, auth *github.Auth) error {
+func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store, auth *github.Auth,
+	settings *appSettings, minimized bool,
+) error {
 	open := func(u string) { go openBrowser(log, u) }
 	if os.Getenv(envNoBrowser) == "1" {
 		open = func(u string) { log.Info("browser open suppressed", "url", u) }
@@ -132,6 +154,7 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Store:          st,
 		Sync:           sy,
 		OnUnreadChange: refreshBadge,
+		Settings:       settings,
 	})
 	if err != nil {
 		return err
@@ -167,6 +190,21 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		log.Info("notification shown", "item", id, "err", err)
 	}
 
+	// showDashboard steers an open tab to path and brings its browser window to the
+	// front (the tray click gave this process foreground rights); without a tab it
+	// opens one.
+	showDashboard := func(path string) {
+		srv.OpenBrowser(path)
+		if srv.Clients() == 0 {
+			return
+		}
+		if title, ok := notify.FocusDashboard(); ok {
+			log.Info("dashboard window focused", "title", title)
+		} else {
+			log.Info("dashboard window not found by title (tab not active?): navigate + title flash only")
+		}
+	}
+
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	defer stopSync()
 
@@ -178,7 +216,7 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
 		Menu: []notify.MenuItem{
-			{Title: "Открыть панель", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
+			{Title: "Открыть", OnClick: func() { showDashboard("") }}, // "": an open tab keeps its page
 			{Title: "Тестовое уведомление", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
@@ -190,15 +228,15 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		},
 		OnClick: func() {
 			log.Info("tray click")
-			srv.OpenBrowser("")
+			showDashboard("")
 		},
 		OnBalloonClick: func(id string) {
 			log.Info("notification clicked", "item", id)
 			if id == "" { // summary balloon
-				srv.OpenBrowser("/")
+				showDashboard("/")
 				return
 			}
-			srv.OpenBrowser("/item/" + url.PathEscape(id))
+			showDashboard("/item/" + url.PathEscape(id))
 		},
 	}, func(t *notify.Tray) {
 		tray = t
@@ -210,7 +248,11 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		}()
 		log.Info("tray ready", "badge", unread.Load())
 		go sy.Run(syncCtx)
-		srv.OpenBrowser("/")
+		if minimized {
+			log.Info("started minimized: dashboard not opened")
+		} else {
+			srv.OpenBrowser("/")
+		}
 		if os.Getenv(envDemo) == "1" {
 			go runDemo(log, t, setBadge)
 		}

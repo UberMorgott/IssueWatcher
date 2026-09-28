@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,6 +22,42 @@ const MinPollInterval = time.Minute
 type Config struct {
 	// PollIntervalMinutes is the GitHub sync period (default 5, minimum 1).
 	PollIntervalMinutes int `json:"pollIntervalMinutes"`
+	// StartWithWindows keeps the HKCU Run entry (internal/autostart) pointing at
+	// this exe; the entry itself is the source of truth for the UI.
+	StartWithWindows bool `json:"startWithWindows"`
+	// StartMinimized starts in the tray without opening the dashboard (the
+	// --minimized flag forces it either way).
+	StartMinimized bool `json:"startMinimized"`
+}
+
+// Update applies patch (JSON field name → value) to dataDir\config.json,
+// keeping keys it does not know, and writes it atomically.
+func Update(dataDir string, patch map[string]any) error {
+	path := filepath.Join(dataDir, File)
+	raw := map[string]any{}
+	body, err := os.ReadFile(path) //nolint:gosec // G304: fixed name inside our own data dir
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return fmt.Errorf("config: read: %w", err)
+	default:
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return fmt.Errorf("config: %s: %w", File, err)
+		}
+	}
+	maps.Copy(raw, patch)
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config: encode: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(out, '\n'), 0o600); err != nil {
+		return fmt.Errorf("config: write: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("config: replace: %w", err)
+	}
+	return nil
 }
 
 // PollInterval is the effective sync period.

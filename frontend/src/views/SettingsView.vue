@@ -2,15 +2,34 @@
 import SelectButton from 'primevue/selectbutton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useToast } from 'primevue/usetoast'
 import { useAppStore, type Theme } from '../stores/app'
+import { api } from '../api/client'
+import type { AppSettings } from '../api/types'
 import { liveConnected } from '../api/live'
 import { absTime, duration } from '../lib/format'
 import { LANGS, lang, setLang, type Lang } from '../i18n'
 
 const app = useAppStore()
 const { t } = useI18n()
+const toast = useToast()
+
+// Server-side settings (config.json + autostart entry); null = endpoint unavailable.
+const server = ref<AppSettings | null>(null)
+const saving = ref(false)
+onMounted(async () => {
+  const r = await api.settings()
+  if (r.ok) server.value = r.data
+})
+async function save(patch: Partial<Pick<AppSettings, 'startWithWindows' | 'startMinimized'>>) {
+  saving.value = true
+  const r = await api.saveSettings(patch)
+  saving.value = false
+  if (r.ok) server.value = r.data
+  else toast.add({ severity: 'error', summary: t('settings.saveFailed'), detail: r.error, life: 5000 })
+}
 const themes = computed(() => [
   { label: t('settings.dark'), value: 'dark', icon: 'pi pi-moon' },
   { label: t('settings.light'), value: 'light', icon: 'pi pi-sun' },
@@ -107,6 +126,52 @@ const langs = computed(() => LANGS.map((l) => ({ label: t('lang.' + l), value: l
             @update:model-value="app.toggleSidebar()"
           />
         </div>
+      </div>
+    </section>
+
+    <section
+      v-if="server"
+      class="panel"
+    >
+      <div class="panel-head">
+        <span class="panel-title">{{ t('settings.startup') }}</span>
+      </div>
+      <div class="panel-body rows">
+        <div class="row">
+          <div>
+            <div class="row-title">
+              {{ t('settings.autostart') }}
+            </div>
+            <div class="row-text">
+              {{ t('settings.autostartText') }}
+            </div>
+          </div>
+          <ToggleSwitch
+            :model-value="server.startWithWindows"
+            :disabled="saving"
+            :aria-label="t('settings.autostart')"
+            @update:model-value="(v: boolean) => save({ startWithWindows: v })"
+          />
+        </div>
+        <div class="row">
+          <div>
+            <div class="row-title">
+              {{ t('settings.minimized') }}
+            </div>
+            <div class="row-text">
+              {{ t('settings.minimizedText') }}
+            </div>
+          </div>
+          <ToggleSwitch
+            :model-value="server.startMinimized"
+            :disabled="saving"
+            :aria-label="t('settings.minimized')"
+            @update:model-value="(v: boolean) => save({ startMinimized: v })"
+          />
+        </div>
+        <p class="row-text hint">
+          <i class="pi pi-info-circle" /> {{ t('settings.appHint') }}
+        </p>
       </div>
     </section>
 
@@ -267,6 +332,10 @@ const langs = computed(() => LANGS.map((l) => ({ label: t('lang.' + l), value: l
   margin: 0;
   font-size: 13px;
   color: var(--iw-muted);
+}
+
+.hint {
+  padding-top: 12px;
 }
 
 .row-actions {
