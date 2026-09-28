@@ -61,7 +61,7 @@ func (s *Server) handleSettingsPatch(w http.ResponseWriter, r *http.Request) {
 		Revision *int            `json:"revision"`
 		Patch    json.RawMessage `json:"patch"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.Revision == nil || len(req.Patch) == 0 {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&req); err != nil || req.Revision == nil || len(req.Patch) == 0 {
 		errJSON(w, http.StatusBadRequest, "body must be {revision, patch}")
 		return
 	}

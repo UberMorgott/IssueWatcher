@@ -26,6 +26,9 @@ func (s Settings) Validate() error {
 	if err := s.Updates.validate(); err != nil {
 		return err
 	}
+	if err := s.Agents.validate(); err != nil {
+		return err
+	}
 	return s.Projects.validate()
 }
 

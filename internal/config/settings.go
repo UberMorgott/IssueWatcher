@@ -18,6 +18,7 @@ type Settings struct {
 	Sync          Sync          `json:"sync"`
 	Projects      Projects      `json:"projects"`
 	Updates       Updates       `json:"updates"`
+	Agents        Agents        `json:"agents"`
 }
 
 // Updates: self-update from GitHub releases (internal/selfupdate). Checks
@@ -136,6 +137,7 @@ func Defaults() Settings {
 		},
 		Sync:    Sync{Mode: SyncBalanced, ActiveDays: 14, Providers: map[string]ProviderSync{"github": defaultGitHub()}},
 		Updates: Updates{Channel: "stable", AutoCheck: true, IntervalHours: 24},
+		Agents:  defaultAgents(),
 		Projects: Projects{
 			Roots: []string{}, ScanDepth: 3,
 			Exclude: []string{"node_modules", ".git", "vendor", "bin", "obj", "build", "dist", "Library", "Temp"},
@@ -162,6 +164,7 @@ func (p ProviderSync) Reconcile() time.Duration {
 }
 
 func (s *Settings) normalize() {
+	s.Agents.normalize()
 	if s.Notifications.MutedProjects == nil {
 		s.Notifications.MutedProjects = []string{}
 	}

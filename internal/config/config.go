@@ -21,7 +21,8 @@ const File = "config.json"
 //
 //	0/1: flat {pollIntervalMinutes, startWithWindows, startMinimized}
 //	2:   sections (general, appearance, notifications, sync, projects, updates)
-const SchemaVersion = 2
+//	3:   + agents (profiles, roles, prompts, per-project prompt/verify); nothing moves
+const SchemaVersion = 3
 
 // ErrConflict means the caller edited an older revision.
 var ErrConflict = errors.New("config: settings changed elsewhere")
