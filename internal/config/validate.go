@@ -23,7 +23,20 @@ func (s Settings) Validate() error {
 	if err := s.Sync.validate(); err != nil {
 		return err
 	}
+	if err := s.Updates.validate(); err != nil {
+		return err
+	}
 	return s.Projects.validate()
+}
+
+func (u Updates) validate() error {
+	if !slices.Contains([]string{"stable", "preview"}, u.Channel) {
+		return notOneOf("updates.channel", "stable", "preview")
+	}
+	if u.IntervalHours < 1 || u.IntervalHours > 168 {
+		return outOfRange("updates.intervalHours", 1, 168)
+	}
+	return nil
 }
 
 func (n Notifications) validate() error {

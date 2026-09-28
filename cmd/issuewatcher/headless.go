@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/api"
-	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 // runEntry is the autostart Run value (internal/autostart.Entry), faked in headless runs.
@@ -40,11 +39,15 @@ func (m *memEntry) Set(on bool, _ string) error {
 
 // runHeadless serves the API and runs the sync without any desktop UI until
 // the process is interrupted or the server stops (IW_HEADLESS=1).
-func runHeadless(syncCtx context.Context, log *slog.Logger, srv *api.Server, sy *syncer.Syncer) error {
+func runHeadless(syncCtx context.Context, log *slog.Logger, srv *api.Server, startSync func(),
+	quit <-chan struct{}, startPath string,
+) error {
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve() }()
-	go sy.Run(syncCtx)
-	srv.OpenBrowser("/") // logs the launch URL (browser opening is suppressed)
+	startSync()
+	if startPath != "" {
+		srv.OpenBrowser(startPath) // logs the launch URL (browser opening is suppressed)
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -54,6 +57,8 @@ func runHeadless(syncCtx context.Context, log *slog.Logger, srv *api.Server, sy 
 		log.Error("http server stopped", "err", err)
 	case s := <-sig:
 		log.Info("headless: signal, exiting", "signal", s.String())
+	case <-quit:
+		log.Info("headless: quit requested")
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(syncCtx), 3*time.Second)
 	defer cancel()

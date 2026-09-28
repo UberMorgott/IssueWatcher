@@ -43,6 +43,9 @@ const (
 type Options struct {
 	Assets        fs.FS // built frontend (index.html at root)
 	PreferredPort int   // used only when free; 0 = OS-chosen
+	// RequirePort: PreferredPort or nothing (a restart after a self-update,
+	// so open tabs reconnect to the same origin); New fails with ErrPortBusy.
+	RequirePort bool
 	Version       string
 	Open          func(url string) // opens a URL in the user's browser
 	Log           *slog.Logger
@@ -63,6 +66,8 @@ type Options struct {
 	// stay signed in after a restart; "" = a new one per run. The bearer
 	// token for programmatic clients still changes every run.
 	SessionSecret string
+	// Updates is the self-updater (GET /api/update, check, install); nil disables it.
+	Updates Updater
 }
 
 // Server serves the SPA and the loopback API.
@@ -90,7 +95,7 @@ type launch struct {
 
 // New binds the listener. Nothing is served until Serve.
 func New(ctx context.Context, opts Options) (*Server, error) {
-	ln, err := listen(ctx, opts.PreferredPort)
+	ln, err := listen(ctx, opts.PreferredPort, opts.RequirePort)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +133,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 			s.registerFolders(mux)
 		}
 	}
+	if opts.Updates != nil {
+		s.registerUpdate(mux)
+	}
 	if opts.TestNotification != nil {
 		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)
 	}
@@ -142,11 +150,36 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	return s, nil
 }
 
-// listen prefers the configured port and falls back to an OS-chosen free one.
-func listen(ctx context.Context, preferred int) (net.Listener, error) {
+// ErrPortBusy: RequirePort was set and the port stayed taken.
+var ErrPortBusy = errors.New("api: the app's port is taken by another program")
+
+// requireWait is how long a required port may stay busy (the previous process
+// may still be closing it).
+var requireWait = 5 * time.Second
+
+// listen prefers the configured port and falls back to an OS-chosen free one;
+// with require it retries the preferred port for requireWait, then fails.
+func listen(ctx context.Context, preferred int, require bool) (net.Listener, error) {
 	var lc net.ListenConfig
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(preferred))
+	if require {
+		if preferred <= 0 {
+			return nil, fmt.Errorf("api: no port to take over: %w", ErrPortBusy)
+		}
+		deadline := time.Now().Add(requireWait)
+		for {
+			ln, err := lc.Listen(ctx, "tcp", addr)
+			if err == nil {
+				return ln, nil
+			}
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("%w: 127.0.0.1:%d (%w)", ErrPortBusy, preferred, err)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 	if preferred > 0 {
-		if ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(preferred))); err == nil {
+		if ln, err := lc.Listen(ctx, "tcp", addr); err == nil {
 			return ln, nil
 		}
 	}

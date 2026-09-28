@@ -200,6 +200,25 @@ export interface Settings {
   }
   sync: { mode: SyncMode; activeDays: number; providers: Record<string, ProviderSync> }
   projects: { roots: string[]; exclude: string[]; scanDepth: number }
+  updates: { channel: UpdateChannel; autoCheck: boolean; intervalHours: number }
+}
+
+export type UpdateChannel = 'stable' | 'preview'
+
+/** GET /api/update and the update.status live event (internal/selfupdate Status). */
+export interface UpdateStatus {
+  current: string
+  channel: UpdateChannel
+  /** Not a release build: checks only, never installs. */
+  devBuild: boolean
+  state: 'idle' | 'checking' | 'downloading' | 'installing' | 'restarting'
+  error?: string
+  done?: number
+  total?: number
+  available?: { version: string; name?: string; notes?: string; publishedAt: string; url?: string; prerelease: boolean }
+  updateAvailable: boolean
+  checkedAt?: string
+  lastResult?: { ok: boolean; from?: string; to?: string; error?: string; at: string }
 }
 
 export type ThemeMode = 'dark' | 'light' | 'system'

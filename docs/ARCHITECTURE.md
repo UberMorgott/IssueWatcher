@@ -41,7 +41,9 @@ internal/store          SQLite + migrations
 internal/api            loopback HTTP server: SPA, JSON API, auth (browser + MCP bridge)
 internal/notify         Win32 tray icon, badge rendering, own popup notification cards (layered windows)
 internal/autostart      HKCU Run entry for «start with Windows» (the only registry write)
-internal/instance       single-instance mutex + data\runtime.json
+internal/instance       single-instance mutex + data\runtime.json + data\port (last port)
+internal/selfupdate     GitHub releases check, signed-manifest verification, exe swap/rollback, update hand-over
+cmd/releasekey          Ed25519 release key (outside the repo) + signed manifest for release.ps1
 internal/paths          portable data dir resolver (IW_DATA_DIR override)
 frontend/               Vue app
 data/                   runtime (gitignored): issuewatcher.db, runtime.json, config.json, logs\, secrets\
@@ -53,8 +55,16 @@ data/                   runtime (gitignored): issuewatcher.db, runtime.json, con
 - Env: `IW_DATA_DIR` (data dir override), `IW_PORT` (preferred port, used only if free), `IW_NO_BROWSER=1` (log launch URLs instead of opening), `IW_HEADLESS=1` (automated runs: server + sync only — no tray icon, no popups, no browser, no window focusing, in-memory autostart instead of the registry), `IW_DEMO=1` (scripted badge + four popup cards + simulated click, for log-based verification), `IW_POPUP_SNAPSHOT=<dir>` (render sample popup PNG files — dark/light single, closed, stack — at 150 % and exit, no window).
 - Fatal panics go to `data\logs\issuewatcher.log` (`debug.SetCrashOutput`); startup errors also show a MessageBox.
 
-## GitHub auth
+## Self-update and releases
 
+- Releases: `pwsh -File release.ps1 -Version vX.Y.Z` on a clean `main` (no CI): frontend `npm ci` + build + eslint, `aegis verify -profile release` (else `go vet` + `go test -race`), `go build -trimpath -ldflags "-s -w -H windowsgui -X main.Version=…"`, `upx --best --lzma`, smoke test of the packed exe (`IW_HEADLESS=1`, scratch data dir, `/api/health` 200 with the version), then `issuewatcher-windows-amd64.exe` + `.sha256` + `manifest.json` {version, asset, size, sha256, minVersion?} + `manifest.json.sig` (Ed25519, key outside the repo, `cmd/releasekey`), tag and `gh release create` with notes from the commits since the last tag. `vX.Y.Z-pre` = GitHub prerelease = preview channel.
+- Check: GitHub REST `releases/latest` (stable) or `releases` (preview: highest version incl. prereleases); `IW_UPDATE_BASE` overrides the API root for tests. Auto-check `updates.intervalHours` (default 24 h, ±10 % jitter, first ~1–2 min after start), never auto-install. A build whose version is not a tag (`dev`, `git describe` past a tag) checks but never installs.
+- Install (`internal/selfupdate`): signed manifest (public key compiled in, `pubkey.go`) → version = tag, newer than running (no downgrade), ≥ `minVersion` → download to `.issuewatcher.exe.new` next to the exe, size + SHA-256 (+ GitHub asset digest) → swap: exe → `.issuewatcher.exe.old`, new → exe → start `exe --after-update=<pid>`.
+- Hand-over: the new process writes `data\update-ready`, waits for the old PID to exit, takes the single-instance lock and **requires** the port in `data\port` (retries 5 s; taken by someone else → `ErrPortBusy`). Any start failure before the port is bound rolls back: exe → `.new`, `.old` → exe, `data\update-result.json` records why, the old exe starts with `--rolled-back=<pid>` and shows the error in Settings › Обновления. The old process, once ready is signalled, publishes `update.status` `restarting` and quits gracefully (tray/headless loop, HTTP + SSE, sync, SQLite; hard exit after 20 s); no ready within 30 s (or the child exits) → kill the child, roll back. The new process deletes `.old`/`.new` with bounded retries.
+- Tabs: the session cookie survives restarts (`data\secrets\session.json`) and the port stays the same, so `EventSource` reconnects (0.5 s while restarting); on reconnect the page compares `/api/health` version and reloads on the same route/query. An after-update start never opens the browser.
+- API: `GET /api/update` (status), `POST /api/update/check`, `POST /api/update/install` (202; progress via SSE `update.status`). Tray menu «Проверить обновления» opens `/settings/updates` and checks.
+
+## GitHub auth
 Verified against GitHub docs 2026-09-28. Flow as built (`internal/api/github_auth.go`, `internal/provider/github/auth.go`):
 
 1. Dashboard "Войти" → `POST /api/auth/github/start` (server opens the default browser itself). No app yet → local page `/auth/github/manifest?state=…` auto-POSTs form field `manifest` to `https://github.com/settings/apps/new?state=…`.

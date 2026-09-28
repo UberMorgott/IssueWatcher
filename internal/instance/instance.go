@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -73,4 +75,30 @@ func RemoveRuntime(dataDir string, pid int) error {
 		return fmt.Errorf("instance: remove runtime: %w", err)
 	}
 	return nil
+}
+
+// PortFile keeps the loopback port of the last run (runtime.json goes away
+// on exit): a restart prefers it, and the restart after a self-update
+// requires it, so open dashboard tabs reconnect to the same origin.
+const PortFile = "port"
+
+// WritePort records the bound port.
+func WritePort(dataDir string, port int) error {
+	if err := os.WriteFile(filepath.Join(dataDir, PortFile), []byte(strconv.Itoa(port)), 0o600); err != nil {
+		return fmt.Errorf("instance: write port: %w", err)
+	}
+	return nil
+}
+
+// ReadPort returns the last recorded port, 0 when none.
+func ReadPort(dataDir string) int {
+	b, err := os.ReadFile(filepath.Join(dataDir, PortFile)) //nolint:gosec // G304: fixed name inside our own data dir
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || n <= 0 || n > 65535 {
+		return 0
+	}
+	return n
 }

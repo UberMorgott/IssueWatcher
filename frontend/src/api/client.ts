@@ -14,6 +14,7 @@ import type {
   FolderSuggestion,
   Stats,
   SyncStatus,
+  UpdateStatus,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -153,6 +154,9 @@ export const api = {
   patchSettings: (revision: number, patch: SettingsPatch) => settingsCall('PATCH', '/api/settings', { revision, patch }),
   resetSettings: (revision: number, section: string) => settingsCall('POST', '/api/settings/reset', { revision, section }),
   testNotification: () => call<void>('POST', '/api/notifications/test'),
+  updateStatus: () => call<UpdateStatus>('GET', '/api/update'),
+  updateCheck: () => call<UpdateStatus>('POST', '/api/update/check'),
+  updateInstall: () => call<void>('POST', '/api/update/install'),
   folders: () => call<FolderRow[]>('GET', '/api/folders'),
   setFolder: (id: number, path: string) => call<FolderRow>('PUT', `/api/projects/${id}/path`, { path }),
   discoverFolders: () => call<{ suggestions: FolderSuggestion[]; visited: number; roots: string[] }>('POST', '/api/folders/discover'),

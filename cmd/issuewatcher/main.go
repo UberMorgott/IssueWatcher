@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/notify"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
@@ -53,13 +55,15 @@ const snapshotScale = 1.5
 
 func main() {
 	if err := run(); err != nil {
-		// Release builds have no console: show the reason.
-		msgBox("IssueWatcher не запустился", err.Error())
+		// Release builds have no console: show the reason (never block an automated run).
+		if os.Getenv(envHeadless) != "1" {
+			msgBox("IssueWatcher не запустился", err.Error())
+		}
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run() (err error) {
 	if dir := os.Getenv(envSnapshot); dir != "" {
 		_, err := notify.WriteSnapshots(dir, snapshotScale)
 		return err
@@ -74,7 +78,27 @@ func run() error {
 	}
 	defer closeLog()
 
-	lock, err := instance.Acquire(dataDir)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	l := parseLaunch(os.Args[1:])
+	var serving atomic.Bool // the port is bound: past the point where a new version rolls back
+	if l.afterUpdate > 0 {
+		defer func() {
+			if err != nil && !serving.Load() {
+				err = rollbackUpdate(log, dataDir, exe, l, err)
+			}
+		}()
+	}
+	if err := l.handOver(log, dataDir); err != nil {
+		return err
+	}
+
+	lock, err := acquireLock(dataDir, l)
 	if errors.Is(err, instance.ErrAlreadyRunning) {
 		if startMinimized(os.Args[1:], false) {
 			log.Info("second launch with --minimized: already running, nothing to show")
@@ -99,13 +123,6 @@ func run() error {
 		return err
 	}
 	cfg := cfgs.Get()
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if p, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = p
-	}
 	headless := os.Getenv(envHeadless) == "1"
 	var entry runEntry = autostart.Default
 	if headless {
@@ -118,12 +135,12 @@ func run() error {
 		log.Info("autostart entry updated", "exe", exe)
 	}
 	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: entry}
-	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized)
-	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized, headless)
+	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized) || l.quiet()
+	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized, headless, l, &serving)
 }
 
 func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, auth *github.Auth,
-	settings *appSettings, minimized, headless bool,
+	settings *appSettings, minimized, headless bool, l launch, serving *atomic.Bool,
 ) error {
 	open := func(u string) { go openBrowser(log, u) }
 	if headless || os.Getenv(envNoBrowser) == "1" {
@@ -134,6 +151,15 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		// Reuse the port baked into the app's callback URL when it is free, so
 		// sign-in works even if GitHub matched loopback redirect ports exactly.
 		preferred = app.RegisteredPort
+	}
+	if preferred == 0 {
+		preferred = instance.ReadPort(dataDir) // open tabs reconnect after a restart
+	}
+	requirePort := l.afterUpdate > 0
+	if requirePort {
+		// The tabs of the old version reconnect only to the same origin: take
+		// its port or fail (and roll back), never move to another one.
+		preferred = instance.ReadPort(dataDir)
 	}
 
 	var (
@@ -187,6 +213,34 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	if headless {
 		focus = nil // never raise the user's own dashboard window
 	}
+	// quit shuts the app down gracefully (tray loop or headless wait returns,
+	// then HTTP/SSE, sync and SQLite close); the updater calls it once the new
+	// version is ready. A hung shutdown ends hard so the new version can start.
+	quit := make(chan struct{})
+	var quitOnce sync.Once
+	requestQuit := func() {
+		quitOnce.Do(func() {
+			log.Info("shutting down for the update")
+			close(quit)
+			if tray != nil {
+				tray.Quit()
+			}
+			time.AfterFunc(shutdownLimit, func() {
+				log.Error("shutdown did not finish in time; exiting", "limit", shutdownLimit)
+				os.Exit(0)
+			})
+		})
+	}
+	last := selfupdate.TakeResult(dataDir)
+	if l.afterUpdate > 0 {
+		last = &selfupdate.Result{OK: true, From: l.from, To: Version, At: time.Now().UTC()}
+	}
+	upd := newUpdater(log, cfgs, dataDir, settings.exe, last, func(s selfupdate.Status) {
+		if srv != nil {
+			srv.Publish(api.EventUpdateStatus, s)
+		}
+	}, requestQuit)
+
 	session, err := loadSession(filepath.Join(dataDir, "secrets"))
 	if err != nil {
 		log.Error("session secret: per-run fallback", "err", err) // tabs sign in again after a restart
@@ -194,6 +248,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	srv, err = api.New(context.Background(), api.Options{
 		Assets:         issuewatcher.Assets(),
 		PreferredPort:  preferred,
+		RequirePort:    requirePort,
+		Updates:        upd,
 		Version:        Version,
 		Open:           open,
 		Log:            log,
@@ -216,6 +272,16 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	if err != nil {
 		return err
+	}
+	serving.Store(true)
+	if err := instance.WritePort(dataDir, srv.Port()); err != nil {
+		log.Error("remember port", "err", err)
+	}
+	if l.afterUpdate > 0 || l.rolledBack > 0 {
+		log.Info("update hand-over done", "version", Version, "port", srv.Port(), "from", l.from, "rolled_back", l.rolledBack > 0)
+		go cleanupAfterUpdate(log, dataDir, settings.exe)
+	} else {
+		_ = selfupdate.Cleanup(context.Background(), settings.exe, 1, 0) // leftovers of a crashed update
 	}
 	rt := instance.Runtime{
 		PID: os.Getpid(), Port: srv.Port(), URL: srv.BaseURL(), Token: srv.Token(),
@@ -248,10 +314,32 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}
 
 	syncCtx, stopSync := context.WithCancel(context.Background())
-	defer stopSync()
+	syncDone := make(chan struct{})
+	startSync := func() {
+		go func() { sy.Run(syncCtx); close(syncDone) }()
+		go upd.Run(syncCtx) // automatic update checks (never installs)
+	}
+	defer func() {
+		// Graceful stop: the sync step in flight finishes before SQLite closes.
+		stopSync()
+		select {
+		case <-syncDone:
+		case <-time.After(10 * time.Second):
+			log.Warn("sync did not stop in time")
+		}
+	}()
+	// What to show on start: after an update nothing (the open tab reconnects
+	// and reloads); after a rollback the Updates page with the error.
+	startPath := "/"
+	switch {
+	case minimized:
+		startPath = ""
+	case l.rolledBack > 0:
+		startPath = "/settings/updates"
+	}
 
 	if headless {
-		return runHeadless(syncCtx, log, srv, sy)
+		return runHeadless(syncCtx, log, srv, startSync, quit, startPath)
 	}
 	icon, err := notify.TrayIcon(int(unread.Load()))
 	if err != nil {
@@ -265,6 +353,10 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Prefs:   &prefs,
 		Menu: []notify.MenuItem{
 			{Title: "Открыть", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
+			{Title: "Проверить обновления", OnClick: func() {
+				srv.OpenBrowser("/settings/updates")
+				go func() { _, _ = upd.Check(context.Background()) }()
+			}},
 			{Title: "Тестовое уведомление", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
@@ -289,11 +381,11 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 			}
 		}()
 		log.Info("tray ready", "badge", unread.Load())
-		go sy.Run(syncCtx)
-		if minimized {
-			log.Info("started minimized: dashboard not opened")
+		startSync()
+		if startPath == "" {
+			log.Info("started minimized: dashboard not opened", "after_update", l.afterUpdate > 0)
 		} else {
-			srv.OpenBrowser("/")
+			srv.OpenBrowser(startPath)
 		}
 		if os.Getenv(envDemo) == "1" {
 			go runDemo(log, t, setBadge)

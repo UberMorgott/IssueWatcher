@@ -20,7 +20,7 @@ const File = "config.json"
 // SchemaVersion is the current layout of config.json.
 //
 //	0/1: flat {pollIntervalMinutes, startWithWindows, startMinimized}
-//	2:   sections (general, appearance, notifications, sync, projects)
+//	2:   sections (general, appearance, notifications, sync, projects, updates)
 const SchemaVersion = 2
 
 // ErrConflict means the caller edited an older revision.

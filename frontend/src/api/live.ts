@@ -11,6 +11,7 @@ export const LIVE_EVENTS = [
   'settings.changed',
   'navigate',
   'superseded',
+  'update.status',
 ] as const
 export type LiveEventName = (typeof LIVE_EVENTS)[number]
 
@@ -21,6 +22,13 @@ const MAX_DELAY = 30000
 
 /** True while the event stream is open. */
 export const liveConnected = ref(false)
+
+/** While the app restarts for an update, reconnect quickly instead of backing off. */
+const RESTART_DELAY = 500
+let restartUntil = 0
+export function expectRestart(ms = 90000) {
+  restartUntil = Date.now() + ms
+}
 
 /**
  * Connects to the SSE stream and keeps it connected: on error the source is
@@ -48,6 +56,10 @@ export function connectLive(handler: LiveHandler, onReconnect: () => void): () =
       es?.close()
       es = null
       if (stopped) return
+      if (Date.now() < restartUntil) {
+        timer = window.setTimeout(open, RESTART_DELAY)
+        return
+      }
       timer = window.setTimeout(open, delay)
       delay = Math.min(delay * 2, MAX_DELAY)
     }

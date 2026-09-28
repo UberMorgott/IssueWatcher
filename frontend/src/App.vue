@@ -14,11 +14,15 @@ import { connectLive, type LiveEventName } from './api/live'
 import type { DataChange, LiveItemEvent, SettingsDoc, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
+import { useUpdatesStore } from './stores/updates'
+import { api } from './api/client'
+import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
 import { updateDocumentTitle } from './router'
 
 const app = useAppStore()
 const settings = useSettingsStore()
+const updates = useUpdatesStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -79,6 +83,9 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'settings.changed':
       if (data) settings.apply(data as SettingsDoc)
       return
+    case 'update.status':
+      if (data) updates.apply(data as UpdateStatus)
+      return
     case 'sync.status':
       void app.onSyncStatus(data as SyncProgress | null)
       return
@@ -110,7 +117,15 @@ let stopLive: (() => void) | undefined
 
 function startLive() {
   stopLive?.()
-  stopLive = connectLive(onLive, () => {
+  stopLive = connectLive(onLive, async () => {
+    // The app restarted: a new version (self-update) serves new assets, so
+    // reload this page — same URL, route and query — instead of patching it.
+    const h = await api.health()
+    if (h.ok && app.version && h.data.version !== app.version) {
+      window.location.reload()
+      return
+    }
+    void updates.load()
     void settings.load()
     void app.loadAuth()
     void app.loadSync()
@@ -162,6 +177,7 @@ useShortcuts({
 onMounted(() => {
   void settings.load()
   void app.init()
+  void updates.load()
   startLive()
   if ('BroadcastChannel' in window) {
     channel = new BroadcastChannel('issuewatcher')

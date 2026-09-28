@@ -17,6 +17,15 @@ type Settings struct {
 	Notifications Notifications `json:"notifications"`
 	Sync          Sync          `json:"sync"`
 	Projects      Projects      `json:"projects"`
+	Updates       Updates       `json:"updates"`
+}
+
+// Updates: self-update from GitHub releases (internal/selfupdate). Checks
+// only; installing is always the user's click.
+type Updates struct {
+	Channel       string `json:"channel"`       // stable | preview
+	AutoCheck     bool   `json:"autoCheck"`     // check every IntervalHours (with jitter)
+	IntervalHours int    `json:"intervalHours"` // 1–168
 }
 
 // General: language and startup.
@@ -125,7 +134,8 @@ func Defaults() Settings {
 			Enabled: true, NewIssue: true, NewComment: true, Closed: true, MutedProjects: []string{},
 			Quiet: QuietHours{From: "22:00", To: "08:00"}, Group: true, AutoHideSeconds: 8,
 		},
-		Sync: Sync{Mode: SyncBalanced, ActiveDays: 14, Providers: map[string]ProviderSync{"github": defaultGitHub()}},
+		Sync:    Sync{Mode: SyncBalanced, ActiveDays: 14, Providers: map[string]ProviderSync{"github": defaultGitHub()}},
+		Updates: Updates{Channel: "stable", AutoCheck: true, IntervalHours: 24},
 		Projects: Projects{
 			Roots: []string{}, ScanDepth: 3,
 			Exclude: []string{"node_modules", ".git", "vendor", "bin", "obj", "build", "dist", "Library", "Temp"},
