@@ -2,15 +2,20 @@
 import SelectButton from 'primevue/selectbutton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Button from 'primevue/button'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type Theme } from '../stores/app'
 import { liveConnected } from '../api/live'
-import { absTime } from '../lib/format'
+import { absTime, duration } from '../lib/format'
+import { LANGS, lang, setLang, type Lang } from '../i18n'
 
 const app = useAppStore()
-const themes = [
-  { label: 'Dark', value: 'dark', icon: 'pi pi-moon' },
-  { label: 'Light', value: 'light', icon: 'pi pi-sun' },
-]
+const { t } = useI18n()
+const themes = computed(() => [
+  { label: t('settings.dark'), value: 'dark', icon: 'pi pi-moon' },
+  { label: t('settings.light'), value: 'light', icon: 'pi pi-sun' },
+])
+const langs = computed(() => LANGS.map((l) => ({ label: t('lang.' + l), value: l })))
 </script>
 
 <template>
@@ -18,26 +23,52 @@ const themes = [
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Settings
+          {{ t('nav.settings') }}
         </h2>
-        <p class="page-sub">
-          Everything is stored next to the exe in <span class="mono">data\</span> — portable, no registry.
-        </p>
+        <i18n-t
+          keypath="settings.sub"
+          tag="p"
+          class="page-sub"
+          scope="global"
+        >
+          <template #path>
+            <span class="mono">data\</span>
+          </template>
+        </i18n-t>
       </div>
     </div>
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">Appearance</span>
+        <span class="panel-title">{{ t('settings.appearance') }}</span>
       </div>
       <div class="panel-body rows">
         <div class="row">
           <div>
             <div class="row-title">
-              Theme
+              {{ t('settings.language') }}
             </div>
             <div class="row-text">
-              Dark is the default. Saved in this browser.
+              {{ t('settings.languageText') }}
+            </div>
+          </div>
+          <SelectButton
+            :model-value="lang()"
+            :options="langs"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            :aria-label="t('settings.language')"
+            @update:model-value="(v: Lang) => setLang(v)"
+          />
+        </div>
+        <div class="row">
+          <div>
+            <div class="row-title">
+              {{ t('settings.theme') }}
+            </div>
+            <div class="row-text">
+              {{ t('settings.themeText') }}
             </div>
           </div>
           <SelectButton
@@ -46,7 +77,7 @@ const themes = [
             option-label="label"
             option-value="value"
             :allow-empty="false"
-            aria-label="Theme"
+            :aria-label="t('settings.theme')"
             @update:model-value="(v: Theme) => app.setTheme(v)"
           >
             <template #option="{ option }">
@@ -57,15 +88,22 @@ const themes = [
         <div class="row">
           <div>
             <div class="row-title">
-              Compact sidebar
+              {{ t('settings.compact') }}
             </div>
-            <div class="row-text">
-              Icons only. Shortcut <kbd class="mono">[</kbd>.
-            </div>
+            <i18n-t
+              keypath="settings.compactText"
+              tag="div"
+              class="row-text"
+              scope="global"
+            >
+              <template #key>
+                <kbd class="mono">[</kbd>
+              </template>
+            </i18n-t>
           </div>
           <ToggleSwitch
             :model-value="app.sidebarCollapsed"
-            aria-label="Compact sidebar"
+            :aria-label="t('settings.compact')"
             @update:model-value="app.toggleSidebar()"
           />
         </div>
@@ -74,33 +112,43 @@ const themes = [
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">Sync</span>
+        <span class="panel-title">{{ t('settings.sync') }}</span>
       </div>
       <div class="panel-body rows">
         <div class="row">
           <div>
             <div class="row-title">
-              Poll interval
+              {{ t('settings.poll') }}
             </div>
-            <div class="row-text">
-              Set <span class="mono">pollIntervalMinutes</span> in <span class="mono">data\config.json</span> (default 5, min 1); applies on restart.
-            </div>
+            <i18n-t
+              keypath="settings.pollText"
+              tag="div"
+              class="row-text"
+              scope="global"
+            >
+              <template #key>
+                <span class="mono">pollIntervalMinutes</span>
+              </template>
+              <template #file>
+                <span class="mono">data\config.json</span>
+              </template>
+            </i18n-t>
           </div>
-          <span class="mono value">{{ app.sync?.interval || '—' }}</span>
+          <span class="mono value">{{ duration(app.sync?.interval) || '—' }}</span>
         </div>
         <div class="row">
           <div>
             <div class="row-title">
-              Last sync
+              {{ t('settings.lastSync') }}
             </div>
             <div class="row-text">
-              {{ app.sync?.lastError ? app.sync.lastError : 'Issues, comments and closes from all installed repositories.' }}
+              {{ app.sync?.lastError ? app.sync.lastError : t('settings.lastSyncText') }}
             </div>
           </div>
           <div class="row-actions">
-            <span class="value">{{ absTime(app.sync?.lastSync) || 'never' }}</span>
+            <span class="value">{{ absTime(app.sync?.lastSync) || t('common.never') }}</span>
             <Button
-              label="Sync now"
+              :label="t('common.syncNow')"
               icon="pi pi-sync"
               size="small"
               severity="secondary"
@@ -115,63 +163,72 @@ const themes = [
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">Notifications</span>
+        <span class="panel-title">{{ t('settings.notifications') }}</span>
       </div>
       <div class="panel-body rows">
         <div class="row">
           <div>
             <div class="row-title">
-              Tray notifications
+              {{ t('settings.tray') }}
             </div>
             <div class="row-text">
-              New issue, new comment and closed issue show a Windows notification; clicking it opens the issue in this tab.
+              {{ t('settings.trayText') }}
             </div>
           </div>
-          <span class="value on">On</span>
+          <span class="value on">{{ t('settings.on') }}</span>
         </div>
         <div class="row">
           <div>
             <div class="row-title">
-              Live updates in this tab
+              {{ t('settings.live') }}
             </div>
             <div class="row-text">
-              Toasts and counters update without reloading.
+              {{ t('settings.liveText') }}
             </div>
           </div>
           <span
             class="value"
             :class="liveConnected ? 'on' : 'warn'"
-          >{{ liveConnected ? 'Connected' : 'Reconnecting…' }}</span>
+          >{{ liveConnected ? t('settings.connected') : t('settings.reconnecting') }}</span>
         </div>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">Agents &amp; prompts</span>
-        <span class="phase-badge">Phase 2 / 3</span>
+        <span class="panel-title">{{ t('settings.agents') }}</span>
+        <span class="phase-badge">{{ t('common.phase', { n: '2 / 3' }) }}</span>
       </div>
       <div class="panel-body">
         <p class="row-text">
-          Agent profiles, concurrency limits and prompt layers will live here.
+          {{ t('settings.agentsText') }}
         </p>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">About</span>
+        <span class="panel-title">{{ t('settings.about') }}</span>
       </div>
       <div class="panel-body rows">
         <div class="row">
           <div class="row-title">
-            Version
+            {{ t('settings.version') }}
           </div><span class="mono value">{{ app.version || 'dev' }}</span>
         </div>
         <div class="row">
           <div class="row-title">
-            Keyboard shortcuts
-          </div><span class="value">press <kbd class="mono">?</kbd></span>
+            {{ t('settings.shortcuts') }}
+          </div><i18n-t
+            keypath="settings.press"
+            tag="span"
+            class="value"
+            scope="global"
+          >
+            <template #key>
+              <kbd class="mono">?</kbd>
+            </template>
+          </i18n-t>
         </div>
       </div>
     </section>

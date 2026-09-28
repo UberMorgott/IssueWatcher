@@ -1,40 +1,44 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import PlatformIcon from '../components/PlatformIcon.vue'
 
-const profiles = [
+const { t } = useI18n()
+
+const profiles = computed(() => [
   {
-    role: 'Coder',
+    role: t('agents.coder'),
     agent: 'Claude Code',
     mark: 'claude',
     cli: 'claude -p',
-    text: 'Fixes bugs in an isolated git worktree of the mapped local folder and proposes a draft PR. Your working copy stays untouched.',
+    text: t('agents.coderText'),
     flows: ['fix'],
-    phase: 'Phase 2',
+    phase: t('common.phase', { n: 2 }),
   },
   {
-    role: 'Responder',
+    role: t('agents.responder'),
     agent: 'Codex',
     mark: 'codex',
     cli: 'codex exec',
-    text: 'Drafts replies to questions and bug reports, asks for missing details, suggests labels. You approve before anything is posted.',
+    text: t('agents.responderText'),
     flows: ['reply', 'label'],
-    phase: 'Phase 3',
+    phase: t('common.phase', { n: 3 }),
   },
-]
+])
 
-const pipeline = [
-  { icon: 'pi pi-inbox', title: 'Issue', text: 'picked by you or a rule' },
-  { icon: 'pi pi-list', title: 'Job queue', text: '1 per project, 1–2 global' },
-  { icon: 'pi pi-code', title: 'Agent run', text: 'worktree + streamed log' },
-  { icon: 'pi pi-verified', title: 'Verify', text: 'real diff + your checks' },
-  { icon: 'pi pi-send', title: 'Publish', text: 'draft PR / reply, merge is manual' },
-]
+const pipeline = computed(() =>
+  (['issue', 'queue', 'run', 'verify', 'publish'] as const).map((k, i) => ({
+    icon: ['pi pi-inbox', 'pi pi-list', 'pi pi-code', 'pi pi-verified', 'pi pi-send'][i],
+    title: t(`agents.pipeline.${k}`),
+    text: t(`agents.pipeline.${k}Text`),
+  })),
+)
 
-const prompts = [
-  { layer: 'Global', text: 'House rules for every agent: tone, language, what never to touch.' },
-  { layer: 'Per project', text: 'Build/test commands, code style, release notes for this repo or mod.' },
-  { layer: 'Per flow', text: 'Templates for fix / reply / verify / label.' },
-]
+const prompts = computed(() => [
+  { layer: t('agents.global'), text: t('agents.globalText') },
+  { layer: t('agents.perProject'), text: t('agents.perProjectText') },
+  { layer: t('agents.perFlow'), text: t('agents.perFlowText') },
+])
 </script>
 
 <template>
@@ -42,13 +46,13 @@ const prompts = [
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Agents
+          {{ t('nav.agents') }}
         </h2>
         <p class="page-sub">
-          Local AI agents that work through issues for you — on your own subscriptions, on this machine.
+          {{ t('agents.sub') }}
         </p>
       </div>
-      <span class="phase-badge"><i class="pi pi-clock" /> Coming in Phase 2 / 3</span>
+      <span class="phase-badge"><i class="pi pi-clock" /> {{ t('agents.coming') }}</span>
     </div>
 
     <div class="profiles">
@@ -77,7 +81,7 @@ const prompts = [
           {{ p.text }}
         </p>
         <div class="flows">
-          <span class="muted">Flows</span>
+          <span class="muted">{{ t('agents.flows') }}</span>
           <span
             v-for="f in p.flows"
             :key="f"
@@ -89,7 +93,7 @@ const prompts = [
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">How a job will run</span>
+        <span class="panel-title">{{ t('agents.howTitle') }}</span>
       </div>
       <div class="panel-body">
         <ol class="pipeline">
@@ -117,8 +121,8 @@ const prompts = [
 
     <section class="panel">
       <div class="panel-head">
-        <span class="panel-title">Prompts</span>
-        <span class="phase-badge">Phase 3</span>
+        <span class="panel-title">{{ t('agents.prompts') }}</span>
+        <span class="phase-badge">{{ t('common.phase', { n: 3 }) }}</span>
       </div>
       <div class="panel-body prompts">
         <div

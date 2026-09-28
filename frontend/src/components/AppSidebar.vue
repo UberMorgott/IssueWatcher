@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 
 defineProps<{ mobile?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const app = useAppStore()
 const route = useRoute()
+const { t } = useI18n()
 
 const items = [
-  { to: '/', icon: 'pi pi-objects-column', label: 'Overview', match: ['overview'] },
-  { to: '/issues', icon: 'pi pi-inbox', label: 'Issues', match: ['issues', 'item'], badge: true },
-  { to: '/projects', icon: 'pi pi-folder', label: 'Projects', match: ['projects'] },
-  { to: '/agents', icon: 'pi pi-microchip-ai', label: 'Agents', match: ['agents'], soon: true },
-  { to: '/connections', icon: 'pi pi-link', label: 'Connections', match: ['connections'] },
-  { to: '/settings', icon: 'pi pi-cog', label: 'Settings', match: ['settings'] },
+  { to: '/', icon: 'pi pi-objects-column', label: 'nav.overview', match: ['overview'] },
+  { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: true },
+  { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
+  { to: '/agents', icon: 'pi pi-microchip-ai', label: 'nav.agents', match: ['agents'], soon: true },
+  { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },
+  { to: '/settings', icon: 'pi pi-cog', label: 'nav.settings', match: ['settings'] },
 ]
 
 const active = (match: string[]) => match.includes(String(route.name))
@@ -23,7 +25,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   <nav
     class="sidebar"
     :class="{ collapsed: app.sidebarCollapsed && !mobile }"
-    aria-label="Main"
+    :aria-label="t('nav.main')"
   >
     <RouterLink
       to="/"
@@ -40,7 +42,7 @@ const active = (match: string[]) => match.includes(String(route.name))
         :key="it.to"
       >
         <RouterLink
-          v-tooltip.right="app.sidebarCollapsed && !mobile ? it.label : undefined"
+          v-tooltip.right="app.sidebarCollapsed && !mobile ? t(it.label) : undefined"
           :to="it.to"
           class="nav-item"
           :class="{ active: active(it.match) }"
@@ -48,7 +50,7 @@ const active = (match: string[]) => match.includes(String(route.name))
           @click="emit('navigate')"
         >
           <i :class="it.icon" />
-          <span class="nav-label">{{ it.label }}</span>
+          <span class="nav-label">{{ t(it.label) }}</span>
           <span
             v-if="it.badge && app.unreadTotal > 0"
             class="nav-badge mono"
@@ -56,7 +58,7 @@ const active = (match: string[]) => match.includes(String(route.name))
           <span
             v-else-if="it.soon"
             class="nav-soon"
-          >soon</span>
+          >{{ t('common.soon') }}</span>
         </RouterLink>
       </li>
     </ul>
@@ -68,14 +70,14 @@ const active = (match: string[]) => match.includes(String(route.name))
       >{{ app.version }}</span>
       <button
         v-if="!mobile"
-        v-tooltip.right="app.sidebarCollapsed ? 'Expand sidebar  [' : undefined"
+        v-tooltip.right="app.sidebarCollapsed ? t('nav.expandTip') : undefined"
         type="button"
         class="collapse"
-        :aria-label="app.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-label="app.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
         @click="app.toggleSidebar()"
       >
         <i :class="app.sidebarCollapsed ? 'pi pi-angle-double-right' : 'pi pi-angle-double-left'" />
-        <span class="nav-label">Collapse</span>
+        <span class="nav-label">{{ t('nav.collapseLabel') }}</span>
       </button>
     </div>
   </nav>

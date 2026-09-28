@@ -9,6 +9,7 @@ import type {
   Stats,
   SyncStatus,
 } from './types'
+import { t } from '../i18n'
 
 /**
  * Result of an API call. Never throws: pages render empty/error states from
@@ -26,7 +27,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<Res
       credentials: 'same-origin',
     })
   } catch {
-    return { ok: false, status: 0, error: 'IssueWatcher is not running' }
+    return { ok: false, status: 0, error: t('common.notRunning') }
   }
   if (!res.ok) {
     let error = res.statusText || `HTTP ${res.status}`
@@ -42,7 +43,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<Res
   try {
     return { ok: true, data: (await res.json()) as T, status: res.status }
   } catch {
-    return { ok: false, status: res.status, error: 'bad response' }
+    return { ok: false, status: res.status, error: t('common.badResponse') }
   }
 }
 

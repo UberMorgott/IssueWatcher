@@ -21,6 +21,7 @@ dispatch local AI agents (Claude Code, Codex CLI) manually, in batches, or by au
 | Publishing | dispatcher publishes (comments, labels, push, draft PR) via provider; agent only proposes | least privilege; merge always manual |
 | AI control | same exe in MCP stdio mode (`modelcontextprotocol/go-sdk`) talking to running core over loopback+token | "tell Claude: reply to X" |
 | Frontend | Vue 3 + Vite + TypeScript + Pinia + PrimeVue (DataTable) + ECharts; `//go:embed` bundle, history routing with server-side SPA fallback | table with filters/checkbox, charts |
+| Language | UI Russian by default, English switch in Settings (`localStorage iw.lang`): `vue-i18n` (Composition API, Slavic plural rule), PrimeVue texts from `primelocale`, dates/relative time via `Intl`. Go-side text (tray menu, balloons, auth pages) is Russian only | user request; no server round trip for a UI preference |
 
 ## Layout
 

@@ -14,10 +14,12 @@ import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { Repo, Stats } from '../api/types'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, relTime, repoColor, repoOwner, shortRepo } from '../lib/format'
+import { absTime, relTime, repoColor, repoOwner, shortDay, shortRepo } from '../lib/format'
 
 const app = useAppStore()
+const { t } = useI18n()
 const filter = ref('')
 const expanded = ref<Record<string, boolean>>({})
 const repoStats = reactive<Record<number, Stats | 'loading' | 'error'>>({})
@@ -37,14 +39,15 @@ async function onExpand(e: { data: Repo }) {
 }
 
 function chart(repo: Repo, s: Stats) {
-  return (t: ChartTheme): EChartsCoreOption => ({
+  const names = { opened: t('overview.opened'), closed: t('overview.closed') }
+  return (c: ChartTheme): EChartsCoreOption => ({
     grid: { left: 30, right: 8, top: 10, bottom: 22 },
-    tooltip: { trigger: 'axis', backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.text } },
-    xAxis: { type: 'category', data: s.weekly.map((w) => w.start.slice(5)), axisLine: { lineStyle: { color: t.border } }, axisTick: { show: false }, axisLabel: { color: t.muted, interval: 4 } },
-    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: t.border, type: 'dashed' } }, axisLabel: { color: t.muted } },
+    tooltip: { trigger: 'axis', backgroundColor: c.surface, borderColor: c.border, textStyle: { color: c.text } },
+    xAxis: { type: 'category', data: s.weekly.map((w) => shortDay(w.start)), axisLine: { lineStyle: { color: c.border } }, axisTick: { show: false }, axisLabel: { color: c.muted, interval: 4 } },
+    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: c.border, type: 'dashed' } }, axisLabel: { color: c.muted } },
     series: [
-      { name: 'Opened', type: 'line', smooth: true, symbol: 'none', data: s.weekly.map((w) => w.opened), lineStyle: { color: repoColor(repo.id), width: 2 }, itemStyle: { color: repoColor(repo.id) }, areaStyle: { color: repoColor(repo.id), opacity: 0.12 } },
-      { name: 'Closed', type: 'line', smooth: true, symbol: 'none', data: s.weekly.map((w) => w.closed), lineStyle: { color: t.closed, width: 2, type: 'dashed' }, itemStyle: { color: t.closed } },
+      { name: names.opened, type: 'line', smooth: true, symbol: 'none', data: s.weekly.map((w) => w.opened), lineStyle: { color: repoColor(repo.id), width: 2 }, itemStyle: { color: repoColor(repo.id) }, areaStyle: { color: repoColor(repo.id), opacity: 0.12 } },
+      { name: names.closed, type: 'line', smooth: true, symbol: 'none', data: s.weekly.map((w) => w.closed), lineStyle: { color: c.closed, width: 2, type: 'dashed' }, itemStyle: { color: c.closed } },
     ],
   })
 }
@@ -57,17 +60,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Projects
+          {{ t('nav.projects') }}
         </h2>
         <p class="page-sub">
-          Repositories and mod pages you watch, with their local working folders.
+          {{ t('projects.sub') }}
         </p>
       </div>
       <div
         v-if="app.repos.length"
         class="summary muted"
       >
-        <b class="mono">{{ app.repos.length }}</b> projects · <b class="mono">{{ totals.open }}</b> open · <b class="mono">{{ totals.closed }}</b> closed
+        <b class="mono">{{ app.repos.length }}</b> {{ t('words.projects', app.repos.length) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }} · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
       </div>
     </div>
 
@@ -79,14 +82,14 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           <InputIcon class="pi pi-search" />
           <InputText
             v-model="filter"
-            placeholder="Filter projects"
-            aria-label="Filter projects"
+            :placeholder="t('projects.filter')"
+            :aria-label="t('projects.filter')"
             fluid
           />
         </IconField>
-        <span v-tooltip.bottom="'Scan folders for git remotes — coming soon'">
+        <span v-tooltip.bottom="t('projects.discoverTip')">
           <Button
-            label="Auto-discover folders"
+            :label="t('projects.discover')"
             icon="pi pi-folder-open"
             severity="secondary"
             outlined
@@ -110,23 +113,23 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
             <EmptyState
               v-if="!app.reposAvailable"
               icon="pi pi-server"
-              title="Project list is not available yet"
-              text="This build does not serve /api/repos."
+              :title="t('projects.unavailable')"
+              :text="t('projects.unavailableText')"
             />
             <EmptyState
               v-else-if="filter"
               icon="pi pi-filter"
-              title="No project matches"
-              :text="`Nothing contains “${filter}”.`"
+              :title="t('projects.noMatch')"
+              :text="t('projects.noMatchText', { filter })"
             />
             <EmptyState
               v-else-if="app.reposLoaded"
               icon="pi pi-folder"
-              title="No projects yet"
-              text="Install your GitHub App on the repositories you want to watch, then sync."
+              :title="t('projects.empty')"
+              :text="t('projects.emptyText')"
             >
               <Button
-                label="Sync now"
+                :label="t('common.syncNow')"
                 icon="pi pi-sync"
                 size="small"
                 :loading="app.syncing"
@@ -142,7 +145,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           />
           <Column
             field="name"
-            header="Project"
+            :header="t('projects.colProject')"
             sortable
           >
             <template #body="{ data }: { data: Repo }">
@@ -169,7 +172,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column
             field="open"
-            header="Open"
+            :header="t('projects.colOpen')"
             sortable
             class="num"
           >
@@ -179,7 +182,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column
             field="closed"
-            header="Closed"
+            :header="t('projects.colClosed')"
             sortable
             class="num"
           >
@@ -188,12 +191,12 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
             </template>
           </Column>
           <Column
-            header="Progress"
+            :header="t('projects.colProgress')"
             class="progress-col"
           >
             <template #body="{ data }: { data: Repo }">
               <div
-                v-tooltip.top="`${closedShare(data)}% closed`"
+                v-tooltip.top="t('projects.closedPct', { n: closedShare(data) })"
                 class="bar"
               >
                 <span :style="{ width: closedShare(data) + '%' }" />
@@ -202,7 +205,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column
             field="unread"
-            header="Unread"
+            :header="t('projects.colUnread')"
             sortable
             class="num"
           >
@@ -220,7 +223,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               >—</span>
             </template>
           </Column>
-          <Column header="Local folder">
+          <Column :header="t('projects.colFolder')">
             <template #body="{ data }: { data: Repo }">
               <div class="folder-cell">
                 <span
@@ -231,10 +234,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 <span
                   v-else
                   class="not-mapped"
-                ><i class="pi pi-folder" /> Not mapped</span>
-                <span v-tooltip.top="'Folder mapping — coming soon'">
+                ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
+                <span v-tooltip.top="t('projects.mappingSoon')">
                   <Button
-                    label="Choose"
+                    :label="t('projects.choose')"
                     size="small"
                     severity="secondary"
                     text
@@ -246,14 +249,14 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column
             field="lastSync"
-            header="Last sync"
+            :header="t('projects.colLastSync')"
             sortable
           >
             <template #body="{ data }: { data: Repo }">
               <span
                 v-tooltip.left="absTime(data.lastSync ?? data.syncedAt)"
                 class="muted nowrap"
-              >{{ relTime(data.lastSync ?? data.syncedAt) || 'never' }}</span>
+              >{{ relTime(data.lastSync ?? data.syncedAt) || t('common.never') }}</span>
             </template>
           </Column>
 
@@ -262,21 +265,21 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               <div class="exp-stats">
                 <div>
                   <div class="exp-label">
-                    Open
+                    {{ t('projects.colOpen') }}
                   </div><div class="exp-val mono">
                     {{ data.open }}
                   </div>
                 </div>
                 <div>
                   <div class="exp-label">
-                    Closed
+                    {{ t('projects.colClosed') }}
                   </div><div class="exp-val mono">
                     {{ data.closed }}
                   </div>
                 </div>
                 <div>
                   <div class="exp-label">
-                    Closed share
+                    {{ t('projects.closedShare') }}
                   </div><div class="exp-val mono">
                     {{ closedShare(data) }}%
                   </div>
@@ -286,7 +289,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   :href="data.url"
                   target="_blank"
                   rel="noopener noreferrer"
-                  label="Open repository"
+                  :label="t('projects.openRepo')"
                   icon="pi pi-external-link"
                   size="small"
                   severity="secondary"
@@ -301,14 +304,14 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 <EmptyState
                   v-else-if="repoStats[data.id] === 'error' || !repoStats[data.id]"
                   icon="pi pi-chart-line"
-                  title="No stats"
+                  :title="t('projects.noStats')"
                   compact
                 />
                 <EChart
                   v-else
                   :option="chart(data, repoStats[data.id] as Stats)"
                   height="180px"
-                  :label="`Weekly activity for ${data.name}`"
+                  :label="t('projects.weeklyFor', { name: data.name })"
                 />
               </div>
             </div>

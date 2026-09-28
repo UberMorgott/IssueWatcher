@@ -10,11 +10,13 @@ import LabelTag from '../components/LabelTag.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { IssueDetail } from '../api/types'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, relTime, shortRepo } from '../lib/format'
+import { absTime, num, relTime, shortRepo } from '../lib/format'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
+const { t } = useI18n()
 const toast = useToast()
 
 const MAX_REPLY = 65536 // GitHub comment body limit (characters)
@@ -59,12 +61,12 @@ async function send() {
   const r = await api.reply(it.id, body)
   sending.value = false
   if (!r.ok) {
-    replyError.value = r.status === 409 ? 'Not signed in to GitHub — reconnect on the Connections page.' : r.error
+    replyError.value = r.status === 409 ? t('item.notSignedIn') : r.error
     return
   }
   item.value = { ...it, comments: it.comments + 1, commentsList: [...it.commentsList, r.data] }
   reply.value = ''
-  toast.add({ severity: 'success', summary: 'Reply posted', detail: `${it.repo}#${it.number}`, life: 3000 })
+  toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: `${it.repo}#${it.number}`, life: 3000 })
 }
 
 function onComposerKey(e: KeyboardEvent) {
@@ -82,10 +84,10 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
   <div class="page">
     <nav
       class="crumbs"
-      aria-label="Breadcrumb"
+      :aria-label="t('item.breadcrumb')"
     >
       <RouterLink to="/issues">
-        Issues
+        {{ t('nav.issues') }}
       </RouterLink>
       <i class="pi pi-angle-right" />
       <template v-if="item">
@@ -112,13 +114,13 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
     <EmptyState
       v-else-if="state !== 'ok' || !item"
       :icon="state === 'missing' ? 'pi pi-search' : 'pi pi-exclamation-triangle'"
-      :title="state === 'missing' ? 'Issue not found' : state === 'unavailable' ? 'Issue details are not available yet' : 'Could not load this issue'"
-      :text="state === 'missing' ? 'It may belong to a project that is no longer synced.' : errorText"
+      :title="state === 'missing' ? t('item.notFound') : state === 'unavailable' ? t('item.unavailable') : t('item.loadError')"
+      :text="state === 'missing' ? t('item.missingText') : errorText"
     >
       <Button
         as="router-link"
         to="/issues"
-        label="Back to issues"
+        :label="t('item.back')"
         icon="pi pi-arrow-left"
         severity="secondary"
         size="small"
@@ -137,9 +139,12 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               :class="item.state"
             >
               <i :class="item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'" />
-              {{ item.state === 'closed' ? 'Closed' : 'Open' }}
+              {{ item.state === 'closed' ? t('item.closed') : t('item.open') }}
             </span>
-            <span class="muted"><b>{{ item.author || 'unknown' }}</b> opened this <span v-tooltip.bottom="absTime(item.createdAt)">{{ relTime(item.createdAt) }}</span> · {{ item.comments }} comments</span>
+            <span class="muted"><i18n-t
+              keypath="item.openedThis"
+              scope="global"
+            ><template #author><b>{{ item.author || t('common.unknown') }}</b></template><template #time><span v-tooltip.bottom="absTime(item.createdAt)">{{ relTime(item.createdAt) }}</span></template></i18n-t> · {{ t('words.comments', item.comments) }}</span>
           </div>
         </div>
         <Button
@@ -147,7 +152,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
           :href="item.url"
           target="_blank"
           rel="noopener noreferrer"
-          label="Open on GitHub"
+          :label="t('item.openOnGithub')"
           icon="pi pi-external-link"
           severity="secondary"
           outlined
@@ -170,15 +175,15 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 v-else
                 class="av"
               >{{ initials(item.author) }}</span>
-              <b>{{ item.author || 'unknown' }}</b>
-              <span class="muted">opened {{ relTime(item.createdAt) }}</span>
-              <span class="author-tag">author</span>
+              <b>{{ item.author || t('common.unknown') }}</b>
+              <span class="muted">{{ t('item.opened', { time: relTime(item.createdAt) }) }}</span>
+              <span class="author-tag">{{ t('item.authorTag') }}</span>
             </header>
             <div
               class="post-body"
               :class="{ empty: !item.body }"
             >
-              {{ item.body || 'No description provided.' }}
+              {{ item.body || t('item.noDescription') }}
             </div>
           </article>
 
@@ -199,26 +204,26 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 v-else
                 class="av"
               >{{ initials(c.author) }}</span>
-              <b>{{ c.author || 'unknown' }}</b>
+              <b>{{ c.author || t('common.unknown') }}</b>
               <span
                 v-tooltip.top="absTime(c.createdAt)"
                 class="muted"
-              >commented {{ relTime(c.createdAt) }}</span>
+              >{{ t('item.commented', { time: relTime(c.createdAt) }) }}</span>
               <span
                 v-if="c.author && c.author === item.author"
                 class="author-tag"
-              >author</span>
+              >{{ t('item.authorTag') }}</span>
               <span
                 v-if="c.author && c.author === app.github?.login"
                 class="you-tag"
-              >you</span>
+              >{{ t('item.youTag') }}</span>
               <a
                 v-if="c.url"
                 :href="c.url"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="post-link"
-                aria-label="Open comment on GitHub"
+                :aria-label="t('item.openComment')"
               ><i class="pi pi-external-link" /></a>
             </header>
             <div class="post-body">
@@ -228,19 +233,19 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 
           <section class="composer panel">
             <div class="composer-head">
-              <i class="pi pi-reply" /> Reply on GitHub
+              <i class="pi pi-reply" /> {{ t('item.replyOnGithub') }}
               <span
                 v-if="app.github?.login"
                 class="muted"
-              >as @{{ app.github.login }}</span>
+              >{{ t('item.replyAs', { login: '@' + app.github.login }) }}</span>
             </div>
             <Textarea
               v-model="reply"
               auto-resize
               rows="5"
               :maxlength="MAX_REPLY"
-              placeholder="Write a reply…  (Ctrl+Enter to send)"
-              aria-label="Reply"
+              :placeholder="t('item.replyPlaceholder')"
+              :aria-label="t('item.replyAria')"
               :disabled="!app.githubConnected"
               fluid
               @keydown="onComposerKey"
@@ -254,9 +259,9 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               {{ replyError }}
             </Message>
             <div class="composer-foot">
-              <span class="muted mono count">{{ reply.length.toLocaleString() }} / {{ MAX_REPLY.toLocaleString() }}</span>
+              <span class="muted mono count">{{ num(reply.length) }} / {{ num(MAX_REPLY) }}</span>
               <Button
-                label="Send reply"
+                :label="t('item.sendReply')"
                 icon="pi pi-send"
                 :loading="sending"
                 :disabled="!reply.trim() || !app.githubConnected"
@@ -268,7 +273,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 
         <aside class="meta panel">
           <dl>
-            <dt>Project</dt>
+            <dt>{{ t('item.metaProject') }}</dt>
             <dd>
               <RouterLink :to="{ name: 'issues', query: { repo: String(item.repoId), state: 'all' } }">
                 {{ shortRepo(item.repo) }}
@@ -277,14 +282,14 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 {{ item.repo }}
               </div>
             </dd>
-            <dt>Source</dt>
+            <dt>{{ t('item.metaSource') }}</dt>
             <dd class="src">
               <PlatformIcon
                 platform="github"
                 :size="16"
               /> GitHub
             </dd>
-            <dt>Labels</dt>
+            <dt>{{ t('item.metaLabels') }}</dt>
             <dd class="labels">
               <LabelTag
                 v-for="l in item.labels"
@@ -294,17 +299,17 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               <span
                 v-if="!item.labels.length"
                 class="muted"
-              >None</span>
+              >{{ t('common.none') }}</span>
             </dd>
-            <dt>Created</dt>
+            <dt>{{ t('item.metaCreated') }}</dt>
             <dd>{{ absTime(item.createdAt) }}</dd>
-            <dt>Updated</dt>
+            <dt>{{ t('item.metaUpdated') }}</dt>
             <dd>{{ absTime(item.updatedAt) }}</dd>
             <template v-if="item.closedAt">
-              <dt>Closed</dt>
+              <dt>{{ t('item.metaClosed') }}</dt>
               <dd>{{ absTime(item.closedAt) }}</dd>
             </template>
-            <dt>Local folder</dt>
+            <dt>{{ t('item.metaFolder') }}</dt>
             <dd
               v-if="repo?.localPath"
               class="mono small"
@@ -315,11 +320,11 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               v-else
               class="muted"
             >
-              Not mapped
+              {{ t('item.notMapped') }}
             </dd>
-            <dt>Project totals</dt>
+            <dt>{{ t('item.metaTotals') }}</dt>
             <dd v-if="repo">
-              <span class="mono">{{ repo.open }}</span> open · <span class="mono">{{ repo.closed }}</span> closed
+              <span class="mono">{{ repo.open }}</span> {{ t('words.open', repo.open) }} · <span class="mono">{{ repo.closed }}</span> {{ t('words.closed', repo.closed) }}
             </dd>
             <dd
               v-else
@@ -328,9 +333,9 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               —
             </dd>
           </dl>
-          <span v-tooltip.top="'Coming in Phase 2'">
+          <span v-tooltip.top="t('item.agentSoon')">
             <Button
-              label="Send to agent"
+              :label="t('item.sendToAgent')"
               icon="pi pi-sparkles"
               disabled
               fluid

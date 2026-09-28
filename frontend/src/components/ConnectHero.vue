@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import Button from 'primevue/button'
+import { useI18n } from 'vue-i18n'
 import PlatformIcon from './PlatformIcon.vue'
 import { useAppStore } from '../stores/app'
 
 const app = useAppStore()
+const { t } = useI18n()
 const busy = ref(false)
 const waiting = ref(false)
 
@@ -14,11 +16,11 @@ async function connect() {
   busy.value = false
 }
 
-const steps = [
-  { icon: 'pi pi-github', title: 'Connect', text: 'Create your private GitHub App and authorize it — two clicks on github.com.' },
-  { icon: 'pi pi-sync', title: 'Sync', text: 'Issues and comments from every installed repo land in a local database.' },
-  { icon: 'pi pi-inbox', title: 'Review', text: 'Triage, reply and get tray notifications for anything new.' },
-]
+const steps = computed(() => [
+  { icon: 'pi pi-github', title: t('hero.steps.connectTitle'), text: t('hero.steps.connectText') },
+  { icon: 'pi pi-sync', title: t('hero.steps.syncTitle'), text: t('hero.steps.syncText') },
+  { icon: 'pi pi-inbox', title: t('hero.steps.reviewTitle'), text: t('hero.steps.reviewText') },
+])
 </script>
 
 <template>
@@ -31,16 +33,21 @@ const steps = [
         tile
       />
       <h2 class="hero-title">
-        Connect GitHub to start watching
+        {{ t('hero.title') }}
       </h2>
-      <p class="hero-text">
-        IssueWatcher collects issues and comments from all your repositories into one place and
-        tells you when something needs a reply. Nothing leaves this machine: tokens stay in
-        <span class="mono">data\secrets</span>.
-      </p>
+      <i18n-t
+        keypath="hero.text"
+        tag="p"
+        class="hero-text"
+        scope="global"
+      >
+        <template #path>
+          <span class="mono">data\secrets</span>
+        </template>
+      </i18n-t>
       <div class="hero-actions">
         <Button
-          label="Connect GitHub"
+          :label="t('common.connectGithub')"
           icon="pi pi-github"
           size="large"
           :loading="busy"
@@ -51,14 +58,14 @@ const steps = [
           to="/connections"
           class="hero-link"
         >
-          Other platforms <i class="pi pi-arrow-right" />
+          {{ t('hero.otherPlatforms') }} <i class="pi pi-arrow-right" />
         </RouterLink>
       </div>
       <p
         v-if="waiting && !app.githubConnected"
         class="hero-wait"
       >
-        <i class="pi pi-spin pi-spinner" /> Continue on github.com in the browser tab that just opened — this page updates by itself.
+        <i class="pi pi-spin pi-spinner" /> {{ t('common.continueOnGithub') }}
       </p>
       <p
         v-if="app.authError"

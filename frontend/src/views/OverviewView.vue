@@ -11,10 +11,12 @@ import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { Issue, Stats } from '../api/types'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, relTime, repoColor, shortRepo } from '../lib/format'
+import { absTime, relTime, repoColor, shortDay, shortRepo } from '../lib/format'
 
 const app = useAppStore()
+const { t } = useI18n()
 
 const stats = ref<Stats | null>(null)
 const statsState = ref<'loading' | 'ok' | 'unavailable' | 'error'>('loading')
@@ -63,57 +65,61 @@ const showHero = computed(() => app.onboarding)
 const shown = computed(() => repoStats.value ?? stats.value)
 const closed26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.closed, 0) ?? null)
 const opened26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.opened, 0) ?? null)
-const repoOptions = computed(() => [{ label: 'All projects', value: null as number | null }, ...app.repos.map((r) => ({ label: r.name, value: r.id as number | null }))])
+const repoOptions = computed(() => [{ label: t('overview.allProjects'), value: null as number | null }, ...app.repos.map((r) => ({ label: r.name, value: r.id as number | null }))])
 const topRepos = computed(() => [...app.repos].sort((a, b) => b.open - a.open).slice(0, 8))
 
 const weeklyOption = computed(() => {
   const weekly = shown.value?.weekly ?? []
-  return (t: ChartTheme): EChartsCoreOption => ({
+  const names = { opened: t('overview.opened'), closed: t('overview.closed') }
+  const days = weekly.map((w) => shortDay(w.start))
+  return (c: ChartTheme): EChartsCoreOption => ({
     grid: { left: 36, right: 12, top: 36, bottom: 28 },
-    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, textStyle: { color: t.muted } },
+    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, textStyle: { color: c.muted } },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(134,165,255,0.06)' } },
-      backgroundColor: t.surface,
-      borderColor: t.border,
-      textStyle: { color: t.text },
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      textStyle: { color: c.text },
     },
     xAxis: {
       type: 'category',
-      data: weekly.map((w) => w.start.slice(5)),
-      axisLine: { lineStyle: { color: t.border } },
+      data: days,
+      axisLine: { lineStyle: { color: c.border } },
       axisTick: { show: false },
-      axisLabel: { color: t.muted, interval: 3 },
+      axisLabel: { color: c.muted, interval: 3 },
     },
-    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: t.border, type: 'dashed' } }, axisLabel: { color: t.muted } },
+    yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: c.border, type: 'dashed' } }, axisLabel: { color: c.muted } },
     series: [
-      { name: 'Opened', type: 'bar', data: weekly.map((w) => w.opened), itemStyle: { color: t.opened, borderRadius: [4, 4, 0, 0] }, barGap: '15%', barMaxWidth: 14 },
-      { name: 'Closed', type: 'bar', data: weekly.map((w) => w.closed), itemStyle: { color: t.closed, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 14 },
+      { name: names.opened, type: 'bar', data: weekly.map((w) => w.opened), itemStyle: { color: c.opened, borderRadius: [4, 4, 0, 0] }, barGap: '15%', barMaxWidth: 14 },
+      { name: names.closed, type: 'bar', data: weekly.map((w) => w.closed), itemStyle: { color: c.closed, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 14 },
     ],
   })
 })
 
 const reposOption = computed(() => {
   const rows = [...topRepos.value].reverse()
-  return (t: ChartTheme): EChartsCoreOption => ({
+  const openName = t('overview.openSeries')
+  return (c: ChartTheme): EChartsCoreOption => ({
     grid: { left: 8, right: 36, top: 8, bottom: 8, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: t.surface, borderColor: t.border, textStyle: { color: t.text } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: c.surface, borderColor: c.border, textStyle: { color: c.text } },
     xAxis: { type: 'value', show: false },
-    yAxis: { type: 'category', data: rows.map((r) => shortRepo(r.name)), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: t.muted } },
+    yAxis: { type: 'category', data: rows.map((r) => shortRepo(r.name)), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: c.muted } },
     series: [
       {
-        name: 'Open',
+        name: openName,
         type: 'bar',
         data: rows.map((r) => ({ value: r.open, itemStyle: { color: repoColor(r.id), borderRadius: [0, 4, 4, 0] } })),
         barMaxWidth: 16,
-        label: { show: true, position: 'right', color: t.muted },
+        label: { show: true, position: 'right', color: c.muted },
       },
     ],
   })
 })
 
 const activityIcon: Record<string, string> = { 'item.new': 'pi pi-inbox', 'comment.new': 'pi pi-comment', 'item.closed': 'pi pi-check-circle' }
-const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.new': 'commented on', 'item.closed': 'closed' }
+const activityKey: Record<string, string> = { 'item.new': 'overview.activity.issue', 'comment.new': 'overview.activity.comment', 'item.closed': 'overview.activity.closed' }
+const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: 'Nexus Mods', steam: 'Steam Workshop' }
 </script>
 
 <template>
@@ -121,10 +127,10 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Overview
+          {{ t('nav.overview') }}
         </h2>
         <p class="page-sub">
-          What changed across your projects and what needs a reply.
+          {{ t('overview.sub') }}
         </p>
       </div>
     </div>
@@ -159,13 +165,13 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
           />
           <div>
             <div class="ps-name">
-              {{ p === 'curseforge' ? 'CurseForge' : p === 'nexusmods' ? 'Nexus Mods' : 'Steam Workshop' }}
+              {{ PLANNED[p] }}
             </div>
             <div class="muted ps-text">
-              Mod comments and bug reports — planned
+              {{ t('overview.plannedText') }}
             </div>
           </div>
-          <span class="phase-badge">Phase 4</span>
+          <span class="phase-badge">{{ t('common.phase', { n: 4 }) }}</span>
         </div>
       </div>
     </template>
@@ -173,41 +179,41 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
     <template v-else>
       <div class="stats-row">
         <StatCard
-          label="Open"
+          :label="t('overview.statOpen')"
           :value="stats?.open ?? null"
           icon="pi pi-inbox"
           :loading="statsState === 'loading'"
-          :hint="app.repos.length ? `across ${app.repos.length} projects` : undefined"
+          :hint="app.repos.length ? t('overview.acrossProjects', app.repos.length) : undefined"
         />
         <StatCard
-          label="Unread"
+          :label="t('overview.statUnread')"
           :value="app.unreadTotal"
           icon="pi pi-bell"
           tone="warn"
           :loading="!app.reposLoaded"
-          hint="new issues and comments"
+          :hint="t('overview.unreadHint')"
         />
         <StatCard
-          label="Opened · 26 wk"
+          :label="t('overview.opened26')"
           :value="opened26"
           icon="pi pi-arrow-up-right"
           tone="muted"
           :loading="statsState === 'loading'"
         />
         <StatCard
-          label="Closed · 26 wk"
+          :label="t('overview.closed26')"
           :value="closed26"
           icon="pi pi-check-circle"
           tone="success"
           :loading="statsState === 'loading'"
-          :hint="stats ? `${stats.closed} closed all time` : undefined"
+          :hint="stats ? t('overview.closedAllTime', { n: stats.closed }) : undefined"
         />
       </div>
 
       <div class="grid">
         <section class="panel chart-panel">
           <div class="panel-head">
-            <span class="panel-title">Opened vs closed, weekly</span>
+            <span class="panel-title">{{ t('overview.chartTitle') }}</span>
             <Select
               v-model="chartRepo"
               :options="repoOptions"
@@ -216,15 +222,15 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
               size="small"
               class="repo-select"
               filter
-              aria-label="Project"
+              :aria-label="t('overview.project')"
             />
           </div>
           <div class="panel-body">
             <EmptyState
               v-if="statsState === 'unavailable' || statsState === 'error'"
               icon="pi pi-chart-bar"
-              :title="statsState === 'unavailable' ? 'Stats are not available yet' : 'Could not load stats'"
-              text="The chart appears once the server serves /api/stats."
+              :title="statsState === 'unavailable' ? t('overview.statsUnavailable') : t('overview.statsError')"
+              :text="t('overview.statsHint')"
               compact
             />
             <Skeleton
@@ -235,7 +241,7 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
               v-else
               :option="weeklyOption"
               height="300px"
-              label="Weekly opened and closed issues for the last 26 weeks"
+              :label="t('overview.chartLabel')"
             />
           </div>
         </section>
@@ -243,12 +249,12 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
         <div class="side">
           <section class="panel">
             <div class="panel-head">
-              <span class="panel-title">Needs attention</span>
+              <span class="panel-title">{{ t('overview.needsAttention') }}</span>
               <RouterLink
                 :to="{ name: 'issues', query: { unread: '1' } }"
                 class="more"
               >
-                All unread
+                {{ t('overview.allUnread') }}
               </RouterLink>
             </div>
             <div class="panel-body list">
@@ -262,8 +268,8 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
               <EmptyState
                 v-else-if="!attention.length"
                 icon="pi pi-check"
-                title="All caught up"
-                text="No unread issues or comments."
+                :title="t('overview.caughtUp')"
+                :text="t('overview.caughtUpText')"
                 compact
               />
               <RouterLink
@@ -283,11 +289,11 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
 
           <section class="panel">
             <div class="panel-head">
-              <span class="panel-title">Recent activity</span>
+              <span class="panel-title">{{ t('overview.recentActivity') }}</span>
               <span
                 v-if="app.activity.length"
                 class="live-pill"
-              ><span class="live-dot" /> live</span>
+              ><span class="live-dot" /> {{ t('common.live') }}</span>
             </div>
             <div class="panel-body list">
               <RouterLink
@@ -302,7 +308,10 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
                 />
                 <span class="row-main">
                   <span class="row-title">{{ a.data.title }}</span>
-                  <span class="row-meta">{{ a.data.actor || 'someone' }} {{ activityVerb[a.kind] }} <span class="mono">{{ shortRepo(a.data.repo) }}#{{ a.data.number }}</span> · {{ relTime(a.at) }}</span>
+                  <span class="row-meta"><i18n-t
+                    :keypath="activityKey[a.kind]"
+                    scope="global"
+                  ><template #actor>{{ a.data.actor || t('common.someone') }}</template><template #ref><span class="mono">{{ shortRepo(a.data.repo) }}#{{ a.data.number }}</span></template></i18n-t> · {{ relTime(a.at) }}</span>
                 </span>
               </RouterLink>
               <template v-if="listsLoading && !app.activity.length">
@@ -315,8 +324,8 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
               <EmptyState
                 v-else-if="!recent.length && !app.activity.length"
                 icon="pi pi-history"
-                title="No activity yet"
-                text="Updates show up here after the first sync."
+                :title="t('overview.noActivity')"
+                :text="t('overview.noActivityText')"
                 compact
               />
               <RouterLink
@@ -332,7 +341,7 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
                 />
                 <span class="row-main">
                   <span class="row-title">{{ it.title }}</span>
-                  <span class="row-meta"><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · updated {{ relTime(it.updatedAt) }}</span>
+                  <span class="row-meta"><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ t('overview.updated', { time: relTime(it.updatedAt) }) }}</span>
                 </span>
               </RouterLink>
             </div>
@@ -342,24 +351,24 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
 
       <section class="panel">
         <div class="panel-head">
-          <span class="panel-title">Projects with the most open issues</span>
+          <span class="panel-title">{{ t('overview.topProjects') }}</span>
           <RouterLink
             to="/projects"
             class="more"
           >
-            All projects
+            {{ t('overview.allProjectsLink') }}
           </RouterLink>
         </div>
         <div class="panel-body">
           <EmptyState
             v-if="app.reposLoaded && !app.repos.length"
             icon="pi pi-folder"
-            title="No projects synced yet"
-            text="Install your GitHub App on the repositories you want to watch, then sync."
+            :title="t('overview.noProjects')"
+            :text="t('overview.noProjectsText')"
             compact
           >
             <Button
-              label="Sync now"
+              :label="t('common.syncNow')"
               icon="pi pi-sync"
               size="small"
               :loading="app.syncing"
@@ -370,7 +379,7 @@ const activityVerb: Record<string, string> = { 'item.new': 'opened', 'comment.ne
             v-else-if="app.repos.length"
             :option="reposOption"
             :height="Math.max(120, topRepos.length * 34) + 'px'"
-            label="Open issues per project"
+            :label="t('overview.perProjectLabel')"
           />
         </div>
       </section>

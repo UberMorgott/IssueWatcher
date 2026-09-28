@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
 import type { LiveItemEvent, Provider, Repo, SyncStatus } from '../api/types'
+import { t } from '../i18n'
 
 export type Theme = 'dark' | 'light'
 
@@ -59,7 +60,7 @@ export const useAppStore = defineStore('app', () => {
       providers.value = r.data
       authError.value = ''
     } else {
-      authError.value = r.status === 404 ? 'Sign-in is not available in this build' : r.error
+      authError.value = r.status === 404 ? t('common.signInUnavailable') : r.error
     }
     authLoaded.value = true
   }

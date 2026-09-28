@@ -6,29 +6,32 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, relTime } from '../lib/format'
+import { absTime, duration, relTime } from '../lib/format'
 
 const app = useAppStore()
 const confirm = useConfirm()
 const toast = useToast()
+const { t } = useI18n()
 const busy = ref(false)
 
 const planned = [
-  { id: 'curseforge', name: 'CurseForge', text: 'Mod comments via your browser session (no official comments API).', phase: 'Phase 4' },
-  { id: 'nexusmods', name: 'Nexus Mods', text: 'Sign in with Nexus SSO; posts, bugs and comments of your mods.', phase: 'Phase 4' },
-  { id: 'steam', name: 'Steam Workshop', text: 'Workshop item comment threads via your Steam session.', phase: 'Phase 4' },
+  { id: 'curseforge', name: 'CurseForge', text: 'connections.curseforgeText', phase: 4 },
+  { id: 'nexusmods', name: 'Nexus Mods', text: 'connections.nexusmodsText', phase: 4 },
+  { id: 'steam', name: 'Steam Workshop', text: 'connections.steamText', phase: 4 },
 ]
 
 const gh = computed(() => app.github)
+const openTotal = computed(() => app.repos.reduce((n, r) => n + r.open, 0))
 const ghState = computed(() => {
   const p = gh.value
-  if (!app.authLoaded) return { tone: 'off', text: 'Checking…' }
-  if (!p) return { tone: 'off', text: app.authError || 'Unavailable' }
-  if (p.connected) return { tone: 'ok', text: 'Connected' }
-  if (p.state === 'connecting') return { tone: 'busy', text: 'Waiting for GitHub…' }
-  if (p.state === 'error') return { tone: 'error', text: 'Error' }
-  return { tone: 'off', text: p.setupNeeded ? 'Not set up' : 'Disconnected' }
+  if (!app.authLoaded) return { tone: 'off', text: t('connections.checking') }
+  if (!p) return { tone: 'off', text: app.authError || t('connections.unavailable') }
+  if (p.connected) return { tone: 'ok', text: t('connections.connected') }
+  if (p.state === 'connecting') return { tone: 'busy', text: t('connections.waiting') }
+  if (p.state === 'error') return { tone: 'error', text: t('connections.error') }
+  return { tone: 'off', text: p.setupNeeded ? t('connections.notSetUp') : t('connections.disconnected') }
 })
 
 async function connect() {
@@ -56,17 +59,17 @@ async function copyCode(code: string) {
     copied.value = true
     window.setTimeout(() => (copied.value = false), 1500)
   } catch {
-    toast.add({ severity: 'warn', summary: 'Copy failed', detail: 'Select the code and copy it manually.', life: 3000 })
+    toast.add({ severity: 'warn', summary: t('connections.copyFailed'), detail: t('connections.copyFailedText'), life: 3000 })
   }
 }
 
 function disconnect() {
   confirm.require({
-    header: 'Disconnect GitHub?',
-    message: 'IssueWatcher forgets the local token and stops syncing. Synced issues stay in the local database; your GitHub App registration is kept, so reconnecting is one click.',
+    header: t('connections.disconnectTitle'),
+    message: t('connections.disconnectText'),
     icon: 'pi pi-sign-out',
-    rejectProps: { label: 'Cancel', severity: 'secondary', outlined: true },
-    acceptProps: { label: 'Disconnect', severity: 'danger' },
+    rejectProps: { label: t('common.cancel'), severity: 'secondary', outlined: true },
+    acceptProps: { label: t('connections.disconnect'), severity: 'danger' },
     accept: async () => {
       busy.value = true
       await app.disconnect('github')
@@ -81,11 +84,18 @@ function disconnect() {
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Connections
+          {{ t('nav.connections') }}
         </h2>
-        <p class="page-sub">
-          Platforms IssueWatcher reads from. Credentials stay on this machine in <span class="mono">data\secrets</span>.
-        </p>
+        <i18n-t
+          keypath="connections.sub"
+          tag="p"
+          class="page-sub"
+          scope="global"
+        >
+          <template #path>
+            <span class="mono">data\secrets</span>
+          </template>
+        </i18n-t>
       </div>
     </div>
 
@@ -128,27 +138,36 @@ function disconnect() {
                 @{{ gh.login }}
               </div>
               <div class="muted small">
-                <template v-if="app.sync?.lastSync">
-                  Last sync <span v-tooltip.top="absTime(app.sync.lastSync)">{{ relTime(app.sync.lastSync) }}</span> · every {{ app.sync.interval }}
-                </template>
+                <i18n-t
+                  v-if="app.sync?.lastSync"
+                  keypath="connections.lastSync"
+                  scope="global"
+                >
+                  <template #time>
+                    <span v-tooltip.top="absTime(app.sync.lastSync)">{{ relTime(app.sync.lastSync) }}</span>
+                  </template>
+                  <template #interval>
+                    {{ duration(app.sync.interval) }}
+                  </template>
+                </i18n-t>
                 <template v-else>
-                  Not synced yet
+                  {{ t('connections.notSynced') }}
                 </template>
               </div>
             </div>
           </div>
           <div class="facts">
-            <span><b class="mono">{{ app.repos.length }}</b> repositories</span>
-            <span><b class="mono">{{ app.repos.reduce((n, r) => n + r.open, 0) }}</b> open issues</span>
+            <span><b class="mono">{{ app.repos.length }}</b> {{ t('words.repositories', app.repos.length) }}</span>
+            <span><b class="mono">{{ openTotal }}</b> {{ t('words.openIssues', openTotal) }}</span>
           </div>
         </template>
         <p
           v-else
           class="card-text"
         >
-          Issues, comments and replies across every repository you install your private GitHub App on.
+          {{ t('connections.cardText') }}
           <template v-if="gh?.setupNeeded">
-            First connect creates the app on github.com — confirm, install, authorize.
+            {{ t('connections.setupNeeded') }}
           </template>
         </p>
         <p
@@ -161,30 +180,36 @@ function disconnect() {
           v-if="gh?.state === 'connecting' && !gh.device?.pending"
           class="device"
         >
-          <i class="pi pi-spin pi-spinner" /> Continue on github.com in the browser tab that opened — this page updates by itself.
+          <i class="pi pi-spin pi-spinner" /> {{ t('common.continueOnGithub') }}
         </p>
-        <p
+        <i18n-t
           v-if="gh?.device?.pending && gh.device.userCode"
+          keypath="connections.enterCode"
+          tag="p"
           class="device"
+          scope="global"
         >
-          Enter code <b class="mono code">{{ gh.device.userCode }}</b>
-          <Button
-            v-tooltip.top="copied ? 'Copied' : 'Copy code'"
-            :icon="copied ? 'pi pi-check' : 'pi pi-copy'"
-            size="small"
-            severity="secondary"
-            text
-            rounded
-            aria-label="Copy code"
-            @click="copyCode(gh.device.userCode)"
-          />
-          at
-          <a
-            :href="gh.device.verificationUri"
-            target="_blank"
-            rel="noopener noreferrer"
-          >{{ gh.device.verificationUri }}</a>
-        </p>
+          <template #code>
+            <b class="mono code">{{ gh.device.userCode }}</b>
+            <Button
+              v-tooltip.top="copied ? t('connections.copied') : t('connections.copyCode')"
+              :icon="copied ? 'pi pi-check' : 'pi pi-copy'"
+              size="small"
+              severity="secondary"
+              text
+              rounded
+              :aria-label="t('connections.copyCode')"
+              @click="copyCode(gh.device.userCode)"
+            />
+          </template>
+          <template #url>
+            <a
+              :href="gh.device.verificationUri"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ gh.device.verificationUri }}</a>
+          </template>
+        </i18n-t>
         <p
           v-if="deviceError"
           class="err"
@@ -195,7 +220,7 @@ function disconnect() {
         <footer class="card-foot">
           <template v-if="gh?.connected">
             <Button
-              label="Disconnect"
+              :label="t('connections.disconnect')"
               icon="pi pi-sign-out"
               severity="secondary"
               outlined
@@ -208,7 +233,7 @@ function disconnect() {
               :href="gh.appUrl"
               target="_blank"
               rel="noopener noreferrer"
-              label="App settings"
+              :label="t('connections.appSettings')"
               icon="pi pi-external-link"
               severity="secondary"
               text
@@ -219,7 +244,7 @@ function disconnect() {
               :href="gh.installUrl"
               target="_blank"
               rel="noopener noreferrer"
-              label="Choose repositories"
+              :label="t('connections.chooseRepos')"
               icon="pi pi-plus"
               severity="secondary"
               text
@@ -227,7 +252,7 @@ function disconnect() {
           </template>
           <template v-else>
             <Button
-              label="Connect GitHub"
+              :label="t('common.connectGithub')"
               icon="pi pi-github"
               :loading="busy"
               :disabled="!app.authLoaded || !gh"
@@ -235,8 +260,8 @@ function disconnect() {
             />
             <Button
               v-if="gh && !gh.setupNeeded"
-              v-tooltip.top="'If the browser redirect fails: sign in with a one-time code (enable Device Flow in the app settings first)'"
-              label="Use a device code"
+              v-tooltip.top="t('connections.deviceTip')"
+              :label="t('connections.useDevice')"
               icon="pi pi-key"
               severity="secondary"
               text
@@ -263,18 +288,18 @@ function disconnect() {
               {{ p.name }}
             </div>
             <div class="status off">
-              <span class="dot" /> Planned
+              <span class="dot" /> {{ t('connections.planned') }}
             </div>
           </div>
-          <span class="phase-badge">{{ p.phase }}</span>
+          <span class="phase-badge">{{ t('common.phase', { n: p.phase }) }}</span>
         </header>
         <p class="card-text">
-          {{ p.text }}
+          {{ t(p.text) }}
         </p>
         <footer class="card-foot">
-          <span v-tooltip.top="'Coming soon'">
+          <span v-tooltip.top="t('common.comingSoon')">
             <Button
-              label="Connect"
+              :label="t('connections.connect')"
               icon="pi pi-link"
               severity="secondary"
               outlined

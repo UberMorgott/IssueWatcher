@@ -17,11 +17,13 @@ import LabelTag from '../components/LabelTag.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { Issue } from '../api/types'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoOwner, shortRepo } from '../lib/format'
 import { typing } from '../lib/shortcuts'
 
 const app = useAppStore()
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -100,23 +102,25 @@ watch(
   },
 )
 
-const sourceOptions = [
-  { label: 'All sources', value: '' },
+const sourceOptions = computed(() => [
+  { label: t('issues.allSources'), value: '' },
   { label: 'GitHub', value: 'github' },
-  { label: 'CurseForge — soon', value: 'curseforge', disabled: true },
-  { label: 'Nexus Mods — soon', value: 'nexusmods', disabled: true },
-  { label: 'Steam Workshop — soon', value: 'steam', disabled: true },
-]
-const repoOptions = computed(() => [{ label: 'All projects', value: 0 }, ...app.repos.map((r) => ({ label: r.name, value: r.id }))])
-const stateOptions = [
-  { label: 'Open', value: 'open' },
-  { label: 'Closed', value: 'closed' },
-  { label: 'All', value: 'all' },
-]
+  { label: t('common.soonSuffix', { name: 'CurseForge' }), value: 'curseforge', disabled: true },
+  { label: t('common.soonSuffix', { name: 'Nexus Mods' }), value: 'nexusmods', disabled: true },
+  { label: t('common.soonSuffix', { name: 'Steam Workshop' }), value: 'steam', disabled: true },
+])
+const repoOptions = computed(() => [{ label: t('issues.allProjects'), value: 0 }, ...app.repos.map((r) => ({ label: r.name, value: r.id }))])
+const stateOptions = computed(() => [
+  { label: t('issues.open'), value: 'open' },
+  { label: t('issues.closed'), value: 'closed' },
+  { label: t('issues.all'), value: 'all' },
+])
+// PrimeVue fills {first}/{last}/{totalRecords} in; the braces must survive translation.
+const pageReport = computed(() => t('issues.pageReport', { first: '{first}', last: '{last}', total: '{totalRecords}' }))
 const labelOptions = computed(() => {
   const s = new Set(seenLabels.value)
   if (filters.value.label) s.add(filters.value.label)
-  return [{ label: 'Any label', value: '' }, ...[...s].sort().map((l) => ({ label: l, value: l }))]
+  return [{ label: t('issues.anyLabel'), value: '' }, ...[...s].sort().map((l) => ({ label: l, value: l }))]
 })
 const anyFilter = computed(() => {
   const f = filters.value
@@ -147,7 +151,7 @@ async function markSelectedRead() {
   const failed = results.filter((r) => !r.ok).length
   toast.add({
     severity: failed ? 'warn' : 'success',
-    summary: failed ? `${failed} of ${ids.length} failed` : `Marked ${ids.length} as read`,
+    summary: failed ? t('issues.markFailed', { failed, total: ids.length }) : t('issues.marked', { n: ids.length }),
     life: 3000,
   })
   selected.value = []
@@ -194,19 +198,19 @@ onBeforeUnmount(() => {
     <div class="page-head">
       <div>
         <h2 class="page-title">
-          Issues
+          {{ t('nav.issues') }}
         </h2>
         <p class="page-sub">
-          Every issue from every connected platform and project.
+          {{ t('issues.sub') }}
         </p>
       </div>
       <div
         v-if="!app.onboarding"
         class="counters"
       >
-        <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> open</span>
-        <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed }}</b> closed</span>
-        <span class="counter"><span class="unread-dot" /> <b class="mono">{{ counts.unread }}</b> unread</span>
+        <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> {{ t('words.open', counts.open) }}</span>
+        <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed }}</b> {{ t('words.closed', counts.closed) }}</span>
+        <span class="counter"><span class="unread-dot" /> <b class="mono">{{ counts.unread }}</b> {{ t('words.unread', counts.unread) }}</span>
       </div>
     </div>
 
@@ -219,8 +223,8 @@ onBeforeUnmount(() => {
           <InputText
             ref="searchBox"
             v-model="search"
-            placeholder="Search title, body or #number   /"
-            aria-label="Search issues"
+            :placeholder="t('issues.searchPlaceholder')"
+            :aria-label="t('issues.searchAria')"
             fluid
           />
         </IconField>
@@ -230,7 +234,7 @@ onBeforeUnmount(() => {
           option-label="label"
           option-value="value"
           option-disabled="disabled"
-          aria-label="Source"
+          :aria-label="t('issues.source')"
           class="f-source"
           @update:model-value="(v: string) => setQuery({ source: v })"
         />
@@ -240,7 +244,7 @@ onBeforeUnmount(() => {
           option-label="label"
           option-value="value"
           filter
-          aria-label="Project"
+          :aria-label="t('issues.project')"
           class="f-repo"
           @update:model-value="(v: number) => setQuery({ repo: v })"
         />
@@ -250,7 +254,7 @@ onBeforeUnmount(() => {
           option-label="label"
           option-value="value"
           filter
-          aria-label="Label"
+          :aria-label="t('issues.label')"
           class="f-label"
           @update:model-value="(v: string) => setQuery({ label: v })"
         />
@@ -260,21 +264,21 @@ onBeforeUnmount(() => {
           option-label="label"
           option-value="value"
           :allow-empty="false"
-          aria-label="State"
+          :aria-label="t('issues.state')"
           @update:model-value="(v: string) => setQuery({ state: v === 'open' ? '' : v })"
         />
         <ToggleButton
           :model-value="filters.unread"
-          on-label="Unread"
-          off-label="Unread"
+          :on-label="t('issues.unread')"
+          :off-label="t('issues.unread')"
           on-icon="pi pi-circle-fill"
           off-icon="pi pi-circle"
-          aria-label="Only unread"
+          :aria-label="t('issues.onlyUnread')"
           @update:model-value="(v: boolean) => setQuery({ unread: v })"
         />
         <Button
           v-if="anyFilter"
-          label="Reset"
+          :label="t('issues.reset')"
           icon="pi pi-filter-slash"
           severity="secondary"
           text
@@ -298,7 +302,7 @@ onBeforeUnmount(() => {
           scrollable
           scroll-height="calc(100vh - 330px)"
           paginator-template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport"
-          current-page-report-template="{first}–{last} of {totalRecords}"
+          :current-page-report-template="pageReport"
           @page="onPage"
           @row-click="(e) => open(e.data as Issue)"
         >
@@ -306,17 +310,17 @@ onBeforeUnmount(() => {
             <EmptyState
               v-if="state === 'unavailable'"
               icon="pi pi-server"
-              title="Issue list is not available yet"
-              text="This build does not serve /api/issues."
+              :title="t('issues.unavailable')"
+              :text="t('issues.unavailableText')"
             />
             <EmptyState
               v-else-if="state === 'error'"
               icon="pi pi-exclamation-triangle"
-              title="Could not load issues"
+              :title="t('issues.loadError')"
               :text="errorText"
             >
               <Button
-                label="Retry"
+                :label="t('common.retry')"
                 icon="pi pi-refresh"
                 size="small"
                 @click="load"
@@ -325,11 +329,11 @@ onBeforeUnmount(() => {
             <EmptyState
               v-else-if="anyFilter"
               icon="pi pi-filter"
-              title="Nothing matches these filters"
-              text="Try a different search or clear the filters."
+              :title="t('issues.noMatch')"
+              :text="t('issues.noMatchText')"
             >
               <Button
-                label="Reset filters"
+                :label="t('issues.resetFilters')"
                 icon="pi pi-filter-slash"
                 size="small"
                 severity="secondary"
@@ -339,12 +343,12 @@ onBeforeUnmount(() => {
             <EmptyState
               v-else-if="!loading"
               icon="pi pi-inbox"
-              title="No open issues"
-              :text="app.sync?.lastSync ? 'The last sync found nothing open. Nice.' : 'Nothing synced yet — run a sync to fetch issues.'"
+              :title="t('issues.noOpen')"
+              :text="app.sync?.lastSync ? t('issues.nothingOpen') : t('issues.nothingSynced')"
             >
               <Button
                 v-if="!app.sync?.lastSync"
-                label="Sync now"
+                :label="t('common.syncNow')"
                 icon="pi pi-sync"
                 size="small"
                 :loading="app.syncing"
@@ -359,7 +363,7 @@ onBeforeUnmount(() => {
             frozen
           />
           <Column
-            header="Issue"
+            :header="t('issues.colIssue')"
             class="col-title"
           >
             <template #body="{ data }: { data: Issue }">
@@ -373,7 +377,7 @@ onBeforeUnmount(() => {
                     <span
                       v-if="data.unread"
                       class="unread-dot"
-                      aria-label="unread"
+                      :aria-label="t('issues.unreadAria')"
                     />
                     <span
                       v-tooltip.top="data.title.length > 80 ? data.title : undefined"
@@ -381,14 +385,14 @@ onBeforeUnmount(() => {
                     >{{ data.title }}</span>
                   </div>
                   <div class="t-meta">
-                    <span class="mono">#{{ data.number }}</span> by {{ data.author || 'unknown' }} · opened {{ relTime(data.createdAt) }}
+                    <span class="mono">#{{ data.number }}</span> {{ t('issues.byOpened', { author: data.author || t('common.unknown'), time: relTime(data.createdAt) }) }}
                   </div>
                 </div>
               </div>
             </template>
           </Column>
           <Column
-            header="Project"
+            :header="t('issues.colProject')"
             class="col-project"
           >
             <template #body="{ data }: { data: Issue }">
@@ -404,7 +408,7 @@ onBeforeUnmount(() => {
             </template>
           </Column>
           <Column
-            header="Labels"
+            :header="t('issues.colLabels')"
             class="col-labels"
           >
             <template #body="{ data }: { data: Issue }">
@@ -423,7 +427,7 @@ onBeforeUnmount(() => {
             </template>
           </Column>
           <Column
-            header="Comments"
+            :header="t('issues.colComments')"
             class="col-num"
           >
             <template #body="{ data }: { data: Issue }">
@@ -434,7 +438,7 @@ onBeforeUnmount(() => {
             </template>
           </Column>
           <Column
-            header="Updated"
+            :header="t('issues.colUpdated')"
             class="col-updated"
           >
             <template #body="{ data }: { data: Issue }">
@@ -452,30 +456,30 @@ onBeforeUnmount(() => {
           v-if="selected.length"
           class="bulk"
           role="toolbar"
-          aria-label="Bulk actions"
+          :aria-label="t('issues.bulkAria')"
         >
-          <span class="bulk-count"><b class="mono">{{ selected.length }}</b> selected</span>
-          <span v-tooltip.top="'Coming in Phase 2: dispatch to Claude Code / Codex'">
+          <span class="bulk-count"><b class="mono">{{ selected.length }}</b> {{ t('words.selected', selected.length) }}</span>
+          <span v-tooltip.top="t('issues.agentSoon')">
             <Button
-              label="Send to agent"
+              :label="t('issues.sendToAgent')"
               icon="pi pi-sparkles"
               disabled
             />
           </span>
           <Button
-            label="Mark read"
+            :label="t('issues.markRead')"
             icon="pi pi-eye"
             severity="secondary"
             :disabled="!selected.some((i) => i.unread)"
             @click="markSelectedRead"
           />
           <Button
-            v-tooltip.top="'Clear selection  (Esc)'"
+            v-tooltip.top="t('issues.clearTip')"
             icon="pi pi-times"
             severity="secondary"
             text
             rounded
-            aria-label="Clear selection"
+            :aria-label="t('issues.clearAria')"
             @click="selected = []"
           />
         </div>

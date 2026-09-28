@@ -15,9 +15,11 @@
     "echarts": "^6.1.0",
     "pinia": "^4.0.3",
     "primeicons": "^8.0.2",
+    "primelocale": "^2.5.0",
     "primevue": "^5.0.1",
     "simple-icons": "^16.33.0",
     "vue": "^3.5.43",
+    "vue-i18n": "^11.4.12",
     "vue-router": "^5.3.1"
   },
   "devDependencies": {

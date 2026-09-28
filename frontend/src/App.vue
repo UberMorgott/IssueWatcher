@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import Toast from 'primevue/toast'
 import ConfirmDialog from 'primevue/confirmdialog'
 import Drawer from 'primevue/drawer'
@@ -18,6 +19,7 @@ const app = useAppStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
+const { t } = useI18n()
 const mobileNav = ref(false)
 const helpOpen = ref(false)
 
@@ -46,11 +48,12 @@ function onNavigate(path: string) {
 }
 
 // --- live events → store + toasts
-const KIND_TEXT: Record<string, { summary: string; severity: 'info' | 'success' | 'secondary' }> = {
-  'item.new': { summary: 'New issue', severity: 'info' },
-  'comment.new': { summary: 'New comment', severity: 'info' },
-  'item.closed': { summary: 'Issue closed', severity: 'secondary' },
+const KIND: Record<string, { key: string; icon: string; severity: 'info' | 'success' | 'secondary' }> = {
+  'item.new': { key: 'app.newIssue', icon: 'pi pi-inbox', severity: 'info' },
+  'comment.new': { key: 'app.newComment', icon: 'pi pi-comment', severity: 'info' },
+  'item.closed': { key: 'app.issueClosed', icon: 'pi pi-check-circle', severity: 'secondary' },
 }
+const toastIcon = (msg: unknown) => (msg as { data?: { icon?: string } }).data?.icon ?? 'pi pi-inbox'
 
 let bumpTimer: number | undefined
 function bumpSoon() {
@@ -66,7 +69,7 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'auth.changed': {
       const a = (data ?? {}) as { state?: string; login?: string }
       if (a.state === 'connected' && !app.githubConnected) {
-        toast.add({ severity: 'success', summary: 'GitHub connected', detail: a.login ? `Signed in as @${a.login}. First sync is running.` : undefined, life: 5000 })
+        toast.add({ severity: 'success', summary: t('app.githubConnected'), detail: a.login ? t('app.signedInAs', { login: '@' + a.login }) : undefined, life: 5000 })
       }
       void app.loadAuth()
       void app.loadSync()
@@ -87,10 +90,10 @@ function onLive(name: LiveEventName, data: unknown) {
       const e = data as LiveItemEvent
       if (!e || typeof e.id !== 'number') return
       app.pushActivity(name, e)
-      const k = KIND_TEXT[name]
+      const k = KIND[name]
       const detail =
         name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
-      toast.add({ group: 'live', severity: k.severity, summary: k.summary, detail, life: 8000, data: { id: e.id } } as never)
+      toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon } } as never)
       bumpSoon()
     }
   }
@@ -128,16 +131,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => stopLive?.())
 
-const shortcuts = [
-  ['/', 'Search issues'],
-  ['J / K', 'Next / previous row'],
-  ['Enter', 'Open selected issue'],
-  ['X', 'Toggle row selection'],
-  ['R', 'Sync now'],
-  ['[', 'Collapse sidebar'],
-  ['G then O / I / P / A / C / S', 'Go to Overview / Issues / Projects / Agents / Connections / Settings'],
-  ['?', 'This help'],
-]
+const shortcuts = computed(() => [
+  ['/', t('app.keys.search')],
+  ['J / K', t('app.keys.nextPrev')],
+  ['Enter', t('app.keys.open')],
+  ['X', t('app.keys.toggle')],
+  ['R', t('app.keys.sync')],
+  ['[', t('app.keys.sidebar')],
+  [t('app.keys.goKeys'), t('app.keys.go')],
+  ['?', t('app.keys.help')],
+])
 </script>
 
 <template>
@@ -168,9 +171,9 @@ const shortcuts = [
         role="status"
       >
         <i class="pi pi-exclamation-circle" />
-        GitHub is disconnected — showing issues from the last sync.
+        {{ t('app.offline') }}
         <RouterLink to="/connections">
-          Reconnect
+          {{ t('app.reconnect') }}
         </RouterLink>
       </div>
       <main class="shell-content">
@@ -194,7 +197,7 @@ const shortcuts = [
             class="live-icon"
             :class="message.severity"
           ><i
-            :class="message.summary === 'Issue closed' ? 'pi pi-check-circle' : message.summary === 'New comment' ? 'pi pi-comment' : 'pi pi-inbox'"
+            :class="toastIcon(message)"
           /></span>
           <div class="live-body">
             <div class="live-title">
@@ -207,7 +210,7 @@ const shortcuts = [
           <button
             type="button"
             class="live-close"
-            aria-label="Dismiss"
+            :aria-label="t('app.dismiss')"
             @click.stop="closeCallback"
           >
             <i class="pi pi-times" />
@@ -220,7 +223,7 @@ const shortcuts = [
 
     <Dialog
       v-model:visible="helpOpen"
-      header="Keyboard shortcuts"
+      :header="t('app.shortcutsTitle')"
       modal
       :style="{ width: '480px' }"
       dismissable-mask
@@ -238,7 +241,7 @@ const shortcuts = [
       </table>
       <template #footer>
         <Button
-          label="Close"
+          :label="t('common.close')"
           severity="secondary"
           @click="helpOpen = false"
         />

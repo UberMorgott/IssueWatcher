@@ -5,28 +5,31 @@ import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import Popover from 'primevue/popover'
 import { useToast } from 'primevue/usetoast'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { liveConnected } from '../api/live'
-import { absTime, relTime } from '../lib/format'
+import { routeTitle } from '../router'
+import { absTime, duration, relTime } from '../lib/format'
 
 defineEmits<{ menu: [] }>()
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const { t } = useI18n()
 
-const title = computed(() => (route.meta.title as string | undefined) ?? '')
+const title = computed(() => routeTitle(route))
 
 type Tone = 'ok' | 'busy' | 'warn' | 'error' | 'off'
 const status = computed<{ tone: Tone; text: string }>(() => {
   const s = app.sync
-  if (!app.githubConnected) return { tone: 'off', text: 'Not connected' }
-  if (app.syncing) return { tone: 'busy', text: 'Syncing…' }
-  if (!s) return { tone: 'off', text: 'Sync unavailable' }
-  if (s.rateLimitedUntil) return { tone: 'warn', text: 'Rate limited' }
-  if (s.lastError) return { tone: 'error', text: 'Sync error' }
-  if (s.lastSync) return { tone: 'ok', text: 'Synced ' + relTime(s.lastSync) }
-  return { tone: 'off', text: 'Waiting for first sync' }
+  if (!app.githubConnected) return { tone: 'off', text: t('topbar.notConnected') }
+  if (app.syncing) return { tone: 'busy', text: t('topbar.syncing') }
+  if (!s) return { tone: 'off', text: t('topbar.syncUnavailable') }
+  if (s.rateLimitedUntil) return { tone: 'warn', text: t('topbar.rateLimited') }
+  if (s.lastError) return { tone: 'error', text: t('topbar.syncError') }
+  if (s.lastSync) return { tone: 'ok', text: t('topbar.synced', { time: relTime(s.lastSync) }) }
+  return { tone: 'off', text: t('topbar.waitingFirstSync') }
 })
 
 const pop = ref<InstanceType<typeof Popover>>()
@@ -34,15 +37,15 @@ const menu = ref<InstanceType<typeof Menu>>()
 
 async function syncNow() {
   const err = await app.syncNow()
-  if (err) toast.add({ severity: 'error', summary: 'Sync failed to start', detail: err, life: 5000 })
+  if (err) toast.add({ severity: 'error', summary: t('topbar.syncStartFailed'), detail: err, life: 5000 })
 }
 
 const accountItems = computed(() => [
-  { label: app.github?.login ? '@' + app.github.login : 'Not signed in', disabled: true },
+  { label: app.github?.login ? '@' + app.github.login : t('topbar.notSignedIn'), disabled: true },
   { separator: true },
-  { label: 'Connections', icon: 'pi pi-link', command: () => router.push('/connections') },
-  { label: 'Settings', icon: 'pi pi-cog', command: () => router.push('/settings') },
-  ...(app.githubConnected ? [{ label: 'Sign out of GitHub', icon: 'pi pi-sign-out', command: () => app.disconnect('github') }] : []),
+  { label: t('nav.connections'), icon: 'pi pi-link', command: () => router.push('/connections') },
+  { label: t('nav.settings'), icon: 'pi pi-cog', command: () => router.push('/settings') },
+  ...(app.githubConnected ? [{ label: t('topbar.signOut'), icon: 'pi pi-sign-out', command: () => app.disconnect('github') }] : []),
 ])
 </script>
 
@@ -51,7 +54,7 @@ const accountItems = computed(() => [
     <button
       type="button"
       class="icon-btn only-mobile"
-      aria-label="Open menu"
+      :aria-label="t('topbar.openMenu')"
       @click="$emit('menu')"
     >
       <i class="pi pi-bars" />
@@ -74,22 +77,22 @@ const accountItems = computed(() => [
       <Popover ref="pop">
         <div class="sync-pop">
           <div class="row">
-            <span class="muted">GitHub</span><span>{{ app.githubConnected ? '@' + app.github?.login : 'not connected' }}</span>
+            <span class="muted">GitHub</span><span>{{ app.githubConnected ? '@' + app.github?.login : t('topbar.notConnectedLower') }}</span>
           </div>
           <div class="row">
-            <span class="muted">Last sync</span><span>{{ absTime(app.sync?.lastSync) || 'never' }}</span>
+            <span class="muted">{{ t('topbar.lastSync') }}</span><span>{{ absTime(app.sync?.lastSync) || t('common.never') }}</span>
           </div>
           <div class="row">
-            <span class="muted">Interval</span><span class="mono">{{ app.sync?.interval || '—' }}</span>
+            <span class="muted">{{ t('topbar.interval') }}</span><span class="mono">{{ duration(app.sync?.interval) || '—' }}</span>
           </div>
           <div class="row">
-            <span class="muted">Live updates</span><span>{{ liveConnected ? 'connected' : 'reconnecting…' }}</span>
+            <span class="muted">{{ t('topbar.liveUpdates') }}</span><span>{{ liveConnected ? t('topbar.liveConnected') : t('topbar.liveReconnecting') }}</span>
           </div>
           <div
             v-if="app.sync?.rateLimitedUntil"
             class="row warn"
           >
-            <span>Rate limited until</span><span>{{ absTime(app.sync.rateLimitedUntil) }}</span>
+            <span>{{ t('topbar.rateLimitedUntil') }}</span><span>{{ absTime(app.sync.rateLimitedUntil) }}</span>
           </div>
           <p
             v-if="app.sync?.lastError"
@@ -101,29 +104,29 @@ const accountItems = computed(() => [
       </Popover>
 
       <Button
-        v-tooltip.bottom="'Sync now  (R)'"
+        v-tooltip.bottom="t('topbar.syncNowTip')"
         icon="pi pi-sync"
         :class="{ spinning: app.syncing }"
         severity="secondary"
         text
         rounded
-        aria-label="Sync now"
+        :aria-label="t('common.syncNow')"
         :disabled="!app.githubConnected || app.syncing"
         @click="syncNow"
       />
       <Button
-        v-tooltip.bottom="app.theme === 'dark' ? 'Light theme' : 'Dark theme'"
+        v-tooltip.bottom="app.theme === 'dark' ? t('topbar.lightTheme') : t('topbar.darkTheme')"
         :icon="app.theme === 'dark' ? 'pi pi-sun' : 'pi pi-moon'"
         severity="secondary"
         text
         rounded
-        aria-label="Toggle theme"
+        :aria-label="t('topbar.toggleTheme')"
         @click="app.setTheme(app.theme === 'dark' ? 'light' : 'dark')"
       />
       <button
         type="button"
         class="avatar-btn"
-        aria-label="Account"
+        :aria-label="t('topbar.account')"
         aria-haspopup="menu"
         @click="menu?.toggle($event)"
       >
