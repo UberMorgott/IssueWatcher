@@ -1,0 +1,3 @@
+[default.extend-words]
+# Win32 notify-icon message prefix (NIN_SELECT, NIN_BALLOONUSERCLICK).
+nin = "nin"

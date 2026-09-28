@@ -1,0 +1,19 @@
+# Runtime state (portable data dir: db, logs, webview profile)
+data/
+
+# Build output
+build/bin/
+bin/
+*.exe
+*.exe~
+
+# Frontend
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# Tooling
+*.log
+coverage.out
+.serena/
+.claude/
