@@ -12,6 +12,7 @@ import { useToast } from 'primevue/usetoast'
 import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import IssueRow from '../components/IssueRow.vue'
+import DispatchDialog from '../components/DispatchDialog.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { rowHeight } from '../lib/appearance'
 import { api } from '../api/client'
@@ -269,6 +270,8 @@ async function markSelectedRead() {
   selected.value = []
   for (const id of ids) app.invalidate({ reason: 'read', itemId: id }) // coalesces with the server's data.changed
 }
+
+const dispatchOpen = ref(false)
 
 // --- keyboard: J/K move, Enter opens, X selects
 const searchBox = ref<{ $el: HTMLElement } | null>(null)
@@ -532,13 +535,11 @@ onBeforeUnmount(() => {
           :aria-label="t('issues.bulkAria')"
         >
           <span class="bulk-count"><b class="mono">{{ selected.length }}</b> {{ t('words.selected', selected.length) }}</span>
-          <span v-tooltip.top="t('issues.agentSoon')">
-            <Button
-              :label="t('issues.sendToAgent')"
-              icon="pi pi-sparkles"
-              disabled
-            />
-          </span>
+          <Button
+            :label="t('issues.sendToAgent')"
+            icon="pi pi-sparkles"
+            @click="dispatchOpen = true"
+          />
           <Button
             :label="t('issues.markRead')"
             icon="pi pi-eye"
@@ -557,6 +558,11 @@ onBeforeUnmount(() => {
           />
         </div>
       </Transition>
+      <DispatchDialog
+        v-model:visible="dispatchOpen"
+        :items="selected"
+        @done="selected = []"
+      />
     </template>
   </div>
 </template>

@@ -8,7 +8,7 @@ export interface ShortcutActions {
   go: (path: string) => void
 }
 
-const GO: Record<string, string> = { o: '/', i: '/issues', p: '/projects', a: '/agents', c: '/connections', s: '/settings' }
+const GO: Record<string, string> = { o: '/', i: '/issues', p: '/projects', j: '/jobs', a: '/settings/agents', c: '/connections', s: '/settings' }
 
 /** True when a key press belongs to a text field or an open overlay. */
 export function typing(e: KeyboardEvent): boolean {

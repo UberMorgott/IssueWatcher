@@ -15,6 +15,7 @@ import type { DataChange, LiveItemEvent, SettingsDoc, SyncProgress } from './api
 import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
+import { useJobsStore } from './stores/jobs'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
@@ -23,6 +24,7 @@ import { updateDocumentTitle } from './router'
 const app = useAppStore()
 const settings = useSettingsStore()
 const updates = useUpdatesStore()
+const jobs = useJobsStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -61,6 +63,7 @@ const KIND: Record<string, { key: string; icon: string; severity: 'info' | 'succ
   'item.closed': { key: 'app.issueClosed', icon: 'pi pi-check-circle', severity: 'secondary' },
 }
 const toastIcon = (msg: unknown) => (msg as { data?: { icon?: string } }).data?.icon ?? 'pi pi-inbox'
+const jobLinks = (msg: unknown) => (msg as { data?: { links?: { label: string; to: string; note: string }[] } }).data?.links ?? []
 
 function onLive(name: LiveEventName, data: unknown) {
   switch (name) {
@@ -91,6 +94,12 @@ function onLive(name: LiveEventName, data: unknown) {
       return
     case 'data.changed':
       app.invalidate((data as DataChange | null) ?? undefined)
+      return
+    case 'job.changed':
+      jobs.emitJob(data)
+      return
+    case 'job.log':
+      jobs.emitLog(data)
       return
     case 'item.new':
     case 'comment.new':
@@ -281,6 +290,40 @@ const shortcuts = computed(() => [
       </template>
     </Toast>
     <Toast position="bottom-right" />
+    <Toast
+      group="jobs"
+      position="bottom-right"
+    >
+      <template #message="{ message }">
+        <div class="jobs-toast">
+          <div class="live-title">
+            {{ message.summary }}
+          </div>
+          <div
+            v-if="message.detail"
+            class="live-detail"
+          >
+            {{ message.detail }}
+          </div>
+          <div
+            v-if="jobLinks(message).length"
+            class="jobs-links"
+          >
+            <RouterLink
+              v-for="l in jobLinks(message)"
+              :key="l.to"
+              :to="l.to"
+              class="mono"
+            >
+              {{ l.label }}<span
+                v-if="l.note"
+                class="muted"
+              > · {{ l.note }}</span>
+            </RouterLink>
+          </div>
+        </div>
+      </template>
+    </Toast>
     <ConfirmDialog />
 
     <Dialog
@@ -417,6 +460,22 @@ const shortcuts = computed(() => [
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.jobs-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.jobs-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 .live-close {

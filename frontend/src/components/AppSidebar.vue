@@ -13,7 +13,7 @@ const items = [
   { to: '/', icon: 'pi pi-objects-column', label: 'nav.overview', match: ['overview'] },
   { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: true },
   { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
-  { to: '/agents', icon: 'pi pi-microchip-ai', label: 'nav.agents', match: ['agents'], soon: true },
+  { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'] },
   { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },
   { to: '/settings', icon: 'pi pi-cog', label: 'nav.settings', match: ['settings'] },
 ]
@@ -55,10 +55,6 @@ const active = (match: string[]) => match.includes(String(route.name))
             v-if="it.badge && app.unreadTotal > 0"
             class="nav-badge mono"
           >{{ app.unreadTotal > 99 ? '99+' : app.unreadTotal }}</span>
-          <span
-            v-else-if="it.soon"
-            class="nav-soon"
-          >{{ t('common.soon') }}</span>
         </RouterLink>
       </li>
     </ul>
@@ -212,15 +208,8 @@ const active = (match: string[]) => match.includes(String(route.name))
   background: var(--iw-primary);
 }
 
-.nav-soon {
-  margin-left: auto;
-  font-size: calc(11px * var(--iw-fs, 1));
-  color: var(--iw-dimmed);
-}
-
 .collapsed .nav-label,
 .collapsed .brand-text,
-.collapsed .nav-soon,
 .collapsed .version {
   display: none;
 }

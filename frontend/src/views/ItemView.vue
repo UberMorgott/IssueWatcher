@@ -9,7 +9,11 @@ import EmptyState from '../components/EmptyState.vue'
 import LabelTag from '../components/LabelTag.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
-import type { IssueDetail } from '../api/types'
+import type { IssueDetail, Job, JobFlow } from '../api/types'
+import SplitButton from 'primevue/splitbutton'
+import JobBadge from '../components/JobBadge.vue'
+import { isActive, useDispatchToast } from '../lib/jobs'
+import { useJobEvents, useJobsStore } from '../stores/jobs'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, num, relTime } from '../lib/format'
@@ -117,6 +121,47 @@ function onComposerKey(e: KeyboardEvent) {
     e.preventDefault()
     void send()
   }
+}
+
+// --- agent jobs of this item (newest first), live from job.changed
+const itemJobs = ref<Job[]>([])
+async function loadJobs() {
+  const r = await api.jobs({ item: Number(props.id), limit: 5 })
+  if (r.ok) itemJobs.value = r.data.items
+}
+watch(() => props.id, () => {
+  itemJobs.value = []
+  void loadJobs()
+}, { immediate: true })
+useJobEvents({
+  job: (j) => {
+    if (j.itemId !== Number(props.id)) return
+    const i = itemJobs.value.findIndex((x) => x.id === j.id)
+    if (i >= 0) itemJobs.value.splice(i, 1, j)
+    else itemJobs.value = [j, ...itemJobs.value].slice(0, 5)
+  },
+})
+const activeJob = (flow: JobFlow) => itemJobs.value.find((j) => j.flow === flow && isActive(j.state))
+
+const jobsStore = useJobsStore()
+const report = useDispatchToast()
+const dispatching = ref(false)
+async function dispatch(flow: JobFlow, profileId?: string) {
+  const it = item.value
+  if (!it || dispatching.value) return
+  dispatching.value = true
+  const r = await jobsStore.dispatch([it.id], flow, profileId)
+  dispatching.value = false
+  report(r)
+  if (r.ok) void loadJobs()
+}
+function profileMenu(flow: JobFlow) {
+  const role = jobsStore.roleProfile(flow)
+  return jobsStore.profiles.map((p) => ({
+    label: p.name + (p.id === role ? ' ✓' : ''),
+    icon: p.cli === 'claude' ? 'pi pi-sparkles' : 'pi pi-code',
+    command: () => void dispatch(flow, p.id),
+  }))
 }
 
 const initials = (name: string) => (name || '?').slice(0, 2).toUpperCase()
@@ -361,15 +406,39 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               —
             </dd>
           </dl>
-          <span v-tooltip.top="t('item.agentSoon')">
-            <Button
-              :label="t('item.sendToAgent')"
-              icon="pi pi-sparkles"
-              disabled
-              fluid
-              severity="secondary"
+          <div class="agent">
+            <div class="agent-title">
+              {{ t('item.agentTitle') }}
+            </div>
+            <RouterLink
+              v-for="j in itemJobs"
+              :key="j.id"
+              :to="'/jobs/' + j.id"
+              class="job-card"
+            >
+              <JobBadge
+                :state="j.state"
+                :flow="j.flow"
+              />
+              <span class="job-card-text">
+                <span>{{ t('jobs.flow.' + j.flow) }}<template v-if="j.phase && isActive(j.state)"> · {{ t('jobs.phase.' + j.phase) }}</template></span>
+                <span class="muted small">{{ relTime(j.createdAt) }}<template v-if="j.attempt > 1"> · ×{{ j.attempt }}</template></span>
+              </span>
+              <i class="pi pi-angle-right muted" />
+            </RouterLink>
+            <SplitButton
+              v-for="f in (['fix', 'reply'] as const)"
+              :key="f"
+              :label="f === 'fix' ? t('item.fixWithAgent') : t('item.replyWithAgent')"
+              :icon="f === 'fix' ? 'pi pi-wrench' : 'pi pi-comment'"
+              :model="profileMenu(f)"
+              :disabled="!!activeJob(f) || dispatching"
+              :severity="f === 'fix' ? undefined : 'secondary'"
+              :title="activeJob(f) ? t('item.jobRunning') : undefined"
+              class="agent-btn"
+              @click="dispatch(f)"
             />
-          </span>
+          </div>
         </aside>
       </div>
     </template>
@@ -545,6 +614,52 @@ dd {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--iw-border);
+}
+
+.agent-title {
+  font-size: calc(11.5px * var(--iw-fs, 1));
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--iw-dimmed);
+}
+
+.job-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--iw-radius-sm);
+  border: 1px solid var(--iw-border);
+  color: var(--iw-text);
+}
+
+.job-card:hover {
+  background: var(--iw-hover);
+  color: var(--iw-text);
+}
+
+.job-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-btn {
+  width: 100%;
+}
+
+.agent-btn :deep(.p-splitbutton-button) {
+  flex: 1;
 }
 
 @media (width <= 1023px) {

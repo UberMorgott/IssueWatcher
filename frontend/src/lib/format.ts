@@ -69,6 +69,26 @@ export function duration(s: string | undefined): string {
   return secs >= 60 && secs % 60 === 0 ? minf().format(secs / 60) : secf().format(secs)
 }
 
+const hourf = () => fmt('hour', (l) => new Intl.NumberFormat(l, { style: 'unit', unit: 'hour', unitDisplay: 'short' }))
+
+/** Milliseconds → "42 с" / "3 мин 12 с" / "1 ч 5 мин"; "" for none. */
+export function elapsed(ms: number | undefined): string {
+  if (ms === undefined || ms < 0 || !Number.isFinite(ms)) return ''
+  const s = Math.round(ms / 1000)
+  if (s < 60) return secf().format(s)
+  const m = Math.floor(s / 60)
+  if (m < 60) return s % 60 ? `${minf().format(m)} ${secf().format(s % 60)}` : minf().format(m)
+  const h = Math.floor(m / 60)
+  return m % 60 ? `${hourf().format(h)} ${minf().format(m % 60)}` : hourf().format(h)
+}
+
+/** "$0.42" (US dollars, agent spend). */
+export function usd(n: number | undefined): string {
+  if (!n) return ''
+  const digits = n < 1 ? 3 : 2
+  return fmt('usd' + digits, (l) => new Intl.NumberFormat(l, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: digits })).format(n)
+}
+
 function hash(s: string): number {
   let h = 2166136261
   for (let i = 0; i < s.length; i++) {

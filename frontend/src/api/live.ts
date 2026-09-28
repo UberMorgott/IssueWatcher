@@ -12,6 +12,8 @@ export const LIVE_EVENTS = [
   'navigate',
   'superseded',
   'update.status',
+  'job.changed',
+  'job.log',
 ] as const
 export type LiveEventName = (typeof LIVE_EVENTS)[number]
 

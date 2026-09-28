@@ -55,6 +55,8 @@ export interface Issue {
   createdAt: string
   updatedAt: string
   closedAt: string
+  /** The item's newest agent job. */
+  job?: JobBadge
 }
 
 /** A row of the virtual issues list: an issue or a loading placeholder. */
@@ -88,7 +90,7 @@ export interface RepoChunk {
 
 /** data.changed live event. */
 export interface DataChange {
-  reason: 'sync' | 'read' | 'reply'
+  reason: 'sync' | 'read' | 'reply' | 'job'
   itemId?: number
   repo?: string
 }
@@ -201,6 +203,190 @@ export interface Settings {
   sync: { mode: SyncMode; activeDays: number; providers: Record<string, ProviderSync> }
   projects: { roots: string[]; exclude: string[]; scanDepth: number }
   updates: { channel: UpdateChannel; autoCheck: boolean; intervalHours: number }
+  agents: Agents
+}
+
+export type AgentCLI = 'claude' | 'codex'
+
+/** One configured agent (internal/config AgentProfile). */
+export interface AgentProfile {
+  id: string
+  name: string
+  cli: AgentCLI
+  /** "" = found on PATH. */
+  path: string
+  /** "" = the CLI's default. */
+  model: string
+  args: string[]
+  timeoutMinutes: number
+  maxParallel: number
+  /** 0 = no cap (claude only). */
+  maxBudgetUsd: number
+}
+
+export interface ProjectAgent {
+  prompt: string
+  verify: string
+  noAegis: boolean
+}
+
+/** settings.agents (internal/config Agents). */
+export interface Agents {
+  maxParallel: number
+  profiles: AgentProfile[]
+  roles: { coder: string; responder: string; verifier: string }
+  prompts: { system: string; fix: string; reply: string; review: string }
+  /** Keyed by project name (owner/repo). */
+  projects: Record<string, ProjectAgent>
+}
+
+// --- agent jobs (internal/store Job, internal/runner Result) -----------------
+
+export type JobState = 'queued' | 'running' | 'needs_review' | 'done' | 'failed' | 'cancelled'
+export type JobFlow = 'fix' | 'reply'
+export type JobPhase = '' | 'prepare' | 'agent' | 'verify' | 'review' | 'publish'
+
+/** Issue row badge: the item's newest job. */
+export interface JobBadge {
+  id: number
+  flow: JobFlow
+  state: JobState
+}
+
+export interface AgentResult {
+  profile: string
+  cli: string
+  model?: string
+  status?: 'fixed' | 'partial' | 'cannot_fix' | 'needs_info'
+  verdict?: 'ok' | 'concerns'
+  summary?: string
+  notes?: string
+  reply?: string
+  final?: string
+  costUsd?: number
+  turns?: number
+  tokens?: number
+  exitCode: number
+  durationMs: number
+  error?: string
+}
+
+export interface FileChange {
+  path: string
+  /** A, M, D, R, … */
+  status: string
+  /** -1 = binary. */
+  added: number
+  deleted: number
+}
+
+export interface DiffSummary {
+  files: FileChange[]
+  added: number
+  deleted: number
+  bytes: number
+  truncated: boolean
+  commits: number
+}
+
+export interface VerifyResult {
+  command: string
+  ok: boolean
+  exitCode: number
+  output: string
+  durationMs: number
+  timedOut?: boolean
+}
+
+export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'git' | 'interrupted'
+
+export interface JobResult {
+  errorCode?: JobErrorCode | string
+  agent?: AgentResult
+  diff?: DiffSummary
+  verify?: VerifyResult
+  review?: AgentResult
+  draft?: string
+  pr?: { number: number; url: string; commit: string }
+  comment?: { id: string; author: string; body: string; url: string; createdAt: string }
+  publishError?: string
+  cleanupError?: string
+  baseBranch?: string
+}
+
+export interface Job {
+  id: number
+  itemId: number
+  projectId: number
+  flow: JobFlow
+  state: JobState
+  profileId: string
+  attempt: number
+  phase: JobPhase
+  branch: string
+  worktree: string
+  baseSha: string
+  error: string
+  result: JobResult
+  createdAt: string
+  startedAt: string
+  finishedAt: string
+  updatedAt: string
+  repo: string
+  number: number
+  title: string
+  itemUrl: string
+}
+
+/** A row of the virtual jobs list: a job or a loading placeholder. */
+export type JobRowData = Job & { skeleton?: true }
+
+export interface JobChunk {
+  items: Job[]
+  nextCursor: string
+  more: boolean
+  total?: number
+}
+
+export interface JobQuery {
+  /** A job state or "active" (queued/running/needs_review). */
+  state?: string
+  flow?: string
+  project?: number
+  item?: number
+  cursor?: string
+  limit?: number
+}
+
+export type StepKind = 'info' | 'text' | 'tool' | 'output' | 'error' | 'stderr' | 'result'
+
+export interface JobStep {
+  t: string
+  kind: StepKind
+  text: string
+}
+
+/** job.log live event: new steps of the running attempt. */
+export interface JobLogEvent {
+  id: number
+  attempt: number
+  steps: JobStep[]
+}
+
+/** POST /api/jobs result per item. */
+export interface QueuedJob {
+  itemId: number
+  job?: Job
+  /** "exists" (job = the unfinished one), "not_found" or a message. */
+  error?: string
+}
+
+/** GET /api/agents/detect row. */
+export interface DetectedCLI {
+  cli: AgentCLI
+  /** "" = not on PATH. */
+  path: string
+  version: string
 }
 
 export type UpdateChannel = 'stable' | 'preview'

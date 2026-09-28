@@ -15,6 +15,13 @@ import type {
   Stats,
   SyncStatus,
   UpdateStatus,
+  DetectedCLI,
+  Job,
+  JobChunk,
+  JobFlow,
+  JobQuery,
+  JobStep,
+  QueuedJob,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -160,6 +167,62 @@ export const api = {
   folders: () => call<FolderRow[]>('GET', '/api/folders'),
   setFolder: (id: number, path: string) => call<FolderRow>('PUT', `/api/projects/${id}/path`, { path }),
   discoverFolders: () => call<{ suggestions: FolderSuggestion[]; visited: number; roots: string[] }>('POST', '/api/folders/discover'),
+
+  // --- agent jobs
+  async jobs(q: JobQuery): Promise<Result<JobChunk>> {
+    const p = new URLSearchParams()
+    if (q.state) p.set('state', q.state)
+    if (q.flow) p.set('flow', q.flow)
+    if (q.project) p.set('project', String(q.project))
+    if (q.item) p.set('item', String(q.item))
+    if (q.cursor) p.set('cursor', q.cursor)
+    if (q.limit) p.set('limit', String(q.limit))
+    const qs = p.toString()
+    const r = await call<JobChunk>('GET', '/api/jobs' + (qs ? '?' + qs : ''))
+    return r.ok ? { ...r, data: { ...r.data, items: (r.data.items ?? []).map(normJob) } } : r
+  },
+  async createJobs(itemIds: number[], flow: JobFlow, profileId?: string): Promise<Result<{ jobs: QueuedJob[] }>> {
+    const r = await call<{ jobs: QueuedJob[] }>('POST', '/api/jobs', { itemIds, flow, profileId: profileId || undefined })
+    return r.ok ? { ...r, data: { jobs: (r.data.jobs ?? []).map((q) => (q.job ? { ...q, job: normJob(q.job) } : q)) } } : r
+  },
+  job: (id: number | string) => jobCall('GET', `/api/jobs/${encodeURIComponent(String(id))}`),
+  jobLog: (id: number, attempt?: number) => call<{ attempt: number; steps: JobStep[] }>('GET', `/api/jobs/${id}/log` + (attempt ? `?attempt=${attempt}` : '')),
+  jobDiff: (id: number, attempt?: number) => textCall(`/api/jobs/${id}/diff` + (attempt ? `?attempt=${attempt}` : '')),
+  /** cancel | retry | dismiss (Отклонить) | pr (Создать PR; 502 = publish failed, job back to needs_review). */
+  jobAction: (id: number, action: 'cancel' | 'retry' | 'dismiss' | 'pr') => jobCall('POST', `/api/jobs/${id}/${action}`),
+  jobReply: (id: number, body: string) => jobCall('POST', `/api/jobs/${id}/reply`, { body }),
+  detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
+}
+
+/** Job rows always carry a result object (the column may hold null). */
+export function normJob(j: Job): Job {
+  return j.result && typeof j.result === 'object' ? j : { ...j, result: {} }
+}
+
+async function jobCall(method: string, url: string, body?: unknown): Promise<Result<Job>> {
+  const r = await call<Job>(method, url, body)
+  return r.ok ? { ...r, data: normJob(r.data) } : r
+}
+
+/** GET returning text/plain (job diff). */
+async function textCall(url: string): Promise<Result<string>> {
+  let res: Response
+  try {
+    res = await fetch(url, { credentials: 'same-origin' })
+  } catch {
+    return { ok: false, status: 0, error: t('common.notRunning') }
+  }
+  if (!res.ok) {
+    let error = res.statusText || `HTTP ${res.status}`
+    try {
+      const j = (await res.json()) as { error?: string }
+      if (j.error) error = j.error
+    } catch {
+      /* non-JSON error body */
+    }
+    return { ok: false, status: res.status, error }
+  }
+  return { ok: true, status: res.status, data: await res.text() }
 }
 
 /** A settings change: 409 carries the current document, 400 the field and a reason code. */

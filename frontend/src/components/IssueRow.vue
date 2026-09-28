@@ -3,6 +3,7 @@ import Skeleton from 'primevue/skeleton'
 import { useI18n } from 'vue-i18n'
 import LabelTag from './LabelTag.vue'
 import PlatformIcon from './PlatformIcon.vue'
+import JobBadge from './JobBadge.vue'
 import type { IssueRowData as Row } from '../api/types'
 import { absTime, relTime, repoOwner, shortRepo } from '../lib/format'
 
@@ -68,6 +69,13 @@ const { t } = useI18n()
               class="t-title"
               :title="item.title.length > 80 ? item.title : undefined"
             >{{ item.title }}</span>
+            <JobBadge
+              v-if="item.job"
+              :id="item.job.id"
+              :state="item.job.state"
+              :flow="item.job.flow"
+              compact
+            />
           </span>
           <span class="t-meta"><span class="mono">#{{ item.number }}</span> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
         </span>

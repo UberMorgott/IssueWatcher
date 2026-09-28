@@ -11,7 +11,10 @@ export const router = createRouter({
     { path: '/issues', name: 'issues', component: () => import('./views/IssuesView.vue'), meta: { title: 'issues' } },
     { path: '/item/:id', name: 'item', component: () => import('./views/ItemView.vue'), props: true, meta: { title: 'item' } },
     { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'projects' } },
-    { path: '/agents', name: 'agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'agents' } },
+    // Agent jobs; /jobs/:id is the deep link of the tray's «agent finished» card.
+    { path: '/jobs', name: 'jobs', component: () => import('./views/JobsView.vue'), meta: { title: 'jobs' } },
+    { path: '/jobs/:id', name: 'job', component: () => import('./views/JobView.vue'), props: true, meta: { title: 'job' } },
+    { path: '/agents', redirect: '/settings/agents' },
     { path: '/connections', name: 'connections', component: () => import('./views/ConnectionsView.vue'), meta: { title: 'connections' } },
     // Deep links: /settings/<section> (general, appearance, notifications, sync, …).
     { path: '/settings/:section?', name: 'settings', component: () => import('./views/SettingsView.vue'), props: true, meta: { title: 'settings' } },
