@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,11 +38,15 @@ var Version = "dev"
 
 // Dev/verification switches (environment variables).
 const (
-	envPort      = "IW_PORT"       // preferred port, used only if free
-	envNoBrowser = "IW_NO_BROWSER" // =1: log browser URLs instead of opening them
-	envDemo      = "IW_DEMO"       // =1: scripted badge + notification + simulated click
-	envDebug     = "IW_DEBUG"      // =1: debug log level (every tray callback message)
+	envPort      = "IW_PORT"           // preferred port, used only if free
+	envNoBrowser = "IW_NO_BROWSER"     // =1: log browser URLs instead of opening them
+	envDemo      = "IW_DEMO"           // =1: scripted badge + popup cards + simulated click
+	envDebug     = "IW_DEBUG"          // =1: debug log level (tray callbacks except mouse moves)
+	envSnapshot  = "IW_POPUP_SNAPSHOT" // =<dir>: render sample popup PNG files there and exit
 )
+
+// snapshotScale renders IW_POPUP_SNAPSHOT samples at 144 DPI.
+const snapshotScale = 1.5
 
 func main() {
 	if err := run(); err != nil {
@@ -54,6 +57,10 @@ func main() {
 }
 
 func run() error {
+	if dir := os.Getenv(envSnapshot); dir != "" {
+		_, err := notify.WriteSnapshots(dir, snapshotScale)
+		return err
+	}
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return err
@@ -136,10 +143,7 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 	sy := syncer.New(syncer.Options{
 		Store: st, Provider: github.NewProvider(auth), Interval: cfg.PollInterval(), Log: log,
 		OnUpdate: func(events []store.Event, unread int) {
-			for _, b := range notify.Balloons(events) {
-				err := tray.Notify(b.Title, b.Text, b.ItemID)
-				log.Info("notification shown", "item", b.ItemID, "err", err)
-			}
+			tray.NotifyEvents(events) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
 			setBadge(int64(unread))
 			publishLive(srv, events)
 		},
@@ -189,10 +193,6 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		}
 		log.Info("tray badge set", "count", n, "label", notify.BadgeLabel(int(n)), "err", err)
 	}
-	notifyItem := func(id, title, body string) {
-		err := tray.Notify(title, body, id)
-		log.Info("notification shown", "item", id, "err", err)
-	}
 
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	defer stopSync()
@@ -205,13 +205,17 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
 		Log:     log,
+		// TODO(settings): Theme/Prefs from the palette + notifications settings,
+		// then Tray.SetTheme / Tray.SetPrefs on settings.changed.
+		Theme: notify.DarkTheme(),
 		Menu: []notify.MenuItem{
 			{Title: "Открыть", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
 			{Title: "Тестовое уведомление", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
-				id := strconv.FormatInt(n%5+1, 10) // mock rows 1..5
-				notifyItem(id, "Тестовое уведомление #"+strconv.FormatInt(n, 10), "Нажмите, чтобы открыть issue "+id)
+				c := notify.SampleCard(n, time.Now())
+				tray.ShowCards(c)
+				log.Info("test notification shown", "item", c.ItemID)
 			}},
 			{},
 			{Title: "Выход", OnClick: func() { tray.Quit() }},
@@ -220,14 +224,7 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 			log.Info("tray click")
 			srv.OpenBrowser("")
 		},
-		OnBalloonClick: func(id string) {
-			log.Info("notification clicked", "item", id)
-			if id == "" { // summary balloon
-				srv.OpenBrowser("/")
-				return
-			}
-			srv.OpenBrowser("/item/" + url.PathEscape(id))
-		},
+		OnCardClick: func(path string) { srv.OpenBrowser(path) },
 	}, func(t *notify.Tray) {
 		tray = t
 		go func() {
@@ -263,11 +260,13 @@ func runDemo(log *slog.Logger, t *notify.Tray, setBadge func(int64)) {
 	log.Info("demo: start")
 	time.Sleep(time.Second)
 	setBadge(150)
-	err := t.Notify("Демо issue #42", "Следом будет имитирован клик", "42")
-	log.Info("demo: notification shown", "err", err)
-	time.Sleep(2 * time.Second)
+	for n := range int64(4) { // four cards: two shown + "+2 ещё"
+		t.ShowCards(notify.SampleCard(n, time.Now()))
+	}
+	log.Info("demo: notifications shown")
+	time.Sleep(4 * time.Second)
 	log.Info("demo: simulating notification click")
-	t.SimulateBalloonClick()
+	t.SimulateCardClick()
 	time.Sleep(time.Second)
 	setBadge(5)
 	log.Info("demo: done")

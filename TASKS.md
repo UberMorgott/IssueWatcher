@@ -60,4 +60,11 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] No PrimeUI license key in the exe: `frontend/scripts/primevue-local.mjs` (npm `postinstall`, also before `dev`/`build`) strips PrimeVue 5.0.1's license check; exact-hash guarded, idempotent, fails on any other PrimeVue version (`npm test`)
 - [x] One page title: the top bar is the heading (breadcrumb on detail pages via `lib/crumbs.ts`: Issues › owner/repo#N); body H1s and filler subtitles removed; repeated counts/labels dropped (Issues total when equal to the state counter, item author/opened line, Agents phase badge, project name twice)
 
+## Own popup notifications (replace Windows tray balloons)
+
+- [x] Own popup cards (`internal/notify/popup_windows.go`): layered, topmost, no-activate tool windows in the bottom-right corner of the work area, per-monitor DPI; card rendered in Go (Inter, SIL OFL) with shadow and slide/fade; stack of 3 + «+N ещё»; hover pauses auto-hide; × closes; click → `/item/:id` / `/issues?unread=1`. Balloon code removed; tray hover callbacks no longer logged; `IW_POPUP_SNAPSHOT=<dir>` renders sample PNG files
+- [ ] Wire settings → popups (block-5 agent): palette → `Tray.SetTheme(notify.Theme)`, `notifications` → `Tray.SetPrefs(notify.Prefs)` at start and on `settings.changed` (TODO in `cmd/issuewatcher/main.go`)
+- [ ] **Manual (user, real desktop)**: tray «Тестовое уведомление» → card bottom-right, focus stays in the current window, hover pauses, × closes, click opens the item; taskbar on top/left; DPI change
+- [ ] Focus assist / DND has no public API: `respectWindowsDnd` covers only full-screen / presentation mode (`SHQueryUserNotificationState`)
+
 ## Phase 2+ — see ARCHITECTURE.md

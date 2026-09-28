@@ -1,62 +1,107 @@
 package notify
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
-// MaxBalloons is how many events get their own balloon per sync cycle; more
-// collapse into one summary that opens the dashboard. One, because the tray
-// keeps a single click target (the latest balloon) and Windows queues bursts.
-const MaxBalloons = 1
+// Kind picks a card's icon.
+type Kind int
 
-// Balloon is one tray notification; ItemID "" opens the dashboard.
-type Balloon struct {
-	Title  string
-	Text   string
-	ItemID string
+// Card kinds.
+const (
+	KindIssue Kind = iota
+	KindComment
+	KindClosed
+	KindGroup // "+N ещё": cards that did not fit the stack
+)
+
+// UnreadPath is the dashboard route of a grouped card.
+const UnreadPath = "/issues?unread=1"
+
+// Card is one popup notification (UI text is Russian).
+type Card struct {
+	Kind   Kind
+	Title  string    // "Новый комментарий"
+	Ref    string    // "owner/repo#42"
+	Text   string    // snippet, wrapped to two lines
+	Time   time.Time // shown as HH:MM
+	ItemID string    // "" opens the unread list
 }
 
-// Balloons turns sync events into tray notifications (UI text is Russian).
-func Balloons(events []store.Event) []Balloon {
-	if len(events) > MaxBalloons {
-		n := len(events)
-		return []Balloon{{
-			Title: strconv.Itoa(n) + " " + ruPlural(n, "обновление", "обновления", "обновлений"),
-			Text:  summary(events),
-		}}
+// Target is the dashboard route a click on the card opens.
+func (c Card) Target() string {
+	if c.Kind == KindGroup || c.ItemID == "" {
+		return UnreadPath
 	}
-	out := make([]Balloon, 0, len(events))
+	return "/item/" + url.PathEscape(c.ItemID)
+}
+
+// Cards turns sync events into popup cards, one per event.
+func Cards(events []store.Event, now time.Time) []Card {
+	out := make([]Card, 0, len(events))
 	for _, e := range events {
-		ref := e.Repo + "#" + strconv.Itoa(e.Number)
-		b := Balloon{ItemID: strconv.FormatInt(e.ItemID, 10)}
+		c := Card{
+			Ref:    e.Repo + "#" + strconv.Itoa(e.Number),
+			Time:   now,
+			ItemID: strconv.FormatInt(e.ItemID, 10),
+		}
 		switch e.Kind {
 		case store.EventNewIssue:
-			b.Title, b.Text = "Новый issue · "+ref, clip(e.Title, 120)+" — "+e.Actor
+			c.Kind, c.Title, c.Text = KindIssue, "Новый issue", clip(e.Title, 200)
+			if e.Actor != "" {
+				c.Text = e.Actor + ": " + c.Text
+			}
 		case store.EventNewComment:
-			b.Title, b.Text = "Новый комментарий · "+ref, e.Actor+": "+clip(oneLine(e.Body), 160)
+			c.Kind, c.Title, c.Text = KindComment, "Новый комментарий", e.Actor+": "+clip(oneLine(e.Body), 200)
 		case store.EventClosed:
-			b.Title, b.Text = "Закрыт · "+ref, clip(e.Title, 160)
+			c.Kind, c.Title, c.Text = KindClosed, "Issue закрыт", clip(e.Title, 200)
 		default:
-			b.Title, b.Text = string(e.Kind)+" · "+ref, clip(e.Title, 160)
+			c.Kind, c.Title, c.Text = KindIssue, string(e.Kind), clip(e.Title, 200)
 		}
-		out = append(out, b)
+		out = append(out, c)
 	}
 	return out
 }
 
-func summary(events []store.Event) string {
+// SampleCard is the tray «Тестовое уведомление» card: kinds rotate with n,
+// the item id cycles through 1..5.
+func SampleCard(n int64, now time.Time) Card {
+	id := strconv.FormatInt(n%5+1, 10)
+	c := Card{Ref: "UberMorgott/IssueWatcher#" + id, Time: now, ItemID: id}
+	switch n % 3 {
+	case 0:
+		c.Kind, c.Title, c.Text = KindComment, "Новый комментарий", "octocat: Тестовое уведомление №"+strconv.FormatInt(n, 10)+
+			". Нажмите на карточку, чтобы открыть issue "+id+" на дашборде."
+	case 1:
+		c.Kind, c.Title, c.Text = KindIssue, "Новый issue", "octocat: Тестовое уведомление №"+strconv.FormatInt(n, 10)
+	default:
+		c.Kind, c.Title, c.Text = KindClosed, "Issue закрыт", "Тестовое уведомление №"+strconv.FormatInt(n, 10)
+	}
+	return c
+}
+
+// groupCard summarises cards that did not fit the stack.
+func groupCard(cards []Card, now time.Time) Card {
+	n := len(cards)
+	return Card{Kind: KindGroup, Title: "+" + strconv.Itoa(n) + " ещё", Text: summary(cards), Time: now}
+}
+
+func summary(cards []Card) string {
 	var issues, comments, closed int
-	for _, e := range events {
-		switch e.Kind {
-		case store.EventNewIssue:
+	for _, c := range cards {
+		switch c.Kind {
+		case KindIssue:
 			issues++
-		case store.EventNewComment:
+		case KindComment:
 			comments++
-		case store.EventClosed:
+		case KindClosed:
 			closed++
+		case KindGroup:
 		}
 	}
 	var parts []string
@@ -92,7 +137,7 @@ func ruPlural(n int, one, few, many string) string {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// clip shortens s to n runes (balloon text is capped at 255 UTF-16 units).
+// clip shortens s to n runes; the renderer ellipsizes to the card width.
 func clip(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {

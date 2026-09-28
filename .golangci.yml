@@ -143,7 +143,7 @@ linters:
       # Win32 tray via raw syscalls: unsafe.Pointer→uintptr is the calling
       # convention (G103), and uintptr↔int32/uint32 conversions carry Win32
       # values whose sign extension is intended (G115). Scoped to these files.
-      - path: '^internal/notify/(tray|focus)_windows\.go$'
+      - path: '^internal/notify/(tray|focus|popup)_windows\.go$'
         linters: [gosec]
         text: 'G103|G115'
       # ---------------------------------------------------------------------

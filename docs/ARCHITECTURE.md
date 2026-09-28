@@ -12,8 +12,8 @@ dispatch local AI agents (Claude Code, Codex CLI) manually, in batches, or by au
 | Loopback auth | per-run bearer token + port in `data\runtime.json`; browser always opened via one-time `/auth?t=` link → `HttpOnly SameSite=Strict` session cookie; Host header must be `127.0.0.1`/`localhost` | other local processes/pages can't drive the API; DNS-rebinding guard |
 | Single instance | named mutex `Local\IssueWatcher-<hash(data dir)>`; second launch reads `runtime.json`, `POST /api/open` → running instance opens the browser, exits | portable copies in different folders stay independent; mutex dies with the process (no stale lock) |
 | Portable | all state in `data\` next to exe (config, SQLite, logs, worktrees). No registry/AppData — **one exception**: Settings → «Запускать вместе с Windows» writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\IssueWatcher` = `"<exe>" --minimized` (`internal/autostart`), only while on, deleted when off, rewritten at startup if the exe moved (`config.json startWithWindows` remembers the choice) | user requirement; autostart has no portable alternative |
-| Start / focus | `--minimized` (or Settings → «Запускать свёрнутым», flag wins) = tray only, no browser tab. Tray click (double-click debounced 400 ms), «Открыть», notification click, second launch: `EnumWindows` finds the browser window whose title starts with the locale-independent marker `IssueWatcher · ` (the SPA's `document.title`), restores + `SetForegroundWindow`s it (foreground rights come from the click; second launch passes them via `AllowSetForegroundWindow`; `AttachThreadInput` fallback) and steers the tab with SSE `navigate`. Not found (background tab, other window) → a new tab opens and the old tabs get SSE `superseded` (+ `BroadcastChannel` from the new tab): dimmed overlay «Дашборд открыт в другой вкладке» with «Работать здесь», live updates and the title marker dropped. `IW_DEBUG=1` logs every tray callback; a balloon that times out right after showing was suppressed by Windows (DND/Focus assist) and its click in the notification center is never reported. Web app manifest lets the user install the dashboard as an app window, which makes the match reliable | browsers ignore `window.focus()` from a background tab |
-| Notifications | tray balloon (`Shell_NotifyIcon` `NIF_INFO`); click (`NIN_BALLOONUSERCLICK`) opens browser at `/item/:id`. Win10/11 render it as a toast | no AUMID/shortcut/registry needed (portable); `fyne.io/systray` exposes neither balloons nor that click → own small Win32 tray (`golang.org/x/sys/windows`) |
+| Start / focus | `--minimized` (or Settings → «Запускать свёрнутым», flag wins) = tray only, no browser tab. Tray click (double-click debounced 400 ms), «Открыть», notification click, second launch: `EnumWindows` finds the browser window whose title starts with the locale-independent marker `IssueWatcher · ` (the SPA's `document.title`), restores + `SetForegroundWindow`s it (foreground rights come from the click; second launch passes them via `AllowSetForegroundWindow`; `AttachThreadInput` fallback) and steers the tab with SSE `navigate`. Not found (background tab, other window) → a new tab opens and the old tabs get SSE `superseded` (+ `BroadcastChannel` from the new tab): dimmed overlay «Дашборд открыт в другой вкладке» with «Работать здесь», live updates and the title marker dropped. `IW_DEBUG=1` logs tray callbacks (hover/mouse-move callbacks never). Web app manifest lets the user install the dashboard as an app window, which makes the match reliable | browsers ignore `window.focus()` from a background tab |
+| Notifications | the app's own popup cards (`internal/notify/popup_windows.go`), not Windows toasts/balloons: one borderless topmost `WS_EX_TOOLWINDOW` + `WS_EX_NOACTIVATE` layered window per card (no taskbar button, never takes focus), bottom-right of the primary monitor's work area (top-right with a top taskbar), per-monitor DPI v2. Card rendered in Go (`golang.org/x/image` + embedded Inter, SIL OFL, `internal/notify/fonts/OFL.txt`) into premultiplied RGBA → `UpdateLayeredWindow` (rounded corners, soft shadow, slide/fade). Kind icon (issue / comment / closed ✓), title, `repo#N`, 2-line snippet, time, ×. Stack ≤ 3: overflow folds into «+N ещё». Auto-hide (`Prefs.AutoHide`, default 8 s), hover pauses; click → `/item/:id` (group → `/issues?unread=1`) through the tray focus/new-tab logic. `Prefs` (types, muted repos, quiet hours, `RespectWindowsDnd` → `SHQueryUserNotificationState`) and `Theme` come from settings | Windows swallows balloons/toasts under Do Not Disturb / Focus assist and never reports clicks from the notification center; no AUMID/registry (portable); no webview |
 | Tray | own Win32 tray: PNG icon rendered in Go with badge count (`99+`) (+ status dots later); menu Открыть / Тестовое уведомление / Выход; left-click opens browser; re-added on `TaskbarCreated` | quick status |
 | DB | SQLite via `modernc.org/sqlite` (no cgo), embedded SQL migrations | reuse `E:\DEV\1сEPD\internal\store\sqlite.go` |
 | GitHub API | GraphQL (explicit queries over `net/http`) for sync; REST (`go-github`) where simpler | rate limit 5000/h per token |
@@ -22,7 +22,7 @@ dispatch local AI agents (Claude Code, Codex CLI) manually, in batches, or by au
 | Publishing | dispatcher publishes (comments, labels, push, draft PR) via provider; agent only proposes | least privilege; merge always manual |
 | AI control | same exe in MCP stdio mode (`modelcontextprotocol/go-sdk`) talking to running core over loopback+token | "tell Claude: reply to X" |
 | Frontend | Vue 3 + Vite + TypeScript + Pinia + PrimeVue (DataTable) + ECharts; `//go:embed` bundle, history routing with server-side SPA fallback | table with filters/checkbox, charts |
-| Language | UI Russian by default, English switch in Settings (`localStorage iw.lang`): `vue-i18n` (Composition API, Slavic plural rule), PrimeVue texts from `primelocale`, dates/relative time via `Intl`. Go-side text (tray menu, balloons, auth pages) is Russian only | user request; no server round trip for a UI preference |
+| Language | UI Russian by default, English switch in Settings (`localStorage iw.lang`): `vue-i18n` (Composition API, Slavic plural rule), PrimeVue texts from `primelocale`, dates/relative time via `Intl`. Go-side text (tray menu, popup cards, auth pages) is Russian only | user request; no server round trip for a UI preference |
 
 ## Layout
 
@@ -38,7 +38,7 @@ internal/config         data\config.json (pollIntervalMinutes, startWithWindows,
 internal/runner         job queue, worktrees, claude/codex adapters, result check
 internal/store          SQLite + migrations
 internal/api            loopback HTTP server: SPA, JSON API, auth (browser + MCP bridge)
-internal/notify         Win32 tray icon, badge rendering, balloon notifications
+internal/notify         Win32 tray icon, badge rendering, own popup notification cards (layered windows)
 internal/autostart      HKCU Run entry for «start with Windows» (the only registry write)
 internal/instance       single-instance mutex + data\runtime.json
 internal/paths          portable data dir resolver (IW_DATA_DIR override)
@@ -49,7 +49,7 @@ data/                   runtime (gitignored): issuewatcher.db, runtime.json, con
 ## Build & dev switches
 
 - `pwsh -File build.ps1` → `build\bin\issuewatcher.exe` (npm build + `go build -H windowsgui`).
-- Env: `IW_DATA_DIR` (data dir override), `IW_PORT` (preferred port, used only if free), `IW_NO_BROWSER=1` (log launch URLs instead of opening), `IW_DEMO=1` (scripted badge + notification + simulated click, for log-based verification).
+- Env: `IW_DATA_DIR` (data dir override), `IW_PORT` (preferred port, used only if free), `IW_NO_BROWSER=1` (log launch URLs instead of opening), `IW_DEMO=1` (scripted badge + four popup cards + simulated click, for log-based verification), `IW_POPUP_SNAPSHOT=<dir>` (render sample popup PNG files — dark/light single, closed, stack — at 150 % and exit, no window).
 - Fatal panics go to `data\logs\issuewatcher.log` (`debug.SetCrashOutput`); startup errors also show a MessageBox.
 
 ## GitHub auth
@@ -86,7 +86,7 @@ Sources:
 - Poller (`internal/syncer`): immediately at start, then every `pollIntervalMinutes` from `data\config.json` (default 5, min 1), plus `POST /api/sync` and after sign-in. One cycle at a time.
 - Rate limit: `x-ratelimit-remaining/reset` headers (REST + GraphQL); sync stops below 50 remaining until reset (replies may use the reserve); 403/429 with `Retry-After` or remaining 0 → rate-limited status.
 - Diff → events (`store.ApplyItems`): new issue, new comment, issue open→closed. First sync of a project = silent baseline; own issues/comments never notify. Events mark the item `unread`.
-- Tray: 1 event → balloon (click → `/item/<id>`); more → one summary balloon (click → dashboard) because the tray keeps one click target. **Badge = number of unread items**; `POST /api/items/{id}/read` clears. Sync events are mirrored to open tabs as SSE (`cmd/issuewatcher/live.go`).
+- Popups: one card per event (click → `/item/<id>`); beyond 3 cards the oldest fold into «+N ещё» (click → `/issues?unread=1`). **Badge = number of unread items**; `POST /api/items/{id}/read` clears. Sync events are mirrored to open tabs as SSE (`cmd/issuewatcher/live.go`).
 
 ## HTTP API
 

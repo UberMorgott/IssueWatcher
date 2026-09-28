@@ -12,12 +12,14 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
-// Own minimal Win32 tray: fyne.io/systray has no balloon (NIF_INFO) API and its
-// window procedure drops NIN_BALLOONUSERCLICK, which is how a click on the
-// notification comes back. Legacy tray balloons need no AUMID or registry
-// entries, so they keep the app portable; Windows 10/11 renders them as toasts.
+// Own minimal Win32 tray: icon with a badge, menu, click. Notifications are the
+// app's own popup windows (popup_windows.go), not tray balloons: Windows
+// swallows balloons under Do Not Disturb / Focus assist and never reports
+// clicks made in the notification center.
 
 var (
 	user32   = windows.NewLazySystemDLL("user32.dll")
@@ -64,14 +66,10 @@ const (
 	wmRButtonDown   = 0x0204
 	wmRButtonUp     = 0x0205
 
-	ninSelect           = wmUser + 0
-	ninKeySelect        = wmUser + 1
-	ninBalloonShow      = wmUser + 2
-	ninBalloonHide      = wmUser + 3
-	ninBalloonTimeout   = wmUser + 4
-	ninBalloonUserClick = wmUser + 5
-	ninPopupOpen        = wmUser + 6
-	ninPopupClose       = wmUser + 7
+	ninSelect     = wmUser + 0
+	ninKeySelect  = wmUser + 1
+	ninPopupOpen  = wmUser + 6 // hover tooltip shown / hidden
+	ninPopupClose = wmUser + 7
 
 	nimAdd        = 0
 	nimModify     = 1
@@ -81,9 +79,7 @@ const (
 	nifMessage  = 0x01
 	nifIcon     = 0x02
 	nifTip      = 0x04
-	nifInfo     = 0x10
 	nifShowTip  = 0x80
-	niifInfo    = 0x01
 	notifyIconV = 4 // NOTIFYICON_VERSION_4
 
 	mfString    = 0x0000
@@ -149,12 +145,14 @@ type MenuItem struct {
 
 // TrayOptions configures RunTray. Handlers run on their own goroutine.
 type TrayOptions struct {
-	Tooltip        string
-	Icon           []byte // PNG
-	Menu           []MenuItem
-	OnClick        func()           // left click / keyboard select on the icon
-	OnBalloonClick func(tag string) // click on the last notification
-	Log            *slog.Logger     // optional; every callback message at debug level
+	Tooltip     string
+	Icon        []byte // PNG
+	Menu        []MenuItem
+	OnClick     func()            // left click / keyboard select on the icon
+	OnCardClick func(path string) // click on a popup card: dashboard route to open
+	Theme       Theme             // popup palette; zero = DarkTheme
+	Prefs       *Prefs            // notification settings; nil = DefaultPrefs
+	Log         *slog.Logger      // required; tray callbacks at debug level (not mouse moves)
 }
 
 // selectDebounce folds the two NIN_SELECT messages of a double-click into one open.
@@ -166,12 +164,12 @@ type Tray struct {
 	hwnd           windows.HWND
 	taskbarCreated uint32
 
-	mu         sync.Mutex
-	icon       windows.Handle
-	balloonTag string
+	mu    sync.Mutex
+	icon  windows.Handle
+	prefs Prefs
 
-	lastSelect     time.Time // message-loop thread only
-	balloonShownAt time.Time // message-loop thread only
+	popups     *popupManager
+	lastSelect time.Time // message-loop thread only
 }
 
 var (
@@ -188,13 +186,25 @@ func RunTray(opts TrayOptions, ready func(*Tray)) error {
 	if activeTray != nil {
 		return errors.New("tray: already running")
 	}
-	t := &Tray{opts: opts}
+	t := &Tray{opts: opts, prefs: DefaultPrefs()}
+	if opts.Prefs != nil {
+		t.prefs = *opts.Prefs
+	}
 	activeTray = t
 	defer func() { activeTray = nil }()
 
 	if err := t.createWindow(); err != nil {
 		return err
 	}
+	theme := opts.Theme
+	if theme == (Theme{}) {
+		theme = DarkTheme()
+	}
+	p, err := newPopupManager(theme, t.prefs.AutoHide, opts.OnCardClick, opts.Log)
+	if err != nil {
+		return err
+	}
+	t.popups = p
 	if err := t.SetIcon(opts.Icon); err != nil {
 		return err
 	}
@@ -299,25 +309,42 @@ func (t *Tray) SetIcon(png []byte) error {
 	return nerr
 }
 
-// Notify shows a balloon notification; a click on it calls OnBalloonClick(tag).
-func (t *Tray) Notify(title, text, tag string) error {
+// ShowCards pops up notification cards (newest last) in the screen corner.
+func (t *Tray) ShowCards(cards ...Card) {
+	if len(cards) > 0 {
+		t.popups.show(cards)
+	}
+}
+
+// SetTheme recolours the popups (shown cards re-render).
+func (t *Tray) SetTheme(th Theme) { t.popups.setTheme(th) }
+
+// SetPrefs replaces the notification settings (safe at runtime; AutoHide
+// applies to cards shown from now on).
+func (t *Tray) SetPrefs(p Prefs) {
 	t.mu.Lock()
-	t.balloonTag = tag
+	t.prefs = p
 	t.mu.Unlock()
-
-	nid := t.baseData()
-	nid.Flags = nifInfo
-	nid.InfoFlags = niifInfo
-	copyUTF16(nid.InfoTitle[:], title)
-	copyUTF16(nid.Info[:], text)
-	return shellNotify(nimModify, &nid)
+	t.popups.setAutoHide(p.AutoHide)
 }
 
-// SimulateBalloonClick posts the same callback Windows sends when the user
-// clicks the notification (dev/demo verification without a mouse).
-func (t *Tray) SimulateBalloonClick() {
-	_, _, _ = procPostMessageW.Call(uintptr(t.hwnd), wmTrayCallback, 0, ninBalloonUserClick)
+// NotifyEvents pops up cards for sync events allowed by the current Prefs and
+// returns how many it showed.
+func (t *Tray) NotifyEvents(events []store.Event) int {
+	t.mu.Lock()
+	p := t.prefs
+	t.mu.Unlock()
+	cards := p.Pick(events, time.Now(), WindowsBusy)
+	t.ShowCards(cards...)
+	if len(events) > 0 {
+		t.opts.Log.Info("notifications", "events", len(events), "shown", len(cards))
+	}
+	return len(cards)
 }
+
+// SimulateCardClick clicks the newest shown card (dev/demo verification
+// without a mouse).
+func (t *Tray) SimulateCardClick() { t.popups.simulateClick() }
 
 // Quit removes the icon and ends RunTray.
 func (t *Tray) Quit() {
@@ -353,8 +380,10 @@ func (t *Tray) showMenu() {
 }
 
 func (t *Tray) handleCallback(event uint16) {
-	if l := t.opts.Log; l != nil {
-		l.Debug("tray callback", "msg", fmt.Sprintf("0x%04X", event), "name", callbackName(event))
+	switch event {
+	case wmMouseMove, ninPopupOpen, ninPopupClose: // every hover: too chatty even for debug
+	default:
+		t.opts.Log.Debug("tray callback", "msg", fmt.Sprintf("0x%04X", event), "name", callbackName(event))
 	}
 	switch event {
 	case ninSelect, ninKeySelect:
@@ -366,23 +395,6 @@ func (t *Tray) handleCallback(event uint16) {
 		dispatch(t.opts.OnClick)
 	case wmContextMenu:
 		t.showMenu()
-	case ninBalloonShow:
-		t.balloonShownAt = time.Now()
-	case ninBalloonTimeout:
-		// Shown and timed out at once = Windows never showed a banner (Do Not
-		// Disturb / Focus assist, banners off for this app, full-screen app): the
-		// notification went straight to the notification center, and clicks there
-		// are not reported to legacy tray balloons.
-		if l := t.opts.Log; l != nil && time.Since(t.balloonShownAt) < time.Second {
-			l.Info("notification suppressed by Windows: no banner; clicks in the notification center are not reported")
-		}
-	case ninBalloonUserClick:
-		t.mu.Lock()
-		tag := t.balloonTag
-		t.mu.Unlock()
-		if h := t.opts.OnBalloonClick; h != nil {
-			go h(tag)
-		}
 	}
 }
 
@@ -393,22 +405,8 @@ func callbackName(event uint16) string {
 		return "NIN_SELECT"
 	case ninKeySelect:
 		return "NIN_KEYSELECT"
-	case ninBalloonShow:
-		return "NIN_BALLOONSHOW"
-	case ninBalloonHide:
-		return "NIN_BALLOONHIDE"
-	case ninBalloonTimeout:
-		return "NIN_BALLOONTIMEOUT"
-	case ninBalloonUserClick:
-		return "NIN_BALLOONUSERCLICK"
-	case ninPopupOpen:
-		return "NIN_POPUPOPEN"
-	case ninPopupClose:
-		return "NIN_POPUPCLOSE"
 	case wmContextMenu:
 		return "WM_CONTEXTMENU"
-	case wmMouseMove:
-		return "WM_MOUSEMOVE"
 	case wmLButtonDown:
 		return "WM_LBUTTONDOWN"
 	case wmLButtonUp:
@@ -434,6 +432,9 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 			_, _, _ = procDestroyWindow.Call(hwnd)
 			return 0
 		case wmDestroy:
+			if t.popups != nil {
+				t.popups.shutdown()
+			}
 			nid := t.baseData()
 			_ = shellNotify(nimDelete, &nid)
 			t.mu.Lock()
