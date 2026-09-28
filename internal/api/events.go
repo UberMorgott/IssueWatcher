@@ -6,23 +6,48 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 // Live events for open dashboard tabs (GET /api/events, Server-Sent Events).
 //
-// Event names: item.new, comment.new, item.closed, sync.status, auth.changed,
-// navigate {path}. The hub also tells the tray whether a tab is open, so a tray
-// click can steer that tab (navigate) instead of opening a new one.
+// Event names: item.new, comment.new, item.closed, sync.status, data.changed,
+// auth.changed, navigate {path}. The hub also tells the tray whether a tab is
+// open, so a tray click can steer that tab (navigate) instead of opening a new one.
 
 // SSE event names.
 const (
 	EventItemNew     = "item.new"
 	EventCommentNew  = "comment.new"
 	EventItemClosed  = "item.closed"
-	EventSyncStatus  = "sync.status"
+	EventSyncStatus  = "sync.status"  // syncer.Progress
+	EventDataChanged = "data.changed" // DataChange: pages refetch what they show
 	EventAuthChanged = "auth.changed"
 	EventNavigate    = "navigate"
 )
+
+// DataChange is the data.changed payload: why the stored data changed and, for
+// local actions, which item.
+type DataChange struct {
+	Reason string `json:"reason"` // sync | read | reply
+	ItemID int64  `json:"itemId,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+}
+
+// syncProgress mirrors a sync step to the open tabs: always sync.status, plus
+// data.changed when the step wrote something (the first, silent sync too).
+func (s *Server) syncProgress(p syncer.Progress) {
+	s.Publish(EventSyncStatus, p)
+	if p.Changed > 0 && p.State != syncer.ProgressDone && p.State != syncer.ProgressError {
+		s.Publish(EventDataChanged, DataChange{Reason: "sync", Repo: p.Repo})
+	}
+}
+
+// dataChanged tells the open tabs that a local action changed stored data.
+func (s *Server) dataChanged(reason string, itemID int64) {
+	s.Publish(EventDataChanged, DataChange{Reason: reason, ItemID: itemID})
+}
 
 const (
 	sseHeartbeat = 25 * time.Second

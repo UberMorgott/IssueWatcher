@@ -100,6 +100,17 @@ export interface SyncStatus {
   interval: string
 }
 
+/** sync.status live event: one step of a sync cycle (internal/syncer Progress). */
+export interface SyncProgress {
+  state: 'started' | 'progress' | 'done' | 'error'
+  repo?: string
+  done: number
+  total: number
+  changed: number
+  unread: number
+  error?: string
+}
+
 export interface Health {
   version: string
   port: number

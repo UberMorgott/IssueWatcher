@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
@@ -25,7 +26,15 @@ func ts(t time.Time) string {
 }
 
 // Store wraps the database with the queries sync and the API need.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db      *sql.DB
+	changes atomic.Int64 // rows sync really changed (items, comments, projects)
+}
+
+// Changes is a counter of synced rows that really changed (new, edited, closed,
+// new comment, project list). Callers diff two readings to see whether a sync step
+// changed what the dashboard shows.
+func (s *Store) Changes() int64 { return s.changes.Load() }
 
 // New wraps an opened database (see Open).
 func New(db *sql.DB) *Store { return &Store{db: db} }
@@ -80,11 +89,19 @@ func (s *Store) SyncProjects(ctx context.Context, sourceID int64, list []provide
 		return nil, fmt.Errorf("store: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	before, err := activeProjects(ctx, tx, sourceID)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET active = 0 WHERE source_id = ?`, sourceID); err != nil {
 		return nil, fmt.Errorf("store: deactivate projects: %w", err)
 	}
 	out := make([]Project, 0, len(list))
+	changed := len(before) != len(list)
 	for _, p := range list {
+		if before[p.ExternalID] != p.Name+"\x00"+p.URL {
+			changed = true
+		}
 		var (
 			row    = Project{ExternalID: p.ExternalID, Name: p.Name, URL: p.URL}
 			cursor string
@@ -102,7 +119,28 @@ func (s *Store) SyncProjects(ctx context.Context, sourceID int64, list []provide
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit projects: %w", err)
 	}
+	if changed {
+		s.changes.Add(1)
+	}
 	return out, nil
+}
+
+// activeProjects maps external id → name+"\x00"+url of the active projects of a source.
+func activeProjects(ctx context.Context, tx *sql.Tx, sourceID int64) (map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT external_id, name, url FROM projects WHERE source_id = ? AND active = 1`, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("store: active projects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	m := map[string]string{}
+	for rows.Next() {
+		var id, name, url string
+		if err := rows.Scan(&id, &name, &url); err != nil {
+			return nil, fmt.Errorf("store: active projects: %w", err)
+		}
+		m[id] = name + "\x00" + url
+	}
+	return m, rows.Err()
 }
 
 // ApplyItems stores a sync batch for one project and returns the changes worth
@@ -123,11 +161,17 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 	}
 	baseline := syncedAt == ""
 
-	var events []Event
+	var (
+		events  []Event
+		changes int64
+	)
 	for i := range items {
-		ev, err := applyItem(ctx, tx, sourceID, projectID, repo, &items[i], self, baseline)
+		ev, changed, err := applyItem(ctx, tx, sourceID, projectID, repo, &items[i], self, baseline)
 		if err != nil {
 			return nil, err
+		}
+		if changed {
+			changes++
 		}
 		events = append(events, ev...)
 		if u := ts(items[i].UpdatedAt); u > cursor {
@@ -141,12 +185,13 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit items: %w", err)
 	}
+	s.changes.Add(changes)
 	return events, nil
 }
 
 func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo string,
 	it *provider.Item, self string, baseline bool,
-) ([]Event, error) {
+) (events []Event, changed bool, err error) {
 	status := "closed"
 	if it.Open {
 		status = "open"
@@ -157,19 +202,21 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 	}
 	lj, err := json.Marshal(labels)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	var (
-		id        int64
-		oldStatus string
+		id         int64
+		oldStatus  string
+		oldUpdated string
 	)
-	err = tx.QueryRowContext(ctx, `SELECT id, status FROM items WHERE source_id = ? AND external_id = ?`,
-		sourceID, it.ExternalID).Scan(&id, &oldStatus)
+	err = tx.QueryRowContext(ctx, `SELECT id, status, updated_at FROM items WHERE source_id = ? AND external_id = ?`,
+		sourceID, it.ExternalID).Scan(&id, &oldStatus, &oldUpdated)
 	existed := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: lookup item: %w", err)
+		return nil, false, fmt.Errorf("store: lookup item: %w", err)
 	}
+	changed = !existed || oldStatus != status || oldUpdated != ts(it.UpdatedAt)
 	args := []any{projectID, it.Kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
 		string(lj), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt)}
 	if existed {
@@ -183,11 +230,10 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 			append(args, sourceID, it.ExternalID)...).Scan(&id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: save item %s: %w", it.ExternalID, err)
+		return nil, false, fmt.Errorf("store: save item %s: %w", it.ExternalID, err)
 	}
 
 	base := Event{ItemID: id, Repo: repo, Number: it.Number, Title: it.Title}
-	var events []Event
 	if !baseline && !existed && it.Author != self {
 		e := base
 		e.Kind, e.Actor = EventNewIssue, it.Author
@@ -201,8 +247,9 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 	for _, c := range it.Comments {
 		inserted, err := saveComment(ctx, tx, id, c)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		changed = changed || inserted
 		if inserted && !baseline && existed && c.Author != self {
 			e := base
 			e.Kind, e.Actor, e.Body = EventNewComment, c.Author, c.Body
@@ -211,10 +258,10 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 	}
 	if len(events) > 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET unread = 1 WHERE id = ?`, id); err != nil {
-			return nil, fmt.Errorf("store: mark unread: %w", err)
+			return nil, false, fmt.Errorf("store: mark unread: %w", err)
 		}
 	}
-	return events, nil
+	return events, changed, nil
 }
 
 type execer interface {

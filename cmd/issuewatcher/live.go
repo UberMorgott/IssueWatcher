@@ -25,9 +25,10 @@ type liveEvent struct {
 // maxLiveBody bounds a comment preview in a live event (runes).
 const maxLiveBody = 280
 
-// publishLive mirrors one sync cycle to the open dashboard tabs: one event per
-// change, then sync.status so pages refresh counts.
-func publishLive(srv *api.Server, events []store.Event, unread int) {
+// publishLive mirrors the notification-worthy changes of one sync cycle to the
+// open dashboard tabs (toasts). sync.status / data.changed come from the
+// syncer's progress listener in the api package.
+func publishLive(srv *api.Server, events []store.Event) {
 	if srv == nil {
 		return
 	}
@@ -42,5 +43,4 @@ func publishLive(srv *api.Server, events []store.Event, unread int) {
 		}
 		srv.Publish(name, liveEvent{ID: e.ItemID, Repo: e.Repo, Number: e.Number, Title: e.Title, Actor: e.Actor, Body: string(body)})
 	}
-	srv.Publish(api.EventSyncStatus, map[string]int{"events": len(events), "unread": unread})
 }

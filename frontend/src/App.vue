@@ -11,7 +11,7 @@ import { useToast } from 'primevue/usetoast'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
 import { connectLive, type LiveEventName } from './api/live'
-import type { LiveItemEvent } from './api/types'
+import type { LiveItemEvent, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useShortcuts } from './lib/shortcuts'
 
@@ -55,12 +55,6 @@ const KIND: Record<string, { key: string; icon: string; severity: 'info' | 'succ
 }
 const toastIcon = (msg: unknown) => (msg as { data?: { icon?: string } }).data?.icon ?? 'pi pi-inbox'
 
-let bumpTimer: number | undefined
-function bumpSoon() {
-  window.clearTimeout(bumpTimer)
-  bumpTimer = window.setTimeout(() => app.bump(), 300)
-}
-
 function onLive(name: LiveEventName, data: unknown) {
   switch (name) {
     case 'navigate':
@@ -73,17 +67,15 @@ function onLive(name: LiveEventName, data: unknown) {
       }
       void app.loadAuth()
       void app.loadSync()
-      bumpSoon()
+      app.invalidate()
       return
     }
-    case 'sync.status': {
-      const wasSignedIn = app.sync?.signedIn
-      void app.loadSync().then(() => {
-        if (app.sync && app.sync.signedIn !== wasSignedIn) void app.loadAuth()
-      })
-      bumpSoon()
+    case 'sync.status':
+      void app.onSyncStatus(data as SyncProgress | null)
       return
-    }
+    case 'data.changed':
+      app.invalidate()
+      return
     case 'item.new':
     case 'comment.new':
     case 'item.closed': {
@@ -94,7 +86,7 @@ function onLive(name: LiveEventName, data: unknown) {
       const detail =
         name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
       toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon } } as never)
-      bumpSoon()
+      app.invalidate()
     }
   }
 }

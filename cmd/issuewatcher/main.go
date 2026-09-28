@@ -118,7 +118,7 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 				log.Info("notification shown", "item", b.ItemID, "err", err)
 			}
 			setBadge(int64(unread))
-			publishLive(srv, events, unread)
+			publishLive(srv, events)
 		},
 	})
 

@@ -62,12 +62,13 @@ const selected = ref<Issue[]>([])
 const cursor = ref(-1)
 const seenLabels = ref(new Set<string>())
 
-async function load() {
+/** quiet = live refresh: no loading overlay; selection, cursor and scroll stay. */
+async function load(quiet = false) {
   if (app.onboarding) {
     loading.value = false
     return
   }
-  loading.value = true
+  if (!quiet) loading.value = true
   const f = filters.value
   const r = await api.issues({ source: f.source, repo: f.repo, state: f.state, label: f.label, q: f.q, unread: f.unread, page: f.page, perPage: PER_PAGE })
   loading.value = false
@@ -81,12 +82,16 @@ async function load() {
   state.value = 'ok'
   items.value = r.data.items
   total.value = r.data.total
+  // Keep the selection but point it at the fresh rows (unread flags may have changed).
+  const byId = new Map(r.data.items.map((it) => [it.id, it]))
+  selected.value = selected.value.map((s) => byId.get(s.id) ?? s)
   for (const it of r.data.items) for (const l of it.labels) seenLabels.value.add(l)
   if (cursor.value >= items.value.length) cursor.value = items.value.length - 1
 }
 
-watch(filters, load, { deep: true })
-watch(() => [app.onboarding, app.dataVersion], load)
+watch(filters, () => load(), { deep: true })
+watch(() => app.onboarding, () => load())
+watch(() => app.dataVersion, () => load(true))
 
 // --- filter controls
 const search = ref(filters.value.q)
@@ -155,7 +160,7 @@ async function markSelectedRead() {
     life: 3000,
   })
   selected.value = []
-  app.bump()
+  app.invalidate() // coalesces with the server's data.changed
 }
 
 // --- keyboard: J/K move, Enter opens, X selects
@@ -323,7 +328,7 @@ onBeforeUnmount(() => {
                 :label="t('common.retry')"
                 icon="pi pi-refresh"
                 size="small"
-                @click="load"
+                @click="load()"
               />
             </EmptyState>
             <EmptyState

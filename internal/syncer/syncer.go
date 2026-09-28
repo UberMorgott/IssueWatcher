@@ -38,14 +38,53 @@ type Status struct {
 	Interval         string `json:"interval"`
 }
 
+// Progress states reported to OnProgress listeners (SSE sync.status).
+const (
+	ProgressStarted = "started"
+	ProgressRepo    = "progress"
+	ProgressDone    = "done"
+	ProgressError   = "error"
+)
+
+// Progress is one step of a sync cycle: started (project list known), one
+// progress per project, then done or error. Changed counts rows that really
+// changed since the previous step (first sync included: silent only means no
+// notifications), so listeners know when the dashboard data is stale.
+type Progress struct {
+	State   string `json:"state"`
+	Repo    string `json:"repo,omitempty"`
+	Done    int    `json:"done"`
+	Total   int    `json:"total"`
+	Changed int    `json:"changed"`
+	Unread  int    `json:"unread"`
+	Error   string `json:"error,omitempty"`
+}
+
 // Syncer runs sync cycles on a timer and on demand.
 type Syncer struct {
 	opts    Options
 	trigger chan struct{}
 	cycle   sync.Mutex // one cycle at a time
 
-	mu     sync.Mutex
-	status Status
+	mu         sync.Mutex
+	status     Status
+	onProgress []func(Progress)
+}
+
+// OnProgress registers a listener for cycle progress (called on the sync goroutine).
+func (s *Syncer) OnProgress(f func(Progress)) {
+	s.mu.Lock()
+	s.onProgress = append(s.onProgress, f)
+	s.mu.Unlock()
+}
+
+func (s *Syncer) progress(p Progress) {
+	s.mu.Lock()
+	fs := append([]func(Progress){}, s.onProgress...)
+	s.mu.Unlock()
+	for _, f := range fs {
+		f(p)
+	}
 }
 
 // New creates a Syncer; call Run to start polling.
@@ -102,7 +141,8 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
-	events, err := s.cycleOnce(ctx)
+	var changed int
+	events, err := s.cycleOnce(ctx, &changed)
 	now := time.Now().UTC().Format(time.RFC3339)
 	var rl *provider.RateLimitError
 	s.update(func(st *Status) {
@@ -127,10 +167,16 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	if uerr == nil {
 		s.opts.OnUpdate(events, unread)
 	}
+	p := Progress{State: ProgressDone, Unread: unread, Changed: changed}
+	if err := errors.Join(err, uerr); err != nil {
+		p.State, p.Error = ProgressError, err.Error()
+	}
+	s.progress(p)
 	return errors.Join(err, uerr)
 }
 
-func (s *Syncer) cycleOnce(ctx context.Context) ([]store.Event, error) {
+// cycleOnce syncs every project; *changed accumulates rows that really changed.
+func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, error) {
 	p := s.opts.Provider
 	login, err := p.Account(ctx)
 	if err != nil {
@@ -144,15 +190,24 @@ func (s *Syncer) cycleOnce(ctx context.Context) ([]store.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
+	c0 := s.opts.Store.Changes()
 	projects, err := s.opts.Store.SyncProjects(ctx, src, list)
 	if err != nil {
 		return nil, err
 	}
+	step := func() int { // rows changed since the previous report
+		c := s.opts.Store.Changes()
+		n := int(c - c0)
+		c0 = c
+		*changed += n
+		return n
+	}
+	s.progress(Progress{State: ProgressStarted, Total: len(projects), Changed: step()})
 	var (
 		events []store.Event
 		errs   []error
 	)
-	for _, pr := range projects {
+	for i, pr := range projects {
 		items, err := p.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
 		if err != nil {
 			var rl *provider.RateLimitError
@@ -160,6 +215,7 @@ func (s *Syncer) cycleOnce(ctx context.Context) ([]store.Event, error) {
 				return events, err // stop the cycle; the rest waits for the next one
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
+			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects)})
 			continue
 		}
 		evs, err := s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
@@ -167,6 +223,7 @@ func (s *Syncer) cycleOnce(ctx context.Context) ([]store.Event, error) {
 			return events, err
 		}
 		events = append(events, evs...)
+		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step()})
 	}
 	return events, errors.Join(errs...)
 }

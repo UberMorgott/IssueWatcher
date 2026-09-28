@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
-import type { LiveItemEvent, Provider, Repo, SyncStatus } from '../api/types'
+import type { LiveItemEvent, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
 import { t } from '../i18n'
 
 export type Theme = 'dark' | 'light'
@@ -88,14 +88,15 @@ export const useAppStore = defineStore('app', () => {
     await loadAuth()
   }
 
-  // --- sync
+  // --- sync (progress arrives as sync.status live events)
   const sync = ref<SyncStatus | null>(null)
   const syncRequested = ref(false)
+  const progress = ref<SyncProgress | null>(null)
   async function loadSync() {
     const r = await api.syncStatus()
     if (r.ok) sync.value = r.data
   }
-  let pollTimer: number | undefined
+  let requestTimer: number | undefined
   async function syncNow() {
     syncRequested.value = true
     const r = await api.syncNow()
@@ -103,23 +104,30 @@ export const useAppStore = defineStore('app', () => {
       syncRequested.value = false
       return r.error
     }
-    // The poller has no "started" event: poll until the cycle ends (max ~2 min).
-    window.clearTimeout(pollTimer)
-    let tries = 0
-    const tick = async () => {
-      await loadSync()
-      tries++
-      if ((sync.value?.running || tries < 2) && tries < 60) {
-        pollTimer = window.setTimeout(tick, 2000)
-      } else {
-        syncRequested.value = false
-        bump()
-      }
-    }
-    pollTimer = window.setTimeout(tick, 600)
+    // The cycle reports itself (sync.status started…done); signed out it stays
+    // silent, so the request indicator gives up after a while.
+    window.clearTimeout(requestTimer)
+    requestTimer = window.setTimeout(() => {
+      syncRequested.value = false
+      void loadSync()
+    }, 15000)
     return ''
   }
-  const syncing = computed(() => syncRequested.value || !!sync.value?.running)
+  /** Applies one sync.status step; a finished cycle refreshes status and counts. */
+  async function onSyncStatus(p: SyncProgress | null) {
+    syncRequested.value = false
+    window.clearTimeout(requestTimer)
+    if (p && (p.state === 'started' || p.state === 'progress')) {
+      progress.value = p
+      return
+    }
+    progress.value = null
+    void loadRepos() // unread badge, per-project last sync
+    const wasSignedIn = sync.value?.signedIn
+    await loadSync()
+    if (sync.value && sync.value.signedIn !== wasSignedIn) await loadAuth()
+  }
+  const syncing = computed(() => syncRequested.value || !!progress.value || !!sync.value?.running)
 
   // --- data
   const repos = ref<Repo[]>([])
@@ -137,11 +145,21 @@ export const useAppStore = defineStore('app', () => {
   /** Signed out but earlier data is still in the local database. */
   const offlineData = computed(() => authLoaded.value && !githubConnected.value && repos.value.length > 0)
 
-  /** Bumped when live data changed; views watch it and refetch. */
+  /**
+   * Bumped when stored data changed (data.changed, auth.changed, SSE reconnect);
+   * every view watches it and refetches quietly, keeping selection, filters and scroll.
+   */
   const dataVersion = ref(0)
   function bump() {
+    window.clearTimeout(invalidateTimer)
     dataVersion.value++
     void loadRepos()
+  }
+  let invalidateTimer: number | undefined
+  /** Debounced bump: a burst of changes (sync of many projects) refetches once. */
+  function invalidate() {
+    window.clearTimeout(invalidateTimer)
+    invalidateTimer = window.setTimeout(bump, 300)
   }
 
   const activity = ref<ActivityEntry[]>([])
@@ -173,6 +191,8 @@ export const useAppStore = defineStore('app', () => {
     loadSync,
     syncNow,
     syncing,
+    progress,
+    onSyncStatus,
     repos,
     reposLoaded,
     reposAvailable,
@@ -182,6 +202,7 @@ export const useAppStore = defineStore('app', () => {
     offlineData,
     dataVersion,
     bump,
+    invalidate,
     activity,
     pushActivity,
     init,

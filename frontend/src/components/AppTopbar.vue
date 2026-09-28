@@ -24,6 +24,8 @@ type Tone = 'ok' | 'busy' | 'warn' | 'error' | 'off'
 const status = computed<{ tone: Tone; text: string }>(() => {
   const s = app.sync
   if (!app.githubConnected) return { tone: 'off', text: t('topbar.notConnected') }
+  const p = app.progress
+  if (p && p.total > 0) return { tone: 'busy', text: t('topbar.syncProgress', { done: p.done, total: p.total }) }
   if (app.syncing) return { tone: 'busy', text: t('topbar.syncing') }
   if (!s) return { tone: 'off', text: t('topbar.syncUnavailable') }
   if (s.rateLimitedUntil) return { tone: 'warn', text: t('topbar.rateLimited') }
@@ -78,6 +80,12 @@ const accountItems = computed(() => [
         <div class="sync-pop">
           <div class="row">
             <span class="muted">GitHub</span><span>{{ app.githubConnected ? '@' + app.github?.login : t('topbar.notConnectedLower') }}</span>
+          </div>
+          <div
+            v-if="app.progress?.repo"
+            class="row"
+          >
+            <span class="muted">{{ t('topbar.current') }}</span><span class="mono">{{ app.progress.repo }}</span>
           </div>
           <div class="row">
             <span class="muted">{{ t('topbar.lastSync') }}</span><span>{{ absTime(app.sync?.lastSync) || t('common.never') }}</span>

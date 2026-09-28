@@ -106,6 +106,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Store != nil && opts.Sync != nil {
 		s.registerData(mux)
+		opts.Sync.OnProgress(s.syncProgress)
 	}
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", s.spa())

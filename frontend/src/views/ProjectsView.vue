@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -37,6 +37,19 @@ async function onExpand(e: { data: Repo }) {
   const r = await api.stats(id)
   repoStats[id] = r.ok ? r.data : 'error'
 }
+
+// Live data: the list comes from the store (refreshed there); open charts refetch quietly.
+watch(
+  () => app.dataVersion,
+  () => {
+    for (const k of Object.keys(expanded.value)) {
+      const id = Number(k)
+      void api.stats(id).then((r) => {
+        if (r.ok) repoStats[id] = r.data
+      })
+    }
+  },
+)
 
 function chart(repo: Repo, s: Stats) {
   const names = { opened: t('overview.opened'), closed: t('overview.closed') }

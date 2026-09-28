@@ -148,6 +148,7 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	if s.opts.OnUnreadChange != nil {
 		s.opts.OnUnreadChange()
 	}
+	s.dataChanged("read", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -174,6 +175,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 	var rl *provider.RateLimitError
 	switch {
 	case err == nil:
+		s.dataChanged("reply", id)
 		writeJSON(w, http.StatusCreated, c)
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, http.StatusNotFound, "not found")

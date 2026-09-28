@@ -63,6 +63,8 @@ const ru: Messages = {
     openMenu: 'Открыть меню',
     notConnected: 'Не подключено',
     syncing: 'Синхронизация…',
+    syncProgress: 'Синхронизация {done}/{total}…',
+    current: 'Сейчас',
     syncUnavailable: 'Синхронизация недоступна',
     rateLimited: 'Лимит запросов',
     syncError: 'Ошибка синхронизации',

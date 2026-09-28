@@ -62,6 +62,8 @@ const en = {
     openMenu: 'Open menu',
     notConnected: 'Not connected',
     syncing: 'Syncing…',
+    syncProgress: 'Syncing {done}/{total}…',
+    current: 'Now syncing',
     syncUnavailable: 'Sync unavailable',
     rateLimited: 'Rate limited',
     syncError: 'Sync error',

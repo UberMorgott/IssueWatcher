@@ -100,7 +100,8 @@ JSON over the loopback server; session cookie or bearer required (except the Git
 - `POST /api/items/{id}/comments {body}` → 201 comment; 400 empty, 404, 409 not signed in, 429 rate limited, 502 GitHub error.
 - `GET /api/stats?project=&weeks=` → `{open, closed, weekly:[{start, opened, closed}], projects?}` (Monday-start UTC weeks, default 26; `projects` = per-project totals when `project` omitted).
 - `GET /api/sync` → `{running, signedIn, lastSync, lastError, rateLimitedUntil, interval}`; `POST /api/sync` → 202.
-- `GET /api/events` (SSE, owned by the SPA/tray side, `internal/api/events.go`): `item.new`, `comment.new`, `item.closed` `{id, repo, number, title, actor?, body?}`, `sync.status`, `auth.changed {provider, state, login}`, `navigate {path}`.
+- `GET /api/events` (SSE, owned by the SPA/tray side, `internal/api/events.go`): `item.new`, `comment.new`, `item.closed` `{id, repo, number, title, actor?, body?}`, `sync.status {state: started|progress|done|error, repo?, done, total, changed, unread, error?}` (every cycle, first/silent sync included), `data.changed {reason: sync|read|reply, itemId?, repo?}` (any write that changes items, comments, projects or read state), `auth.changed {provider, state, login}`, `navigate {path}`.
+- SPA reactivity: one store (`frontend/src/stores/app.ts`) turns `data.changed` / `auth.changed` / item events into a debounced (300 ms) `dataVersion` bump; every view refetches quietly on it (no loading overlay; selection, filters, scroll kept). SSE reconnect = full refetch. The top bar shows `sync.status` progress (project N/M).
 ## Domain
 
 - `Source` — connected account on a platform (github:UberMorgott). Tokens stored in `data\`.
