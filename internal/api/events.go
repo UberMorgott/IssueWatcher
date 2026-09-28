@@ -65,9 +65,29 @@ type hub struct {
 	mu      sync.Mutex
 	seq     uint64
 	clients map[chan sseMsg]uint64 // → connect order; the highest is the active tab
+	joined  chan struct{}           // signalled (non-blocking) on every subscribe
 }
 
-func newHub() *hub { return &hub{clients: map[chan sseMsg]uint64{}} }
+func newHub() *hub { return &hub{clients: map[chan sseMsg]uint64{}, joined: make(chan struct{}, 1)} }
+
+// waitClient reports whether a client is connected now or connects within d.
+func (h *hub) waitClient(d time.Duration) bool {
+	if h.count() > 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for {
+		select {
+		case <-h.joined:
+			if h.count() > 0 {
+				return true
+			}
+		case <-t.C:
+			return h.count() > 0
+		}
+	}
+}
 
 func (h *hub) subscribe() chan sseMsg {
 	ch := make(chan sseMsg, sseBuffer)
@@ -75,6 +95,10 @@ func (h *hub) subscribe() chan sseMsg {
 	h.seq++
 	h.clients[ch] = h.seq
 	h.mu.Unlock()
+	select {
+	case h.joined <- struct{}{}:
+	default:
+	}
 	return ch
 }
 

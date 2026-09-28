@@ -83,6 +83,27 @@ func (s *Server) OpenBrowser(next string) {
 	s.launchLocked(next)
 }
 
+// StartGrace is how long a start waits for a tab of the previous run to
+// reconnect before opening a new one. The SPA retries its event stream at
+// least every 2.5 s while the app is down, so an open tab is back within it.
+const StartGrace = 3 * time.Second
+
+// OpenOnStart shows the dashboard at next when the app starts, unless a tab
+// of the previous run reconnects within grace: after a restart the open tab
+// comes back by itself (same port, persistent session), and a new tab then
+// would be a duplicate. A reconnected tab is steered to next unless next is
+// "/" (it keeps its page). Blocks up to grace.
+func (s *Server) OpenOnStart(next string, grace time.Duration) {
+	if s.hub.waitClient(grace) {
+		s.opts.Log.Info("api: dashboard tab reconnected on start; not opening a new tab", "path", next)
+		if next != "/" {
+			s.navigate(next)
+		}
+		return
+	}
+	s.OpenBrowser(next)
+}
+
 // launchLocked opens a new tab at next and waits for it to connect. o.mu held.
 func (s *Server) launchLocked(next string) {
 	o := &s.opener

@@ -204,3 +204,26 @@ func TestNavigateTargetsActiveTabOnly(t *testing.T) {
 	}
 	noOpen(t, opened, 50*time.Millisecond)
 }
+
+// After a restart the open tab reconnects by itself: the start must not open
+// a duplicate tab while it does, and opens one only when nothing comes back.
+func TestOpenOnStartWaitsForReconnect(t *testing.T) {
+	s, opened, rec := newOpenServer(t, time.Minute)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		openStream(t, s) // the old tab's EventSource retry
+	}()
+	s.OpenOnStart("/", time.Second)
+	noOpen(t, opened, 50*time.Millisecond)
+	if !slices.Contains(rec.all(), "api: dashboard tab reconnected on start; not opening a new tab") {
+		t.Fatalf("decision not logged: %q", rec.all())
+	}
+
+	s2, opened2, _ := newOpenServer(t, time.Minute)
+	start := time.Now()
+	s2.OpenOnStart("/", 200*time.Millisecond)
+	mustOpen(t, s2, opened2, "/")
+	if d := time.Since(start); d < 200*time.Millisecond {
+		t.Fatalf("opened after %s, before the grace ended", d)
+	}
+}

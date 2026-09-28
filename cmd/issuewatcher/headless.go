@@ -46,7 +46,7 @@ func runHeadless(syncCtx context.Context, log *slog.Logger, srv *api.Server, sta
 	go func() { done <- srv.Serve() }()
 	startSync()
 	if startPath != "" {
-		srv.OpenBrowser(startPath) // logs the launch URL (browser opening is suppressed)
+		go srv.OpenOnStart(startPath, api.StartGrace) // logs the launch URL (browser opening is suppressed)
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)

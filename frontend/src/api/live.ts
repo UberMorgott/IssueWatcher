@@ -18,7 +18,9 @@ export type LiveEventName = (typeof LIVE_EVENTS)[number]
 export type LiveHandler = (name: LiveEventName, data: unknown) => void
 
 const MIN_DELAY = 1000
-const MAX_DELAY = 30000
+// Loopback only: retrying is free, and a tab must be back within the app's
+// start grace (internal/api StartGrace, 3 s) so a restart opens no duplicate tab.
+const MAX_DELAY = 2500
 
 /** True while the event stream is open. */
 export const liveConnected = ref(false)
@@ -32,7 +34,7 @@ export function expectRestart(ms = 90000) {
 
 /**
  * Connects to the SSE stream and keeps it connected: on error the source is
- * closed and reopened with exponential backoff (1 s → 30 s, reset on open).
+ * closed and reopened with exponential backoff (1 s → 2.5 s, reset on open).
  * `onReconnect` fires after a reconnect so pages can reload what they missed.
  */
 export function connectLive(handler: LiveHandler, onReconnect: () => void): () => void {

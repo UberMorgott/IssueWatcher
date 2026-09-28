@@ -385,7 +385,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		if startPath == "" {
 			log.Info("started minimized: dashboard not opened", "after_update", l.afterUpdate > 0)
 		} else {
-			srv.OpenBrowser(startPath)
+			go srv.OpenOnStart(startPath, api.StartGrace) // a tab of the previous run may reconnect
 		}
 		if os.Getenv(envDemo) == "1" {
 			go runDemo(log, t, setBadge)
