@@ -121,7 +121,7 @@ function askReset() {
 
 <style scoped>
 .path {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
   color: var(--iw-muted);
   overflow-wrap: anywhere;
   text-align: right;

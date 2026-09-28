@@ -57,7 +57,7 @@ defineProps<{ title: string; text?: string; stack?: boolean }>()
 
 .text {
   margin-top: 2px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 

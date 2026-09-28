@@ -47,7 +47,7 @@ func (a *appSettings) doc(s config.Settings) api.SettingsDoc {
 		Settings: s,
 		Info: api.SettingsInfo{
 			DataDir: a.dataDir, ConfigFile: filepath.Join(a.dataDir, config.File), Version: a.version, Exe: a.exe,
-			SyncPresets: config.Presets(),
+			SyncPresets: config.Presets(), Palettes: config.Palettes(),
 		},
 	}
 }

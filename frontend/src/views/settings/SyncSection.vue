@@ -137,7 +137,7 @@ function setField(key: keyof ProviderSync, v: number | null) {
 <style scoped>
 .hint {
   margin: 12px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 

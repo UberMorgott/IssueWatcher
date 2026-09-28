@@ -19,7 +19,7 @@ import (
 type cfgStore struct{ s *config.Store }
 
 func (c cfgStore) doc(s config.Settings) SettingsDoc {
-	return SettingsDoc{Revision: s.Revision, Settings: s, Info: SettingsInfo{SyncPresets: config.Presets()}}
+	return SettingsDoc{Revision: s.Revision, Settings: s, Info: SettingsInfo{SyncPresets: config.Presets(), Palettes: config.Palettes()}}
 }
 func (c cfgStore) Settings() (SettingsDoc, error) { return c.doc(c.s.Get()), nil }
 func (c cfgStore) PatchSettings(rev int, p json.RawMessage) (SettingsDoc, error) {

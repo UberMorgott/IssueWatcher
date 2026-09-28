@@ -343,7 +343,7 @@ function disconnect() {
 }
 
 .name {
-  font-size: 18px;
+  font-size: calc(18px * var(--iw-fs, 1));
   font-weight: 650;
 }
 
@@ -351,7 +351,7 @@ function disconnect() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
@@ -413,14 +413,14 @@ function disconnect() {
 }
 
 .small {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 .facts {
   display: flex;
   gap: 20px;
   color: var(--iw-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .facts b {

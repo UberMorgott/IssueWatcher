@@ -26,13 +26,6 @@ func (s Settings) Validate() error {
 	return s.Projects.validate()
 }
 
-func (a Appearance) validate() error {
-	if !slices.Contains([]string{"dark", "light", "system"}, a.Mode) {
-		return notOneOf("appearance.mode", "dark", "light", "system")
-	}
-	return nil
-}
-
 func (n Notifications) validate() error {
 	for field, v := range map[string]string{"notifications.quiet.from": n.Quiet.From, "notifications.quiet.to": n.Quiet.To} {
 		if !hhmm.MatchString(v) {

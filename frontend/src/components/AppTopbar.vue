@@ -214,7 +214,7 @@ const accountItems = computed(() => [
 
 .topbar-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--iw-fs, 1));
   font-weight: 600;
 }
 
@@ -241,7 +241,7 @@ const accountItems = computed(() => [
 }
 
 .crumbs .sep {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
 }
 
@@ -264,7 +264,7 @@ const accountItems = computed(() => [
   background: var(--iw-surface);
   color: var(--iw-muted);
   font: inherit;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
   font-weight: 500;
   cursor: pointer;
   transition: border-color 140ms ease;
@@ -308,7 +308,7 @@ const accountItems = computed(() => [
   flex-direction: column;
   gap: 8px;
   min-width: 260px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .sync-pop .row {

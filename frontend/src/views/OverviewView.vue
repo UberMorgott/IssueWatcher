@@ -402,7 +402,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 }
 
 .more {
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   font-weight: 500;
 }
 
@@ -435,7 +435,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 
 .row-icon {
   margin-top: 3px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
@@ -461,7 +461,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 }
 
 .row-meta {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
@@ -469,7 +469,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-success);
 }
 
@@ -498,7 +498,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 }
 
 .ps-text {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 .platform-soon .phase-badge {

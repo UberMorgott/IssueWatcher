@@ -350,7 +350,7 @@ const shortcuts = computed(() => [
   align-items: center;
   gap: 8px;
   padding: 8px var(--iw-gutter);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-warn);
   background: var(--iw-warn-soft);
   border-bottom: 1px solid var(--iw-border);
@@ -395,7 +395,7 @@ const shortcuts = computed(() => [
 }
 
 .live-detail {
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -433,12 +433,12 @@ const shortcuts = computed(() => [
 }
 
 .superseded-card i {
-  font-size: 24px;
+  font-size: calc(24px * var(--iw-fs, 1));
   color: var(--iw-primary);
 }
 
 .superseded-card h2 {
-  font-size: 18px;
+  font-size: calc(18px * var(--iw-fs, 1));
   font-weight: 600;
 }
 
@@ -462,7 +462,7 @@ kbd {
   border-radius: 6px;
   border: 1px solid var(--iw-border-strong);
   background: var(--iw-elevated);
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
 }
 
 @media (width <= 899px) {

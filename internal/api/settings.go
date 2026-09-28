@@ -19,6 +19,8 @@ type SettingsInfo struct {
 	Exe        string `json:"exe"`
 	// SyncPresets are the fixed plans behind the balanced and fast sync modes.
 	SyncPresets map[string]config.ProviderSync `json:"syncPresets"`
+	// Palettes are the colour presets (Appearance).
+	Palettes []config.Palette `json:"palettes"`
 }
 
 // SettingsDoc is GET /api/settings and every successful PATCH.

@@ -110,7 +110,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   margin-bottom: 12px;
   color: var(--iw-text);
   font-weight: 650;
-  font-size: 16px;
+  font-size: calc(16px * var(--iw-fs, 1));
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -158,7 +158,7 @@ const active = (match: string[]) => match.includes(String(route.name))
 
 .nav-item i,
 .collapse i {
-  font-size: 16px;
+  font-size: calc(16px * var(--iw-fs, 1));
   width: 20px;
   text-align: center;
   flex: none;
@@ -195,7 +195,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   min-width: 22px;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
   font-weight: 600;
   text-align: center;
   color: var(--iw-on-primary);
@@ -204,7 +204,7 @@ const active = (match: string[]) => match.includes(String(route.name))
 
 .nav-soon {
   margin-left: auto;
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
 }
 
@@ -221,7 +221,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   right: 2px;
   min-width: 0;
   padding: 0 5px;
-  font-size: 10px;
+  font-size: calc(10px * var(--iw-fs, 1));
 }
 
 .foot {
@@ -233,7 +233,7 @@ const active = (match: string[]) => match.includes(String(route.name))
 
 .version {
   padding: 0 12px;
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
 }
 </style>

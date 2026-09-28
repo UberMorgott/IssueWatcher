@@ -49,17 +49,17 @@ defineProps<{ icon: string; title: string; text?: string; compact?: boolean }>()
   border-radius: 14px;
   background: var(--iw-elevated);
   color: var(--iw-muted);
-  font-size: 20px;
+  font-size: calc(20px * var(--iw-fs, 1));
 }
 
 .compact .empty-icon {
   width: 36px;
   height: 36px;
-  font-size: 15px;
+  font-size: calc(15px * var(--iw-fs, 1));
 }
 
 .empty-title {
-  font-size: 15px;
+  font-size: calc(15px * var(--iw-fs, 1));
   font-weight: 600;
 }
 

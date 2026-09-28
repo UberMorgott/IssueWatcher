@@ -43,7 +43,7 @@ const { t } = useI18n()
   margin: 0 0 12px;
   padding-left: 20px;
   color: var(--iw-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .go {

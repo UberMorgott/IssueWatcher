@@ -385,7 +385,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 }
 
 .title {
-  font-size: 26px;
+  font-size: calc(26px * var(--iw-fs, 1));
   line-height: 32px;
   font-weight: 650;
   letter-spacing: -0.01em;
@@ -422,7 +422,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   background: var(--iw-elevated);
   border-bottom: 1px solid var(--iw-border);
 }
@@ -433,7 +433,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: calc(10px * var(--iw-fs, 1));
   font-weight: 700;
   background: var(--iw-hover);
   object-fit: cover;
@@ -443,7 +443,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 .you-tag {
   padding: 0 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
   border: 1px solid var(--iw-border-strong);
   color: var(--iw-muted);
 }
@@ -495,7 +495,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 }
 
 .count {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
 }
 
 .meta {
@@ -516,7 +516,7 @@ dl {
 
 dt {
   margin-top: 10px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--iw-fs, 1));
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -532,7 +532,7 @@ dd {
 }
 
 .small {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
 }
 
 .src {

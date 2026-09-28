@@ -123,7 +123,7 @@ const steps = computed(() => [
 }
 
 .hero-title {
-  font-size: 26px;
+  font-size: calc(26px * var(--iw-fs, 1));
   line-height: 32px;
   font-weight: 650;
   letter-spacing: -0.01em;
@@ -133,7 +133,7 @@ const steps = computed(() => [
   margin: 0;
   max-width: 560px;
   color: var(--iw-muted);
-  font-size: 15px;
+  font-size: calc(15px * var(--iw-fs, 1));
 }
 
 .hero-actions {
@@ -191,7 +191,7 @@ const steps = computed(() => [
   flex: none;
   border-radius: 50%;
   font-weight: 700;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-primary);
   background: var(--iw-primary-soft);
 }
@@ -205,11 +205,11 @@ const steps = computed(() => [
 
 .step-title i {
   color: var(--iw-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .step-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 

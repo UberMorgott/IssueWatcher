@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image/color"
 	"strconv"
 	"strings"
 	"time"
@@ -62,10 +63,39 @@ func liveFilter(n config.Notifications) notify.Prefs {
 	return p
 }
 
-// popupTheme follows the dashboard's theme mode (system → dark).
+// popupTheme gives the popups the dashboard's colours: the effective palette
+// of the current mode (system → dark), with the same derivations the UI uses
+// (frontend/src/lib/appearance.ts tokens).
 func popupTheme(a config.Appearance) notify.Theme {
+	mode := "dark"
 	if a.Mode == "light" {
-		return notify.LightTheme()
+		mode = "light"
 	}
-	return notify.DarkTheme()
+	c := a.Effective(mode)
+	base := notify.DarkTheme()
+	if mode == "light" {
+		base = notify.LightTheme()
+	}
+	bg, text := hexColor(c.Surface), hexColor(c.Text)
+	return notify.Theme{
+		Bg:      mix(bg, text, 0.06),
+		Surface: mix(bg, text, 0.14),
+		Border:  mix(bg, text, 0.22),
+		Text:    text,
+		Muted:   mix(text, bg, 0.38),
+		Accent:  hexColor(c.Accent),
+		Success: base.Success,
+		Shadow:  base.Shadow,
+	}
+}
+
+func hexColor(h string) color.NRGBA {
+	v, _ := strconv.ParseUint(strings.TrimPrefix(h, "#"), 16, 32)
+	return color.NRGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 0xff} //nolint:gosec // G115: masked 8-bit channels
+}
+
+// mix moves a towards b by w (0..1).
+func mix(a, b color.NRGBA, w float64) color.NRGBA {
+	f := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*w + 0.5) }
+	return color.NRGBA{R: f(a.R, b.R), G: f(a.G, b.G), B: f(a.B, b.B), A: 0xff}
 }

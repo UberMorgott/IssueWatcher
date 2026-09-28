@@ -171,7 +171,7 @@ const { t } = useI18n()
 
 .state-icon {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: calc(14px * var(--iw-fs, 1));
 }
 
 .state-icon.open {
@@ -207,7 +207,7 @@ const { t } = useI18n()
 }
 
 .t-meta {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -241,7 +241,7 @@ const { t } = useI18n()
 }
 
 .l-more {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 

@@ -29,7 +29,7 @@ export const useSettingsStore = defineStore('settings', () => {
     doc.value = d
     const s = d.settings
     if (s.general.language !== lang()) setLang(s.general.language)
-    applyAppearance(s.appearance)
+    applyAppearance(s.appearance, d.info?.palettes ?? [])
   }
 
   async function load() {

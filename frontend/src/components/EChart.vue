@@ -4,7 +4,7 @@ import { init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
 import { BarChart, LineChart, PieChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { SVGRenderer } from 'echarts/renderers'
-import { useAppStore } from '../stores/app'
+import { themeVersion } from '../lib/appearance'
 
 use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, SVGRenderer])
 
@@ -20,7 +20,6 @@ export interface ChartTheme {
 
 const props = defineProps<{ option: (t: ChartTheme) => EChartsCoreOption; height?: string; label: string }>()
 const el = ref<HTMLDivElement>()
-const app = useAppStore()
 let chart: ECharts | undefined
 let ro: ResizeObserver | undefined
 
@@ -51,7 +50,8 @@ onMounted(() => {
 })
 
 watch(() => props.option, render)
-watch(() => app.theme, () => requestAnimationFrame(render))
+// Palette, mode or custom colours changed: re-read the tokens.
+watch(themeVersion, () => requestAnimationFrame(render))
 
 onBeforeUnmount(() => {
   ro?.disconnect()

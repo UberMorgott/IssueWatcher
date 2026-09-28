@@ -20,7 +20,7 @@ const hue = computed(() => labelHue(props.name))
   max-width: 160px;
   padding: 1px 8px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--iw-fs, 1));
   font-weight: 500;
   line-height: 18px;
   white-space: nowrap;

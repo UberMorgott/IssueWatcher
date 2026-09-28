@@ -435,7 +435,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 }
 
 .owner {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
 }
 
@@ -468,7 +468,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
   padding: 1px 8px;
   border-radius: 999px;
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 600;
   color: var(--iw-on-primary);
   background: var(--iw-primary);
@@ -488,7 +488,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-text);
 }
 
@@ -497,7 +497,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
   align-items: center;
   gap: 6px;
   color: var(--iw-dimmed);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .expansion {
@@ -515,19 +515,19 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 }
 
 .exp-label {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--iw-fs, 1));
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--iw-dimmed);
 }
 
 .exp-val {
-  font-size: 20px;
+  font-size: calc(20px * var(--iw-fs, 1));
   font-weight: 650;
 }
 
 :deep(.iw-projects .p-datatable-thead > tr > th) {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;

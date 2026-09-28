@@ -172,7 +172,7 @@ export interface Settings {
   schemaVersion: number
   revision: number
   general: { language: 'ru' | 'en'; startWithWindows: boolean; startMinimized: boolean }
-  appearance: { mode: ThemeMode }
+  appearance: Appearance
   notifications: {
     enabled: boolean
     newIssue: boolean
@@ -189,6 +189,31 @@ export interface Settings {
 }
 
 export type ThemeMode = 'dark' | 'light' | 'system'
+
+/** Four base colours of one theme mode (#rrggbb); the UI derives the rest. */
+export interface Colors {
+  accent: string
+  background: string
+  surface: string
+  text: string
+}
+
+/** A colour preset: a dark and a light variant (GET /api/settings info.palettes). */
+export interface Palette {
+  id: string
+  dark: Colors
+  light: Colors
+}
+
+export interface Appearance {
+  mode: ThemeMode
+  paletteId: string
+  /** Per-mode overrides of the palette; empty = palette colour. */
+  custom: { dark: Colors; light: Colors }
+  fontFamily: 'inter' | 'segoe' | 'system' | 'mono'
+  fontScale: number
+  density: 'compact' | 'comfortable' | 'spacious'
+}
 export type SyncMode = 'balanced' | 'fast' | 'custom'
 
 export interface ProviderSync {
@@ -203,7 +228,7 @@ export interface ProviderSync {
 export interface SettingsDoc {
   revision: number
   settings: Settings
-  info: { dataDir: string; configFile: string; version: string; exe: string; syncPresets: Record<string, ProviderSync> }
+  info: { dataDir: string; configFile: string; version: string; exe: string; syncPresets: Record<string, ProviderSync>; palettes: Palette[] }
 }
 
 type DeepPartial<T> = T extends unknown[] ? T : T extends object ? { [K in keyof T]?: DeepPartial<T[K]> } : T

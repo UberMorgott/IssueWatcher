@@ -46,7 +46,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 500;
   color: var(--iw-muted);
   text-transform: uppercase;
@@ -59,7 +59,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .primary .stat-icon {
@@ -83,7 +83,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
 }
 
 .stat-value {
-  font-size: 32px;
+  font-size: calc(32px * var(--iw-fs, 1));
   line-height: 38px;
   font-weight: 650;
   font-family: var(--iw-font);
@@ -100,7 +100,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
 }
 
 .stat-hint {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 

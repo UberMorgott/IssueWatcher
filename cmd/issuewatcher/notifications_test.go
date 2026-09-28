@@ -52,3 +52,16 @@ func TestGroupRepeatsKeepsLastPerItem(t *testing.T) {
 		t.Fatalf("grouped %+v", got)
 	}
 }
+
+func TestPopupThemeFollowsPalette(t *testing.T) {
+	a := config.Defaults().Appearance
+	a.PaletteID, a.Mode = "rose", "light"
+	th := popupTheme(a)
+	if th.Accent != hexColor("#b12d5c") || th.Text != hexColor("#2a161f") {
+		t.Fatalf("light rose: %+v", th)
+	}
+	a.Mode = "system"
+	if popupTheme(a).Accent != hexColor("#f27fa9") {
+		t.Fatal("system mode must use the dark palette")
+	}
+}

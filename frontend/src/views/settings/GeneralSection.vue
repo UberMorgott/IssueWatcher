@@ -68,7 +68,7 @@ const langs = computed(() => LANGS.map((l) => ({ label: t('lang.' + l), value: l
 <style scoped>
 .hint {
   margin: 12px 0 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 </style>

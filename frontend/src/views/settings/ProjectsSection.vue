@@ -303,7 +303,7 @@ async function acceptAll() {
 <style scoped>
 .hint {
   margin: 8px 0;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
@@ -315,7 +315,7 @@ async function acceptAll() {
 }
 
 .path {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
   overflow-wrap: anywhere;
 }
 
@@ -344,7 +344,7 @@ async function acceptAll() {
   color: inherit;
   cursor: pointer;
   padding: 0 2px;
-  font-size: 10px;
+  font-size: calc(10px * var(--iw-fs, 1));
 }
 
 .sugg {
@@ -398,7 +398,7 @@ async function acceptAll() {
 
 .status {
   flex: none;
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
 }
 
 :deep(.num-input) {

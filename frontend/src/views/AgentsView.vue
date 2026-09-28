@@ -160,7 +160,7 @@ const prompts = computed(() => [
 }
 
 .role {
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -168,13 +168,13 @@ const prompts = computed(() => [
 }
 
 .agent {
-  font-size: 18px;
+  font-size: calc(18px * var(--iw-fs, 1));
   font-weight: 650;
 }
 
 .cli {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 400;
   color: var(--iw-dimmed);
 }
@@ -188,7 +188,7 @@ const prompts = computed(() => [
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 .flow {
@@ -234,7 +234,7 @@ const prompts = computed(() => [
 }
 
 .stage-text {
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
@@ -243,7 +243,7 @@ const prompts = computed(() => [
   right: -14px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 11px;
+  font-size: calc(11px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
 }
 

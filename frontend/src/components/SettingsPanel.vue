@@ -29,7 +29,7 @@ defineProps<{ title: string; text?: string }>()
 
 .intro {
   margin: 4px 0 6px;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 </style>

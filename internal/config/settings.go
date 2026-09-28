@@ -30,9 +30,21 @@ type General struct {
 	StartMinimized bool `json:"startMinimized"`
 }
 
-// Appearance: theme mode (palettes and typography extend it).
+// Appearance: theme mode, palette preset, custom colours per mode, typography.
 type Appearance struct {
-	Mode string `json:"mode"` // dark | light | system
+	Mode      string `json:"mode"`      // dark | light | system
+	PaletteID string `json:"paletteId"` // a Palettes() id
+	// Custom overrides palette colours per mode; empty fields use the palette.
+	Custom     CustomColors `json:"custom"`
+	FontFamily string       `json:"fontFamily"` // inter | segoe | system | mono
+	FontScale  float64      `json:"fontScale"`  // 0.85–1.30
+	Density    string       `json:"density"`    // compact | comfortable | spacious
+}
+
+// CustomColors are the per-mode overrides of the custom editor.
+type CustomColors struct {
+	Dark  Colors `json:"dark"`
+	Light Colors `json:"light"`
 }
 
 // Notifications: which sync events pop up.
@@ -108,7 +120,7 @@ func Defaults() Settings {
 	return Settings{
 		SchemaVersion: SchemaVersion,
 		General:       General{Language: "ru"},
-		Appearance:    Appearance{Mode: "dark"},
+		Appearance:    Appearance{Mode: "dark", PaletteID: "indigo", FontFamily: "inter", FontScale: 1, Density: "comfortable"},
 		Notifications: Notifications{
 			Enabled: true, NewIssue: true, NewComment: true, Closed: true, MutedProjects: []string{},
 			Quiet: QuietHours{From: "22:00", To: "08:00"}, Group: true, AutoHideSeconds: 8,

@@ -13,6 +13,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import IssueRow from '../components/IssueRow.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { rowHeight } from '../lib/appearance'
 import { api } from '../api/client'
 import type { Issue, IssueQuery, IssueRowData as Row } from '../api/types'
 import { useI18n } from 'vue-i18n'
@@ -29,7 +30,8 @@ const toast = useToast()
 // Infinite list: fixed row height (virtual scroller, no layout shift), chunks of
 // CHUNK loaded while the viewport is within ~2 screens of the loaded end. Rows use
 // native title tooltips: a tooltip directive per recycled row costs frames.
-const ROW = 60
+// Row height follows Settings → Appearance (density × text size).
+const ROW = rowHeight
 const CHUNK = 50
 const SKELETON_ROWS = 6
 
@@ -82,11 +84,13 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: rows.value.length,
     getScrollElement: () => scrollEl.value,
-    estimateSize: () => ROW,
+    estimateSize: () => ROW.value,
+    // (re-measured below when the row height setting changes)
     overscan: 10,
     getItemKey: (i: number) => rows.value[i]?.id ?? i,
   })),
 )
+watch(ROW, () => virtualizer.value.measure())
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 let firstVisible = 0
@@ -94,20 +98,20 @@ const newAbove = ref(0)
 watch(virtualRows, (vr) => {
   if (!vr.length) return
   const el = scroller()
-  firstVisible = el ? Math.floor(el.scrollTop / ROW) : vr[0].index
-  const screen = el ? Math.ceil(el.clientHeight / ROW) : 12
+  firstVisible = el ? Math.floor(el.scrollTop / ROW.value) : vr[0].index
+  const screen = el ? Math.ceil(el.clientHeight / ROW.value) : 12
   if (vr[vr.length - 1].index >= items.value.length - 2 * screen) void list.loadMore().then(checkNearEnd)
 })
 function checkNearEnd() {
   const el = scroller()
   if (!el || list.done.value || list.error.value) return
-  const last = Math.floor((el.scrollTop + el.clientHeight) / ROW)
-  const screen = Math.ceil(el.clientHeight / ROW)
+  const last = Math.floor((el.scrollTop + el.clientHeight) / ROW.value)
+  const screen = Math.ceil(el.clientHeight / ROW.value)
   if (last >= items.value.length - 2 * screen) void list.loadMore().then(checkNearEnd)
 }
 function onScroll() {
   const el = scroller()
-  if (el && el.scrollTop < ROW / 2) newAbove.value = 0
+  if (el && el.scrollTop < ROW.value / 2) newAbove.value = 0
 }
 function toTop() {
   scroller()?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -116,10 +120,10 @@ function toTop() {
 /** Keeps the rows under the viewport in place after rows were added/removed above it. */
 async function keepAnchor(deltaRows: number) {
   const el = scroller()
-  if (!el || !deltaRows || el.scrollTop < ROW / 2) return
+  if (!el || !deltaRows || el.scrollTop < ROW.value / 2) return
   const top = el.scrollTop
   await nextTick()
-  el.scrollTop = Math.max(0, top + deltaRows * ROW)
+  el.scrollTop = Math.max(0, top + deltaRows * ROW.value)
 }
 
 function reload() {
@@ -188,7 +192,7 @@ async function refreshLive() {
     }
     const byId = new Map(items.value.map((it) => [it.id, it]))
     selected.value = selected.value.filter((s) => byId.has(s.id)).map((s) => byId.get(s.id) as Issue)
-    if (added && (scroller()?.scrollTop ?? 0) >= ROW / 2) newAbove.value += added
+    if (added && (scroller()?.scrollTop ?? 0) >= ROW.value / 2) newAbove.value += added
     await keepAnchor(added - removedAbove)
   } finally {
     refreshing = false
@@ -562,7 +566,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 18px;
   color: var(--iw-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
 }
 
 .counter {
@@ -632,7 +636,7 @@ onBeforeUnmount(() => {
   height: 44px;
   padding: 0 16px 0 12px;
   border-bottom: 1px solid var(--iw-border);
-  font-size: 12px;
+  font-size: calc(12px * var(--iw-fs, 1));
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -671,7 +675,7 @@ onBeforeUnmount(() => {
 .f-total {
   margin-left: auto;
   color: var(--iw-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   white-space: nowrap;
 }
 
@@ -692,7 +696,7 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 999px;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(13px * var(--iw-fs, 1));
   font-weight: 600;
   color: var(--iw-on-primary);
   background: var(--iw-primary);

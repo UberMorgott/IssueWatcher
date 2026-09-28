@@ -15,6 +15,14 @@
         var m = localStorage.getItem('iw.theme')
         if (m === 'light' || (m === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches))
           document.documentElement.classList.remove('dark')
+        // Last palette / custom colours / font (lib/appearance.ts writes them).
+        var p = JSON.parse(localStorage.getItem('iw.paint') || 'null')
+        if (p && p.tokens && (m !== 'system' || p.dark === document.documentElement.classList.contains('dark'))) {
+          var s = document.documentElement.style
+          for (var k in p.tokens) if (k.indexOf('--iw-') === 0) s.setProperty(k, p.tokens[k])
+          if (p.font) s.setProperty('--iw-font', p.font)
+          if (p.fs) s.setProperty('--iw-fs', String(p.fs))
+        }
       } catch (e) {
         /* storage blocked: keep dark */
       }
