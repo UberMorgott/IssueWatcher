@@ -55,9 +55,14 @@ type Server struct {
 	*httptest.Server
 	Mu sync.Mutex
 
-	Repos     []string // owner/name reachable through installation 1
-	Issues    []*Issue
-	ExpiresIn int // seconds; 0 = non-expiring user tokens
+	Repos        []string // owner/name reachable through installation 1
+	Issues       []*Issue
+	PullRequests []*Issue // listed by the REST issues endpoint only
+	ExpiresIn    int      // seconds; 0 = non-expiring user tokens
+	PollInterval int      // X-Poll-Interval seconds on change checks; 0 = none
+
+	hits Hits
+	fail *failure
 
 	codes      map[string]string // auth code → PKCE challenge
 	access     map[string]bool   // live access tokens
@@ -79,6 +84,8 @@ func New(t *testing.T) *Server {
 	mux.HandleFunc("GET /user/installations", s.authed(s.installations))
 	mux.HandleFunc("GET /user/installations/{id}/repositories", s.authed(s.repositories))
 	mux.HandleFunc("POST /graphql", s.authed(s.graphql))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/issues", s.authed(s.restIssues))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/comments", s.authed(s.restComments))
 	s.Server = httptest.NewServer(mux)
 	t.Cleanup(s.Close)
 	return s
@@ -250,7 +257,13 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
+	s.hits.GraphQL++
+	if s.injected(w) {
+		return
+	}
 	switch {
+	case strings.Contains(req.Query, "issue(number:"):
+		s.issuesByNumber(w, req.Query, req.Variables)
 	case strings.Contains(req.Query, "addComment"):
 		s.addComment(w, req.Variables)
 	case strings.Contains(req.Query, "repository("):

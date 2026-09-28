@@ -126,6 +126,20 @@ export interface SyncStatus {
   lastError: string
   rateLimitedUntil: string
   interval: string
+  /** Tiered sync (internal/syncer Status). */
+  lastCheck?: string
+  mode?: string
+  activeEvery?: string
+  idleEvery?: string
+  reconcileEvery?: string
+  nextReconcile?: string
+  projects?: number
+  activeProjects?: number
+  budget?: number
+  budgetUsed?: number
+  checks?: number
+  notModified?: number
+  rate?: { limit: number; remaining: number; reset: string }
 }
 
 /** sync.status live event: one step of a sync cycle (internal/syncer Progress). */

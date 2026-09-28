@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type client struct {
 	now  func() time.Time
 
 	mu        sync.Mutex
+	limit     int
 	remaining int
 	reset     time.Time
 	known     bool
@@ -46,9 +48,20 @@ func (c *client) track(h http.Header) {
 	if err1 != nil || err2 != nil {
 		return
 	}
+	limit, _ := strconv.Atoi(h.Get("X-RateLimit-Limit"))
 	c.mu.Lock()
 	c.remaining, c.reset, c.known = rem, time.Unix(reset, 0), true
+	if limit > 0 {
+		c.limit = limit
+	}
 	c.mu.Unlock()
+}
+
+// rate is the last reported quota.
+func (c *client) rate() (provider.RateStatus, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return provider.RateStatus{Limit: c.limit, Remaining: c.remaining, Reset: c.reset}, c.known
 }
 
 // do sends an authenticated JSON request. reserve is the quota to keep back
@@ -89,21 +102,34 @@ func (c *client) do(ctx context.Context, method, u string, in, out any, reserve 
 	if err != nil {
 		return err
 	}
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized:
-		_ = c.auth.Logout() // revoked or expired beyond refresh
-		return fmt.Errorf("%w: %s", provider.ErrNotSignedIn, resp.Status)
-	case resp.StatusCode == http.StatusTooManyRequests ||
-		(resp.StatusCode == http.StatusForbidden && (resp.Header.Get("Retry-After") != "" || resp.Header.Get("X-RateLimit-Remaining") == "0")):
-		return &provider.RateLimitError{Reset: c.retryAt(resp.Header)}
-	case resp.StatusCode < 200 || resp.StatusCode > 299:
-		return fmt.Errorf("github: %s %s: %s: %s", method, req.URL.Path, resp.Status, truncate(string(data), 300))
+	if err := c.status(resp, data, req); err != nil {
+		return err
 	}
 	if out == nil {
 		return nil
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("github: decode %s: %w", req.URL.Path, err)
+	}
+	return nil
+}
+
+// status maps an error response: 401 signs out, 429/403 rate limits (primary
+// or secondary), anything else non-2xx is an error.
+func (c *client) status(resp *http.Response, data []byte, req *http.Request) error {
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		_ = c.auth.Logout() // revoked or expired beyond refresh
+		return fmt.Errorf("%w: %s", provider.ErrNotSignedIn, resp.Status)
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden:
+		secondary := strings.Contains(strings.ToLower(string(data)), "secondary rate limit")
+		if resp.StatusCode == http.StatusTooManyRequests || secondary ||
+			resp.Header.Get("Retry-After") != "" || resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			return &provider.RateLimitError{Reset: c.retryAt(resp.Header), Secondary: secondary || resp.Header.Get("X-RateLimit-Remaining") != "0"}
+		}
+		return fmt.Errorf("github: %s %s: %s: %s", req.Method, req.URL.Path, resp.Status, truncate(string(data), 300))
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return fmt.Errorf("github: %s %s: %s: %s", req.Method, req.URL.Path, resp.Status, truncate(string(data), 300))
 	}
 	return nil
 }
@@ -145,4 +171,57 @@ func (c *client) graphql(ctx context.Context, query string, vars map[string]any,
 		return fmt.Errorf("github graphql: decode: %w", err)
 	}
 	return nil
+}
+
+// condResult is a conditional GET's answer.
+type condResult struct {
+	notModified  bool
+	etag         string
+	body         []byte
+	pollInterval time.Duration // X-Poll-Interval
+}
+
+// conditional GETs u with If-None-Match: etag. A 304 has no body and, for an
+// authenticated request, does not count against the primary rate limit.
+func (c *client) conditional(ctx context.Context, u, etag string) (condResult, error) {
+	var res condResult
+	if err := c.checkQuota(minRemaining); err != nil {
+		return res, err
+	}
+	token, err := c.auth.AccessToken(ctx)
+	if err != nil {
+		return res, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return res, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("Authorization", "Bearer "+token)
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.track(resp.Header)
+	if s, err := strconv.Atoi(resp.Header.Get("X-Poll-Interval")); err == nil && s > 0 {
+		res.pollInterval = time.Duration(s) * time.Second
+	}
+	if resp.StatusCode == http.StatusNotModified {
+		res.notModified = true
+		return res, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return res, err
+	}
+	if err := c.status(resp, data, req); err != nil {
+		return res, err
+	}
+	res.etag, res.body = resp.Header.Get("ETag"), data
+	return res, nil
 }

@@ -34,6 +34,9 @@ func (p *Provider) Capabilities() provider.Capabilities {
 	}
 }
 
+// RateStatus implements provider.RateReporter.
+func (p *Provider) RateStatus() (provider.RateStatus, bool) { return p.c.rate() }
+
 // Account implements provider.Provider.
 func (p *Provider) Account(ctx context.Context) (string, error) {
 	if _, err := p.auth.AccessToken(ctx); err != nil {
@@ -93,18 +96,19 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 const commentFields = `pageInfo { hasNextPage endCursor }
       nodes { id body url createdAt updatedAt author { login } }`
 
+// issueFields is one issue with labels and its first comment page.
+const issueFields = `id number title body url state stateReason createdAt updatedAt closedAt
+        author { login }
+        labels(first: 50) { nodes { name } }
+        comments(first: 100) { ` + commentFields + ` }`
+
 // issuesQuery pages issues (pull requests are a separate connection, so none
 // appear here) updated since $since, oldest update first.
 const issuesQuery = `query($owner: String!, $name: String!, $since: DateTime, $after: String) {
   repository(owner: $owner, name: $name) {
     issues(first: 50, after: $after, orderBy: {field: UPDATED_AT, direction: ASC}, filterBy: {since: $since}) {
       pageInfo { hasNextPage endCursor }
-      nodes {
-        id number title body url state stateReason createdAt updatedAt closedAt
-        author { login }
-        labels(first: 50) { nodes { name } }
-        comments(first: 100) { ` + commentFields + ` }
-      }
+      nodes { ` + issueFields + ` }
     }
   }
 }`

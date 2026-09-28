@@ -1,5 +1,11 @@
-// Package syncer polls a provider into the store and reports changes
-// (new issue, new comment, issue closed) plus the unread count for the tray.
+// Package syncer keeps the store in step with the providers and reports
+// changes (new issue, new comment, issue closed) plus the unread count.
+//
+// Tiered sync: a full reconcile (list projects, re-read every project's items
+// since its cursor) runs on start, on demand and every Plan.Reconcile; between
+// reconciles every project gets a cheap change check (provider.Poller) every
+// Plan.Active (recently active projects) or Plan.Idle, with jitter, bounded
+// concurrency and an hourly request budget. Rate limits pause the schedule.
 package syncer
 
 import (
@@ -14,28 +20,39 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
-// DefaultInterval is the poll period when none is configured.
-const DefaultInterval = 5 * time.Minute
-
 // Options configures a Syncer.
 type Options struct {
 	Store    *store.Store
 	Provider provider.Provider
-	Interval time.Duration // default DefaultInterval
-	// OnUpdate runs after every completed cycle with the detected events
-	// (possibly none) and the current unread count.
+	Plan     Plan
+	// OnUpdate runs after every reconcile and every change check that found
+	// something, with the detected events (possibly none) and the unread count.
 	OnUpdate func(events []store.Event, unread int)
 	Log      *slog.Logger
+	Now      func() time.Time // default time.Now (tests use a fake clock)
 }
 
 // Status is reported by GET /api/sync.
 type Status struct {
-	Running          bool   `json:"running"`
-	SignedIn         bool   `json:"signedIn"`
-	LastSync         string `json:"lastSync"`
-	LastError        string `json:"lastError"`
-	RateLimitedUntil string `json:"rateLimitedUntil"`
-	Interval         string `json:"interval"`
+	Running          bool                 `json:"running"`
+	SignedIn         bool                 `json:"signedIn"`
+	LastSync         string               `json:"lastSync"` // last full reconcile
+	LastCheck        string               `json:"lastCheck"`
+	LastError        string               `json:"lastError"`
+	RateLimitedUntil string               `json:"rateLimitedUntil"`
+	Interval         string               `json:"interval"` // active-project check period (legacy field)
+	Mode             string               `json:"mode"`
+	ActiveEvery      string               `json:"activeEvery"`
+	IdleEvery        string               `json:"idleEvery"`
+	ReconcileEvery   string               `json:"reconcileEvery"`
+	NextReconcile    string               `json:"nextReconcile"`
+	Projects         int                  `json:"projects"`
+	ActiveProjects   int                  `json:"activeProjects"`
+	Budget           int                  `json:"budget"`      // requests per hour
+	BudgetUsed       int                  `json:"budgetUsed"`  // in the last hour
+	Checks           int                  `json:"checks"`      // change-check requests since start
+	NotModified      int                  `json:"notModified"` // of them answered 304 (free)
+	Rate             *provider.RateStatus `json:"rate,omitempty"`
 }
 
 // Progress states reported to OnProgress listeners (SSE sync.status).
@@ -60,15 +77,30 @@ type Progress struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// Syncer runs sync cycles on a timer and on demand.
+// Syncer runs the schedule.
 type Syncer struct {
 	opts    Options
 	trigger chan struct{}
-	cycle   sync.Mutex // one cycle at a time
+	wake    chan struct{}
+	cycle   sync.Mutex // one reconcile at a time
+	spend   budget
+	minPoll time.Duration
 
-	mu         sync.Mutex
-	status     Status
-	onProgress []func(Progress)
+	mu             sync.Mutex
+	status         Status
+	onProgress     []func(Progress)
+	plan_          Plan
+	targets        map[int64]*target
+	source         int64
+	login          string
+	nextReconcile  time.Time
+	reconciledOnce bool
+	forceReconcile bool
+	pausedUntil    time.Time
+	backoff        time.Duration
+	budgetFree     time.Time
+	checks         int
+	notModified    int
 }
 
 // OnProgress registers a listener for cycle progress (called on the sync goroutine).
@@ -87,24 +119,72 @@ func (s *Syncer) progress(p Progress) {
 	}
 }
 
-// New creates a Syncer; call Run to start polling.
+// New creates a Syncer; call Run to start the schedule.
 func New(opts Options) *Syncer {
-	if opts.Interval <= 0 {
-		opts.Interval = DefaultInterval
-	}
 	if opts.OnUpdate == nil {
 		opts.OnUpdate = func([]store.Event, int) {}
 	}
-	return &Syncer{opts: opts, trigger: make(chan struct{}, 1), status: Status{Interval: opts.Interval.String()}}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Log == nil {
+		opts.Log = slog.New(slog.DiscardHandler)
+	}
+	s := &Syncer{
+		opts: opts, trigger: make(chan struct{}, 1), wake: make(chan struct{}, 1),
+		targets: map[int64]*target{},
+	}
+	if pl, ok := opts.Provider.(provider.Poller); ok {
+		s.minPoll = pl.Scheduling().PollMinInterval
+	}
+	s.SetPlan(opts.Plan)
+	return s
 }
 
-// Run syncs now, then every Interval or on Trigger, until ctx ends.
+func (s *Syncer) now() time.Time { return s.opts.Now() }
+
+func (s *Syncer) plan() Plan {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.plan_
+}
+
+// SetPlan applies new polling settings (live, from settings.changed): the next
+// reconcile and every project's next check are re-derived from it.
+func (s *Syncer) SetPlan(p Plan) {
+	p = p.normalized()
+	now := s.now()
+	s.mu.Lock()
+	old := s.plan_
+	s.plan_ = p
+	s.status.Interval, s.status.Mode = p.Active.String(), p.Mode
+	s.status.ActiveEvery, s.status.IdleEvery, s.status.ReconcileEvery = p.Active.String(), p.Idle.String(), p.Reconcile.String()
+	s.status.Budget = p.Budget
+	if s.reconciledOnce && old.Reconcile != p.Reconcile {
+		s.nextReconcile = now.Add(jitter(p.Reconcile, 0, now.Unix()/60))
+	}
+	for _, t := range s.targets { // shorter intervals take effect now, longer ones after the pending check
+		d := p.Idle
+		if !t.activity.IsZero() && now.Sub(t.activity) <= p.ActiveWindow {
+			d = p.Active
+		}
+		if t.next.After(now.Add(d)) {
+			t.next = now.Add(jitter(d, t.ID, now.Unix()/60))
+		}
+	}
+	s.budgetFree = time.Time{}
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Run follows the schedule until ctx ends.
 func (s *Syncer) Run(ctx context.Context) {
 	for {
-		if err := s.SyncOnce(ctx); err != nil && ctx.Err() == nil {
-			s.opts.Log.Warn("sync failed", "err", err)
-		}
-		t := time.NewTimer(s.interval())
+		wait := s.Step(ctx)
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -112,29 +192,16 @@ func (s *Syncer) Run(ctx context.Context) {
 		case <-t.C:
 		case <-s.trigger:
 			t.Stop()
+			s.mu.Lock()
+			s.forceReconcile = true
+			s.mu.Unlock()
+		case <-s.wake:
+			t.Stop()
 		}
 	}
 }
 
-func (s *Syncer) interval() time.Duration {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.opts.Interval
-}
-
-// SetInterval changes the poll period (settings, live); it applies after the
-// pending wait.
-func (s *Syncer) SetInterval(d time.Duration) {
-	if d <= 0 {
-		d = DefaultInterval
-	}
-	s.mu.Lock()
-	s.opts.Interval = d
-	s.status.Interval = d.String()
-	s.mu.Unlock()
-}
-
-// Trigger requests a sync as soon as possible (coalesced).
+// Trigger requests a full sync as soon as possible (coalesced).
 func (s *Syncer) Trigger() {
 	select {
 	case s.trigger <- struct{}{}:
@@ -144,9 +211,30 @@ func (s *Syncer) Trigger() {
 
 // Status returns a snapshot.
 func (s *Syncer) Status() Status {
+	now := s.now()
+	used := s.spend.used(now)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.status
+	st := s.status
+	st.BudgetUsed, st.Checks, st.NotModified = used, s.checks, s.notModified
+	st.Projects, st.ActiveProjects = len(s.targets), 0
+	for _, t := range s.targets {
+		if !t.activity.IsZero() && now.Sub(t.activity) <= s.plan_.ActiveWindow {
+			st.ActiveProjects++
+		}
+	}
+	if !s.nextReconcile.IsZero() {
+		st.NextReconcile = s.nextReconcile.UTC().Format(time.RFC3339)
+	}
+	if s.pausedUntil.After(now) {
+		st.RateLimitedUntil = s.pausedUntil.UTC().Format(time.RFC3339)
+	}
+	s.mu.Unlock()
+	if rr, ok := s.opts.Provider.(provider.RateReporter); ok {
+		if r, ok := rr.RateStatus(); ok {
+			st.Rate = &r
+		}
+	}
+	return st
 }
 
 func (s *Syncer) update(f func(*Status)) {
@@ -155,14 +243,14 @@ func (s *Syncer) update(f func(*Status)) {
 	s.mu.Unlock()
 }
 
-// SyncOnce runs one full cycle. Signed out is not an error: nothing to do.
+// SyncOnce runs one full reconcile. Signed out is not an error: nothing to do.
 func (s *Syncer) SyncOnce(ctx context.Context) error {
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
 	var changed int
 	events, err := s.cycleOnce(ctx, &changed)
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.now()
 	var rl *provider.RateLimitError
 	s.update(func(st *Status) {
 		st.Running = false
@@ -170,7 +258,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 		st.RateLimitedUntil = ""
 		switch {
 		case err == nil:
-			st.LastSync, st.LastError = now, ""
+			st.LastSync, st.LastError = now.UTC().Format(time.RFC3339), ""
 		case errors.Is(err, provider.ErrNotSignedIn):
 			st.LastError = ""
 		case errors.As(err, &rl):
@@ -179,6 +267,14 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 			st.LastError = err.Error()
 		}
 	})
+	s.mu.Lock()
+	s.reconciledOnce = true
+	s.nextReconcile = now.Add(jitter(s.plan_.Reconcile, 0, now.Unix()/60))
+	if errors.Is(err, provider.ErrNotSignedIn) {
+		// Signed out: look again soon (sign-in also triggers a sync).
+		s.nextReconcile = now.Add(s.plan_.Active)
+	}
+	s.mu.Unlock()
 	if errors.Is(err, provider.ErrNotSignedIn) {
 		return nil
 	}
@@ -231,6 +327,7 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 		if err != nil {
 			var rl *provider.RateLimitError
 			if errors.As(err, &rl) || errors.Is(err, provider.ErrNotSignedIn) || ctx.Err() != nil {
+				s.refreshTargets(ctx, src, login)
 				return events, err // stop the cycle; the rest waits for the next one
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
@@ -244,7 +341,41 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 		events = append(events, evs...)
 		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step()})
 	}
+	s.refreshTargets(ctx, src, login)
 	return events, errors.Join(errs...)
+}
+
+// refreshTargets reloads the change-check targets after a reconcile: active
+// projects with their cursor, activity and persisted poll state. A project's
+// next check keeps its slot when it already had one.
+func (s *Syncer) refreshTargets(ctx context.Context, src int64, login string) {
+	rows, err := s.opts.Store.PollTargets(ctx, src)
+	if err != nil {
+		s.opts.Log.Error("sync: load poll targets", "err", err)
+		return
+	}
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.source, s.login = src, login
+	next := map[int64]*target{}
+	for _, r := range rows {
+		t, ok := s.targets[r.ID]
+		if !ok {
+			t = &target{Project: r.Project, poll: r.Poll}
+		}
+		t.Project, t.activity = r.Project, r.Activity
+		if !ok || t.next.IsZero() {
+			// First slot: spread the projects over the interval instead of a burst.
+			d := s.plan_.Idle
+			if !t.activity.IsZero() && now.Sub(t.activity) <= s.plan_.ActiveWindow {
+				d = s.plan_.Active
+			}
+			t.next = now.Add(jitter(d, t.ID, 0))
+		}
+		next[r.ID] = t
+	}
+	s.targets = next
 }
 
 // ErrWrongPlatform means the item belongs to a platform this syncer does not serve.

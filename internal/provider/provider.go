@@ -36,7 +36,12 @@ type Capabilities struct {
 var ErrNotSignedIn = errors.New("provider: not signed in")
 
 // RateLimitError means the platform quota is exhausted until Reset.
-type RateLimitError struct{ Reset time.Time }
+// Secondary marks GitHub's secondary (abuse) limit: back off even when Reset
+// is near, and longer on repeats.
+type RateLimitError struct {
+	Reset     time.Time
+	Secondary bool
+}
 
 func (e *RateLimitError) Error() string {
 	return "provider: rate limited until " + e.Reset.UTC().Format(time.RFC3339)

@@ -149,7 +149,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	var group atomic.Bool
 	group.Store(cfg.Notifications.Group)
 	sy := syncer.New(syncer.Options{
-		Store: st, Provider: github.NewProvider(auth), Interval: cfg.Sync.Plan("github").Active(), Log: log,
+		Store: st, Provider: github.NewProvider(auth), Plan: syncPlan(cfg.Sync), Log: log,
 		OnUpdate: func(events []store.Event, unread int) {
 			popups := events
 			if group.Load() {
@@ -165,7 +165,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		lp := liveFilter(cur.Notifications)
 		live.Store(&lp)
 		group.Store(cur.Notifications.Group)
-		sy.SetInterval(cur.Sync.Plan("github").Active())
+		sy.SetPlan(syncPlan(cur.Sync))
 		if tray != nil {
 			tray.SetPrefs(notifyPrefs(cur.Notifications))
 			tray.SetTheme(popupTheme(cur.Appearance))

@@ -2,7 +2,7 @@
 import SelectButton from 'primevue/selectbutton'
 import InputNumber from 'primevue/inputnumber'
 import Button from 'primevue/button'
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '../../components/SettingRow.vue'
 import SettingsPanel from '../../components/SettingsPanel.vue'
@@ -17,6 +17,13 @@ const settings = useSettingsStore()
 const app = useAppStore()
 const save = useSave()
 const sy = computed(() => settings.doc?.settings.sync)
+// Live counters (budget, 304s, quota) refresh while this section is open.
+let poll: number | undefined
+onMounted(() => {
+  void app.loadSync()
+  poll = window.setInterval(() => void app.loadSync(), 15000)
+})
+onBeforeUnmount(() => window.clearInterval(poll))
 const custom = computed(() => sy.value?.mode === 'custom')
 
 const plan = computed<ProviderSync | undefined>(() => {
@@ -126,9 +133,27 @@ function setField(key: keyof ProviderSync, v: number | null) {
         :text="app.sync?.rateLimitedUntil ? t('settings.sync.limitedUntil', { time: absTime(app.sync.rateLimitedUntil) }) : t('settings.sync.rateOk')"
       >
         <span
+          v-if="app.sync?.rate?.limit"
+          class="value mono"
+        >{{ t('settings.sync.remaining', { n: app.sync.rate.remaining, limit: app.sync.rate.limit }) }}</span>
+        <span
           class="value"
           :class="app.sync?.rateLimitedUntil ? 'warn' : 'on'"
         >{{ app.sync?.rateLimitedUntil ? t('settings.sync.limited') : t('settings.sync.ok') }}</span>
+      </SettingRow>
+      <SettingRow
+        v-if="app.sync?.budget"
+        :title="t('settings.sync.budgetUsed')"
+        :text="t('settings.sync.budgetText', { checks: app.sync.checks ?? 0, free: app.sync.notModified ?? 0 })"
+      >
+        <span class="value mono">{{ app.sync.budgetUsed ?? 0 }} / {{ app.sync.budget }}</span>
+      </SettingRow>
+      <SettingRow
+        v-if="app.sync?.projects"
+        :title="t('settings.sync.projectsTitle')"
+        :text="app.sync.nextReconcile ? t('settings.sync.nextReconcile', { time: absTime(app.sync.nextReconcile) }) : ''"
+      >
+        <span class="value">{{ t('settings.sync.activeOf', { n: app.sync.activeProjects ?? 0, total: app.sync.projects }) }}</span>
       </SettingRow>
     </SettingsPanel>
   </template>
