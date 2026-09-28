@@ -173,7 +173,11 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	var testN atomic.Int64
 
-	srv, err := api.New(context.Background(), api.Options{
+	session, err := loadSession(filepath.Join(dataDir, "secrets"))
+	if err != nil {
+		log.Error("session secret: per-run fallback", "err", err) // tabs sign in again after a restart
+	}
+	srv, err = api.New(context.Background(), api.Options{
 		Assets:         issuewatcher.Assets(),
 		PreferredPort:  preferred,
 		Version:        Version,
@@ -191,7 +195,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		},
 		// Tray/notification clicks give this process foreground rights: bring the
 		// dashboard's browser window to the front, or open a new tab.
-		Focus: notify.FocusDashboard,
+		Focus:         notify.FocusDashboard,
+		SessionSecret: session,
 	})
 	if err != nil {
 		return err

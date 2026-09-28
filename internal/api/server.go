@@ -9,6 +9,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -34,6 +35,7 @@ import (
 
 const (
 	sessionCookie = "iw_session"
+	sessionMaxAge = 400 * 24 * time.Hour // Chrome's cap for cookie lifetime
 	launchTTL     = 2 * time.Minute
 )
 
@@ -56,6 +58,11 @@ type Options struct {
 	// Focus brings the browser window showing the dashboard to the front
 	// (desktop shell, internal/notify); nil = SSE navigate only.
 	Focus func() (title string, ok bool)
+	// SessionSecret is the browser session cookie value kept across runs
+	// (data\secrets\session.json), so open tabs and the installed app window
+	// stay signed in after a restart; "" = a new one per run. The bearer
+	// token for programmatic clients still changes every run.
+	SessionSecret string
 }
 
 // Server serves the SPA and the loopback API.
@@ -65,7 +72,7 @@ type Server struct {
 	srv     *http.Server
 	port    int
 	token   string // bearer for API clients; published in runtime.json
-	session string // cookie value; memory only
+	session string // cookie value (Options.SessionSecret or per run)
 	index   []byte
 
 	mu       sync.Mutex
@@ -97,7 +104,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		ln:       ln,
 		port:     addr.Port,
 		token:    randomHex(32),
-		session:  randomHex(32),
+		session:  cmp.Or(opts.SessionSecret, randomHex(32)),
 		launches: map[string]launch{},
 		hub:      newHub(),
 	}
@@ -234,13 +241,19 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// No Secure flag: plain-HTTP loopback, a Secure cookie would never be sent back.
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure impossible on http://127.0.0.1; HttpOnly+SameSite=Strict set
+	c := &http.Cookie{ //nolint:gosec // G124: Secure impossible on http://127.0.0.1; HttpOnly+SameSite=Strict set
 		Name:     sessionCookie,
 		Value:    s.session,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-	})
+	}
+	if s.opts.SessionSecret != "" {
+		// Persistent secret: the cookie outlives the browser session too, so an
+		// installed app window stays signed in across app and browser restarts.
+		c.MaxAge = int(sessionMaxAge / time.Second)
+	}
+	http.SetCookie(w, c)
 	http.Redirect(w, r, l.next, http.StatusSeeOther)
 }
 
