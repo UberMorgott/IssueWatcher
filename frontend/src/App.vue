@@ -11,12 +11,14 @@ import { useToast } from 'primevue/usetoast'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
 import { connectLive, type LiveEventName } from './api/live'
-import type { DataChange, LiveItemEvent, SyncProgress } from './api/types'
+import type { DataChange, LiveItemEvent, SettingsDoc, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
+import { useSettingsStore } from './stores/settings'
 import { useShortcuts } from './lib/shortcuts'
 import { updateDocumentTitle } from './router'
 
 const app = useAppStore()
+const settings = useSettingsStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -74,6 +76,9 @@ function onLive(name: LiveEventName, data: unknown) {
       app.invalidate()
       return
     }
+    case 'settings.changed':
+      if (data) settings.apply(data as SettingsDoc)
+      return
     case 'sync.status':
       void app.onSyncStatus(data as SyncProgress | null)
       return
@@ -106,6 +111,7 @@ let stopLive: (() => void) | undefined
 function startLive() {
   stopLive?.()
   stopLive = connectLive(onLive, () => {
+    void settings.load()
     void app.loadAuth()
     void app.loadSync()
     app.bump()
@@ -133,6 +139,7 @@ function takeOver() {
   superseded.value = false
   announce()
   startLive()
+  void settings.load()
   void app.loadAuth()
   void app.loadSync()
   app.bump()
@@ -153,6 +160,7 @@ useShortcuts({
 })
 
 onMounted(() => {
+  void settings.load()
   void app.init()
   startLive()
   if ('BroadcastChannel' in window) {

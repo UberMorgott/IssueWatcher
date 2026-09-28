@@ -1,5 +1,4 @@
 import type {
-  AppSettings,
   Comment,
   CommentChunk,
   Health,
@@ -9,10 +8,14 @@ import type {
   Provider,
   Repo,
   RepoChunk,
+  SettingsDoc,
+  SettingsPatch,
+  FolderRow,
+  FolderSuggestion,
   Stats,
   SyncStatus,
 } from './types'
-import { t } from '../i18n'
+import { t, te } from '../i18n'
 
 /**
  * Result of an API call. Never throws: pages render empty/error states from
@@ -143,9 +146,50 @@ export const api = {
     return call<Stats>('GET', '/api/stats?' + p.toString())
   },
 
-  settings: () => call<AppSettings>('GET', '/api/settings'),
-  saveSettings: (patch: Partial<Pick<AppSettings, 'startWithWindows' | 'startMinimized'>>) => call<AppSettings>('PUT', '/api/settings', patch),
-
   syncStatus: () => call<SyncStatus>('GET', '/api/sync'),
   syncNow: () => call<void>('POST', '/api/sync'),
+
+  settingsDoc: () => call<SettingsDoc>('GET', '/api/settings'),
+  patchSettings: (revision: number, patch: SettingsPatch) => settingsCall('PATCH', '/api/settings', { revision, patch }),
+  resetSettings: (revision: number, section: string) => settingsCall('POST', '/api/settings/reset', { revision, section }),
+  testNotification: () => call<void>('POST', '/api/notifications/test'),
+  folders: () => call<FolderRow[]>('GET', '/api/folders'),
+  setFolder: (id: number, path: string) => call<FolderRow>('PUT', `/api/projects/${id}/path`, { path }),
+  discoverFolders: () => call<{ suggestions: FolderSuggestion[]; visited: number; roots: string[] }>('POST', '/api/folders/discover'),
+}
+
+/** A settings change: 409 carries the current document, 400 the field and a reason code. */
+export type SettingsResult =
+  | { ok: true; data: SettingsDoc; status: number }
+  | { ok: false; status: number; error: string; current?: SettingsDoc; field?: string; code?: string }
+
+/** Localised name of a settings field path (sync.providers.github.activeMinutes → "Active projects"). */
+function fieldLabel(field: string): string {
+  const last = field.split('.').filter((p) => !/^\d+$/.test(p)).pop() ?? field
+  for (const k of ['settings.fields.' + last, 'settings.sync.fields.' + last]) if (te(k)) return t(k)
+  return field
+}
+
+async function settingsCall(method: string, url: string, body: unknown): Promise<SettingsResult> {
+  let res: Response
+  try {
+    res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' })
+  } catch {
+    return { ok: false, status: 0, error: t('common.notRunning') }
+  }
+  let j: Record<string, unknown> = {}
+  try {
+    j = (await res.json()) as Record<string, unknown>
+  } catch {
+    /* empty body */
+  }
+  if (res.ok) return { ok: true, status: res.status, data: j as unknown as SettingsDoc }
+  const code = typeof j.code === 'string' ? j.code : undefined
+  const field = typeof j.field === 'string' ? j.field : undefined
+  let error = typeof j.error === 'string' ? j.error : res.statusText || `HTTP ${res.status}`
+  if (code && te('settings.errors.' + code)) {
+    const params = (j.params as Record<string, unknown> | undefined) ?? {}
+    error = (field ? fieldLabel(field) + ': ' : '') + t('settings.errors.' + code, params)
+  }
+  return { ok: false, status: res.status, error, current: j.current as SettingsDoc | undefined, field, code }
 }

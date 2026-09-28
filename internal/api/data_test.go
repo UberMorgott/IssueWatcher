@@ -13,9 +13,9 @@ import (
 )
 
 // syncedEnv is signed in and has synced two issues, then sees a new comment.
-func syncedEnv(t *testing.T) *env {
+func syncedEnv(t *testing.T, extra ...func(*Options)) *env {
 	t.Helper()
-	e := newEnv(t)
+	e := newEnv(t, extra...)
 	if _, err := e.auth.ConvertManifest(t.Context(), githubtest.ManifestCode, e.s.Port()); err != nil {
 		t.Fatal(err)
 	}

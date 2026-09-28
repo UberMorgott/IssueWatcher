@@ -50,7 +50,9 @@ type Options struct {
 	Store          *store.Store   // data endpoints (need Sync too)
 	Sync           *syncer.Syncer // poller status, sync now, replies
 	OnUnreadChange func()         // called after the user marks an item read
-	Settings       SettingsStore  // GET/PUT /api/settings
+	Settings       SettingsStore  // GET/PATCH /api/settings (+ folders with Store)
+	// TestNotification shows a sample popup (Settings → Notifications).
+	TestNotification func()
 	// Focus brings the browser window showing the dashboard to the front
 	// (desktop shell, internal/notify); nil = SSE navigate only.
 	Focus func() (title string, ok bool)
@@ -114,6 +116,12 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Settings != nil {
 		s.registerSettings(mux)
+		if opts.Store != nil {
+			s.registerFolders(mux)
+		}
+	}
+	if opts.TestNotification != nil {
+		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)
 	}
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", s.spa())

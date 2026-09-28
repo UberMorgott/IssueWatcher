@@ -9,9 +9,12 @@
     <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <title>IssueWatcher</title>
     <script>
-      // Apply the saved theme before first paint (no dark→light flash).
+      // Apply the last theme mode before first paint (no dark→light flash); the
+      // server-side settings take over once the app loads.
       try {
-        if (localStorage.getItem('iw.theme') === 'light') document.documentElement.classList.remove('dark')
+        var m = localStorage.getItem('iw.theme')
+        if (m === 'light' || (m === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches))
+          document.documentElement.classList.remove('dark')
       } catch (e) {
         /* storage blocked: keep dark */
       }

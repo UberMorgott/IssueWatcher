@@ -1,7 +1,8 @@
 package main
 
 import (
-	"errors"
+	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -24,47 +25,69 @@ func startMinimized(args []string, setting bool) bool {
 	return setting
 }
 
-// appSettings implements api.SettingsStore over config.json and the Run entry.
+// appSettings implements api.SettingsStore over config.Store plus the side
+// effects that live outside config.json (the autostart Run entry).
 type appSettings struct {
-	mu      sync.Mutex
+	mu      sync.Mutex // one change at a time (entry.Set + write)
+	store   *config.Store
 	dataDir string
 	exe     string
+	version string
 	entry   autostart.Entry
 }
 
-func (a *appSettings) Settings() (api.Settings, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.read()
+func (a *appSettings) doc(s config.Settings) api.SettingsDoc {
+	// The Run entry is the truth for "start with Windows" (the user may have
+	// removed it in Task Manager).
+	if on, err := a.entry.Enabled(a.exe); err == nil {
+		s.General.StartWithWindows = on
+	}
+	return api.SettingsDoc{
+		Revision: s.Revision,
+		Settings: s,
+		Info: api.SettingsInfo{
+			DataDir: a.dataDir, ConfigFile: filepath.Join(a.dataDir, config.File), Version: a.version, Exe: a.exe,
+			SyncPresets: config.Presets(),
+		},
+	}
 }
 
-func (a *appSettings) read() (api.Settings, error) {
-	cfg, err := config.Load(a.dataDir)
-	on, rerr := a.entry.Enabled(a.exe)
-	return api.Settings{
-		StartWithWindows:    on,
-		StartMinimized:      cfg.StartMinimized,
-		PollIntervalMinutes: int(cfg.PollInterval().Minutes()),
-	}, errors.Join(err, rerr)
+func (a *appSettings) Settings() (api.SettingsDoc, error) {
+	return a.doc(a.store.Get()), nil
 }
 
-func (a *appSettings) UpdateSettings(p api.SettingsPatch) (api.Settings, error) {
+// PatchSettings writes the Run entry first when the patch names
+// general.startWithWindows, so a failed registry write saves nothing.
+func (a *appSettings) PatchSettings(rev int, patch json.RawMessage) (api.SettingsDoc, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	patch := map[string]any{}
-	if p.StartWithWindows != nil {
-		if err := a.entry.Set(*p.StartWithWindows, a.exe); err != nil {
-			return api.Settings{}, err
-		}
-		patch["startWithWindows"] = *p.StartWithWindows
+	var p struct {
+		General *struct {
+			StartWithWindows *bool `json:"startWithWindows"`
+		} `json:"general"`
 	}
-	if p.StartMinimized != nil {
-		patch["startMinimized"] = *p.StartMinimized
+	_ = json.Unmarshal(patch, &p) // shape errors are reported by Patch
+	var before func(old, next config.Settings) error
+	if p.General != nil && p.General.StartWithWindows != nil {
+		before = func(_, next config.Settings) error { return a.entry.Set(next.General.StartWithWindows, a.exe) }
 	}
-	if len(patch) > 0 {
-		if err := config.Update(a.dataDir, patch); err != nil {
-			return api.Settings{}, err
-		}
+	s, err := a.store.Patch(rev, patch, before)
+	if err != nil {
+		return api.SettingsDoc{}, err
 	}
-	return a.read()
+	return a.doc(s), nil
+}
+
+func (a *appSettings) ResetSettings(rev int, section string) (api.SettingsDoc, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var before func(old, next config.Settings) error
+	if section == "general" {
+		before = func(_, next config.Settings) error { return a.entry.Set(next.General.StartWithWindows, a.exe) }
+	}
+	s, err := a.store.Reset(rev, section, before)
+	if err != nil {
+		return api.SettingsDoc{}, err
+	}
+	return a.doc(s), nil
 }

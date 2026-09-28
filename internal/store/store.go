@@ -319,6 +319,18 @@ func (s *Store) AddComment(ctx context.Context, itemID int64, c provider.Comment
 	}, nil
 }
 
+// SetLocalPath maps project id to a local folder ("" = unmap).
+func (s *Store) SetLocalPath(ctx context.Context, id int64, path string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE projects SET local_path = ? WHERE id = ?`, path, id)
+	if err != nil {
+		return fmt.Errorf("store: set local path: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // MarkRead clears the unread flag of item id.
 func (s *Store) MarkRead(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE items SET unread = 0 WHERE id = ?`, id)

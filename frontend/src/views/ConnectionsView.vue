@@ -10,6 +10,8 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, duration, relTime } from '../lib/format'
 
+/** embedded: shown inside Settings → Connections (no page frame). */
+defineProps<{ embedded?: boolean }>()
 const app = useAppStore()
 const confirm = useConfirm()
 const toast = useToast()
@@ -80,7 +82,7 @@ function disconnect() {
 </script>
 
 <template>
-  <div class="page">
+  <div :class="embedded ? 'embedded' : 'page'">
     <i18n-t
       keypath="connections.sub"
       tag="p"
@@ -306,6 +308,12 @@ function disconnect() {
 </template>
 
 <style scoped>
+.embedded {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -100,19 +100,38 @@ func New(opts Options) *Syncer {
 
 // Run syncs now, then every Interval or on Trigger, until ctx ends.
 func (s *Syncer) Run(ctx context.Context) {
-	t := time.NewTicker(s.opts.Interval)
-	defer t.Stop()
 	for {
 		if err := s.SyncOnce(ctx); err != nil && ctx.Err() == nil {
 			s.opts.Log.Warn("sync failed", "err", err)
 		}
+		t := time.NewTimer(s.interval())
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
 		case <-s.trigger:
+			t.Stop()
 		}
 	}
+}
+
+func (s *Syncer) interval() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.opts.Interval
+}
+
+// SetInterval changes the poll period (settings, live); it applies after the
+// pending wait.
+func (s *Syncer) SetInterval(d time.Duration) {
+	if d <= 0 {
+		d = DefaultInterval
+	}
+	s.mu.Lock()
+	s.opts.Interval = d
+	s.status.Interval = d.String()
+	s.mu.Unlock()
 }
 
 // Trigger requests a sync as soon as possible (coalesced).

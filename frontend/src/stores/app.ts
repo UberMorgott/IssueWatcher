@@ -3,8 +3,10 @@ import { computed, ref } from 'vue'
 import { api } from '../api/client'
 import type { DataChange, LiveItemEvent, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
 import { t } from '../i18n'
+import { theme, type Theme } from '../lib/appearance'
+import { useSettingsStore } from './settings'
 
-export type Theme = 'dark' | 'light'
+export type { Theme }
 
 export interface ActivityEntry {
   key: number
@@ -33,12 +35,10 @@ let activitySeq = 0
 
 /** App-wide state: theme, shell, connections, sync status, repo list, live feed. */
 export const useAppStore = defineStore('app', () => {
-  // --- shell
-  const theme = ref<Theme>(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+  // --- shell: the effective light/dark theme (lib/appearance); setTheme saves
+  // the mode server-side, so every tab and browser follows.
   function setTheme(t: Theme) {
-    theme.value = t
-    document.documentElement.classList.toggle('dark', t === 'dark')
-    save('iw.theme', t)
+    void useSettingsStore().patch({ appearance: { mode: t } })
   }
   const sidebarCollapsed = ref(load('iw.sidebar') === 'collapsed')
   function toggleSidebar() {

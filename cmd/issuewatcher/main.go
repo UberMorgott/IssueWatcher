@@ -91,10 +91,11 @@ func run() error {
 	}
 	defer func() { _ = db.Close() }()
 
-	cfg, err := config.Load(dataDir)
+	cfgs, err := config.Open(dataDir)
 	if err != nil {
 		return err
 	}
+	cfg := cfgs.Get()
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -103,17 +104,17 @@ func run() error {
 		exe = p
 	}
 	// Portable folder moved: keep the autostart entry pointing at this exe.
-	if wrote, err := autostart.Default.Refresh(cfg.StartWithWindows, exe); err != nil {
+	if wrote, err := autostart.Default.Refresh(cfg.General.StartWithWindows, exe); err != nil {
 		log.Error("autostart refresh", "err", err)
 	} else if wrote {
 		log.Info("autostart entry updated", "exe", exe)
 	}
-	settings := &appSettings{dataDir: dataDir, exe: exe, entry: autostart.Default}
-	minimized := startMinimized(os.Args[1:], cfg.StartMinimized)
-	return serve(log, dataDir, cfg, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized)
+	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: autostart.Default}
+	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized)
+	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized)
 }
 
-func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store, auth *github.Auth,
+func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, auth *github.Auth,
 	settings *appSettings, minimized bool,
 ) error {
 	open := func(u string) { go openBrowser(log, u) }
@@ -140,14 +141,37 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		}
 		setBadge(int64(n))
 	}
+	cfg := cfgs.Get()
+	prefs := notifyPrefs(cfg.Notifications)
+	var live atomic.Pointer[notify.Prefs] // in-app toast filter (kinds, muted projects)
+	lp := liveFilter(cfg.Notifications)
+	live.Store(&lp)
+	var group atomic.Bool
+	group.Store(cfg.Notifications.Group)
 	sy := syncer.New(syncer.Options{
-		Store: st, Provider: github.NewProvider(auth), Interval: cfg.PollInterval(), Log: log,
+		Store: st, Provider: github.NewProvider(auth), Interval: cfg.Sync.Plan("github").Active(), Log: log,
 		OnUpdate: func(events []store.Event, unread int) {
-			tray.NotifyEvents(events) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
+			popups := events
+			if group.Load() {
+				popups = groupRepeats(events)
+			}
+			tray.NotifyEvents(popups) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
 			setBadge(int64(unread))
-			publishLive(srv, events)
+			publishLive(srv, live.Load().Filter(events, time.Now()))
 		},
 	})
+	// Settings apply live: popups, toasts, poll interval.
+	cfgs.Subscribe(func(_, cur config.Settings) {
+		lp := liveFilter(cur.Notifications)
+		live.Store(&lp)
+		group.Store(cur.Notifications.Group)
+		sy.SetInterval(cur.Sync.Plan("github").Active())
+		if tray != nil {
+			tray.SetPrefs(notifyPrefs(cur.Notifications))
+			tray.SetTheme(popupTheme(cur.Appearance))
+		}
+	})
+	var testN atomic.Int64
 
 	srv, err := api.New(context.Background(), api.Options{
 		Assets:         issuewatcher.Assets(),
@@ -160,6 +184,11 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Sync:           sy,
 		OnUnreadChange: refreshBadge,
 		Settings:       settings,
+		TestNotification: func() {
+			c := notify.SampleCard(testN.Add(1), time.Now())
+			tray.ShowCards(c)
+			log.Info("test notification shown", "item", c.ItemID)
+		},
 		// Tray/notification clicks give this process foreground rights: bring the
 		// dashboard's browser window to the front, or open a new tab.
 		Focus: notify.FocusDashboard,
@@ -205,9 +234,8 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
 		Log:     log,
-		// TODO(settings): Theme/Prefs from the palette + notifications settings,
-		// then Tray.SetTheme / Tray.SetPrefs on settings.changed.
-		Theme: notify.DarkTheme(),
+		Theme:   popupTheme(cfg.Appearance), // settings.changed → Tray.SetTheme / SetPrefs
+		Prefs:   &prefs,
 		Menu: []notify.MenuItem{
 			{Title: "Открыть", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
 			{Title: "Тестовое уведомление", OnClick: func() {

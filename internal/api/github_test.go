@@ -32,7 +32,7 @@ type env struct {
 	opened  chan string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, extra ...func(*Options)) *env {
 	t.Helper()
 	gh := githubtest.New(t)
 	a := github.NewAuth(filepath.Join(t.TempDir(), "secrets"))
@@ -45,13 +45,17 @@ func newEnv(t *testing.T) *env {
 	st := store.New(db)
 	sy := syncer.New(syncer.Options{Store: st, Provider: github.NewProvider(a), Log: slog.New(slog.DiscardHandler)})
 	e := &env{gh: gh, auth: a, store: st, sync: sy, unread: make(chan struct{}, 8), opened: make(chan string, 8)}
-	e.s, err = New(t.Context(), Options{
+	opts := Options{
 		Assets: fstest.MapFS{"index.html": {Data: []byte(indexHTML)}},
 		Open:   func(u string) { e.opened <- u },
 		Log:    slog.New(slog.DiscardHandler),
 		GitHub: a, Store: st, Sync: sy,
 		OnUnreadChange: func() { e.unread <- struct{}{} },
-	})
+	}
+	for _, f := range extra {
+		f(&opts)
+	}
+	e.s, err = New(t.Context(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}

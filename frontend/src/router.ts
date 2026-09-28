@@ -13,7 +13,8 @@ export const router = createRouter({
     { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'projects' } },
     { path: '/agents', name: 'agents', component: () => import('./views/AgentsView.vue'), meta: { title: 'agents' } },
     { path: '/connections', name: 'connections', component: () => import('./views/ConnectionsView.vue'), meta: { title: 'connections' } },
-    { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue'), meta: { title: 'settings' } },
+    // Deep links: /settings/<section> (general, appearance, notifications, sync, …).
+    { path: '/settings/:section?', name: 'settings', component: () => import('./views/SettingsView.vue'), props: true, meta: { title: 'settings' } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue'), meta: { title: 'notFound' } },
   ],
   scrollBehavior: () => ({ top: 0 }),

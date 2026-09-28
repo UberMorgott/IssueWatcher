@@ -37,7 +37,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [ ] **Manual (user)**: dashboard tab open but window minimised / behind other windows → tray left-click, menu «Открыть» and a balloon click each restore it and bring it to the front. Dashboard tab open but not the active tab in its window → a new tab opens, the old one shows «Дашборд открыт в другой вкладке» (log: `dashboard window not found by title; opening a new tab`). Double-click on the icon → one open. Real balloon click with `IW_DEBUG=1`: log must show `NIN_BALLOONUSERCLICK`; if it shows `NIN_BALLOONSHOW` + `NIN_BALLOONTIMEOUT` at once, Windows suppressed the banner (Do Not Disturb / Focus assist) — clicks in the notification center are not reported (seen on the dev machine 2026-09-28). Installed as an app window (browser menu → Install IssueWatcher) → always found.
 - [ ] Installed app window after an app restart: the session cookie is per run, so the old window shows «Вход не выполнен»; the tray then opens a new browser tab. Consider a persistent (per data dir) session secret.
 - [x] Infinite scroll: keyset API (`cursor`/`after`/`ids`/`limit`, comments + projects chunks), virtual Issues list, chunked comments/projects; page/per removed
-- [ ] Repo ↔ local folder mapping + auto-discovery
+- [x] Repo ↔ local folder mapping + auto-discovery (Settings → Проекты и папки; block 5)
 - [ ] Optional: revoke token on logout (`DELETE /applications/{client_id}/token`)
 
 ### Manual live test (needs a real GitHub account; cannot run in CI)
@@ -59,11 +59,14 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 ## Block 5 — settings, palettes, tiered sync, session
 - [x] No PrimeUI license key in the exe: `frontend/scripts/primevue-local.mjs` (npm `postinstall`, also before `dev`/`build`) strips PrimeVue 5.0.1's license check; exact-hash guarded, idempotent, fails on any other PrimeVue version (`npm test`)
 - [x] One page title: the top bar is the heading (breadcrumb on detail pages via `lib/crumbs.ts`: Issues › owner/repo#N); body H1s and filler subtitles removed; repeated counts/labels dropped (Issues total when equal to the state counter, item author/opened line, Agents phase badge, project name twice)
+- [x] Settings page with its own menu and deep links `/settings/:section`: Общие, Внешний вид, Уведомления, Синхронизация, Подключения, Проекты и папки, Агенты (placeholder), Обновления (version + «скоро»), Расширенные (paths, export, diagnostics, reset per section). `config.json` v2 (`schemaVersion`, migration of v1 `pollIntervalMinutes`/flat keys, unknown keys kept), one `GET/PATCH /api/settings` (merge patch, revision → 409, validation codes → localised messages, atomic write + `.bak`), live apply + SSE `settings.changed`; language and theme mode moved server-side (localStorage only for first paint)
+- [x] Notifications settings: per-kind switches, per-project mute, quiet hours, group repeats, display time, full-screen DND, test button → `notify.Prefs` via `Tray.SetPrefs` (live); in-app toasts honour kinds + mutes
+- [x] Projects & folders: roots, depth, excludes; discovery by git remote (`internal/folders`, worktrees too) → suggestions the user accepts; per-project path + status (ok / missing / not git / other remote)
 
 ## Own popup notifications (replace Windows tray balloons)
 
 - [x] Own popup cards (`internal/notify/popup_windows.go`): layered, topmost, no-activate tool windows in the bottom-right corner of the work area, per-monitor DPI; card rendered in Go (Inter, SIL OFL) with shadow and slide/fade; stack of 3 + «+N ещё»; hover pauses auto-hide; × closes; click → `/item/:id` / `/issues?unread=1`. Balloon code removed; tray hover callbacks no longer logged; `IW_POPUP_SNAPSHOT=<dir>` renders sample PNG files
-- [ ] Wire settings → popups (block-5 agent): palette → `Tray.SetTheme(notify.Theme)`, `notifications` → `Tray.SetPrefs(notify.Prefs)` at start and on `settings.changed` (TODO in `cmd/issuewatcher/main.go`)
+- [x] Wire settings → popups: `notifications` → `Tray.SetPrefs(notify.Prefs)` and theme mode → `Tray.SetTheme` at start and on every settings change (palette colours: block 5 task 3)
 - [ ] **Manual (user, real desktop)**: tray «Тестовое уведомление» → card bottom-right, focus stays in the current window, hover pauses, × closes, click opens the item; taskbar on top/left; DPI change
 - [ ] Focus assist / DND has no public API: `respectWindowsDnd` covers only full-screen / presentation mode (`SHQueryUserNotificationState`)
 
