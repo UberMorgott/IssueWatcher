@@ -1,43 +1,388 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import Toast from 'primevue/toast'
+import ConfirmDialog from 'primevue/confirmdialog'
+import Drawer from 'primevue/drawer'
+import Dialog from 'primevue/dialog'
+import Button from 'primevue/button'
+import { useToast } from 'primevue/usetoast'
+import AppSidebar from './components/AppSidebar.vue'
+import AppTopbar from './components/AppTopbar.vue'
+import { connectLive, type LiveEventName } from './api/live'
+import type { LiveItemEvent } from './api/types'
+import { useAppStore } from './stores/app'
+import { useShortcuts } from './lib/shortcuts'
 
-// The session cookie (set by the tray's one-time launch link) authorizes /api.
-const version = ref('')
+const app = useAppStore()
+const router = useRouter()
+const route = useRoute()
+const toast = useToast()
+const mobileNav = ref(false)
+const helpOpen = ref(false)
 
-onMounted(async () => {
-  try {
-    const res = await fetch('/api/health')
-    if (res.ok) version.value = ((await res.json()) as { version: string }).version
-  } catch {
-    // offline: header just omits the version
+// --- tab reuse: the tray sends navigate{path} instead of opening a new tab
+let flashTimer: number | undefined
+function flashTitle() {
+  window.clearInterval(flashTimer)
+  if (document.hasFocus()) return
+  const base = document.title
+  let on = false
+  let n = 0
+  flashTimer = window.setInterval(() => {
+    on = !on
+    document.title = on ? '● IssueWatcher' : base
+    if (document.hasFocus() || ++n > 30) {
+      window.clearInterval(flashTimer)
+      document.title = base
+    }
+  }, 1000)
+}
+
+function onNavigate(path: string) {
+  if (path && path !== route.fullPath) void router.push(path)
+  window.focus()
+  flashTitle()
+}
+
+// --- live events → store + toasts
+const KIND_TEXT: Record<string, { summary: string; severity: 'info' | 'success' | 'secondary' }> = {
+  'item.new': { summary: 'New issue', severity: 'info' },
+  'comment.new': { summary: 'New comment', severity: 'info' },
+  'item.closed': { summary: 'Issue closed', severity: 'secondary' },
+}
+
+let bumpTimer: number | undefined
+function bumpSoon() {
+  window.clearTimeout(bumpTimer)
+  bumpTimer = window.setTimeout(() => app.bump(), 300)
+}
+
+function onLive(name: LiveEventName, data: unknown) {
+  switch (name) {
+    case 'navigate':
+      onNavigate(((data as { path?: string }) ?? {}).path ?? '')
+      return
+    case 'auth.changed': {
+      const a = (data ?? {}) as { state?: string; login?: string }
+      if (a.state === 'connected' && !app.githubConnected) {
+        toast.add({ severity: 'success', summary: 'GitHub connected', detail: a.login ? `Signed in as @${a.login}. First sync is running.` : undefined, life: 5000 })
+      }
+      void app.loadAuth()
+      void app.loadSync()
+      bumpSoon()
+      return
+    }
+    case 'sync.status': {
+      const wasSignedIn = app.sync?.signedIn
+      void app.loadSync().then(() => {
+        if (app.sync && app.sync.signedIn !== wasSignedIn) void app.loadAuth()
+      })
+      bumpSoon()
+      return
+    }
+    case 'item.new':
+    case 'comment.new':
+    case 'item.closed': {
+      const e = data as LiveItemEvent
+      if (!e || typeof e.id !== 'number') return
+      app.pushActivity(name, e)
+      const k = KIND_TEXT[name]
+      const detail =
+        name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
+      toast.add({ group: 'live', severity: k.severity, summary: k.summary, detail, life: 8000, data: { id: e.id } } as never)
+      bumpSoon()
+    }
   }
+}
+
+function openFromToast(msg: unknown, close: () => void) {
+  const id = (msg as { data?: { id?: number } }).data?.id
+  if (id) void router.push(`/item/${id}`)
+  close()
+}
+
+let stopLive: (() => void) | undefined
+
+useShortcuts({
+  sync: () => {
+    if (app.githubConnected && !app.syncing) void app.syncNow()
+  },
+  search: () => {
+    if (route.name !== 'issues') void router.push({ name: 'issues', query: { focus: '1' } })
+    else window.dispatchEvent(new CustomEvent('iw:focus-search'))
+  },
+  help: () => (helpOpen.value = !helpOpen.value),
+  sidebar: () => app.toggleSidebar(),
+  go: (to) => void router.push(to),
 })
+
+onMounted(() => {
+  void app.init()
+  stopLive = connectLive(onLive, () => {
+    void app.loadAuth()
+    void app.loadSync()
+    app.bump()
+  })
+})
+
+onBeforeUnmount(() => stopLive?.())
+
+const shortcuts = [
+  ['/', 'Search issues'],
+  ['J / K', 'Next / previous row'],
+  ['Enter', 'Open selected issue'],
+  ['X', 'Toggle row selection'],
+  ['R', 'Sync now'],
+  ['[', 'Collapse sidebar'],
+  ['G then O / I / P / A / C / S', 'Go to Overview / Issues / Projects / Agents / Connections / Settings'],
+  ['?', 'This help'],
+]
 </script>
 
 <template>
-  <div class="shell">
-    <header class="shell-header">
-      <RouterLink
-        to="/"
-        class="brand"
+  <div
+    class="shell"
+    :class="{ collapsed: app.sidebarCollapsed }"
+  >
+    <aside class="shell-side">
+      <AppSidebar />
+    </aside>
+    <Drawer
+      v-model:visible="mobileNav"
+      class="mobile-drawer"
+      :show-close-icon="false"
+      :pt="{ content: { style: 'padding:0' } }"
+    >
+      <AppSidebar
+        mobile
+        @navigate="mobileNav = false"
+      />
+    </Drawer>
+
+    <div class="shell-main">
+      <AppTopbar @menu="mobileNav = true" />
+      <div
+        v-if="app.offlineData"
+        class="offline-banner"
+        role="status"
       >
-        IssueWatcher
-      </RouterLink>
-      <span
-        v-if="version"
-        class="version"
-      >{{ version }}</span>
-    </header>
-    <main class="shell-main">
-      <RouterView />
-    </main>
+        <i class="pi pi-exclamation-circle" />
+        GitHub is disconnected — showing issues from the last sync.
+        <RouterLink to="/connections">
+          Reconnect
+        </RouterLink>
+      </div>
+      <main class="shell-content">
+        <RouterView />
+      </main>
+    </div>
+
+    <Toast
+      group="live"
+      position="bottom-right"
+    >
+      <template #container="{ message, closeCallback }">
+        <div
+          class="live-toast"
+          role="button"
+          tabindex="0"
+          @click="openFromToast(message, closeCallback)"
+          @keydown.enter="openFromToast(message, closeCallback)"
+        >
+          <span
+            class="live-icon"
+            :class="message.severity"
+          ><i
+            :class="message.summary === 'Issue closed' ? 'pi pi-check-circle' : message.summary === 'New comment' ? 'pi pi-comment' : 'pi pi-inbox'"
+          /></span>
+          <div class="live-body">
+            <div class="live-title">
+              {{ message.summary }}
+            </div>
+            <div class="live-detail">
+              {{ message.detail }}
+            </div>
+          </div>
+          <button
+            type="button"
+            class="live-close"
+            aria-label="Dismiss"
+            @click.stop="closeCallback"
+          >
+            <i class="pi pi-times" />
+          </button>
+        </div>
+      </template>
+    </Toast>
+    <Toast position="bottom-right" />
+    <ConfirmDialog />
+
+    <Dialog
+      v-model:visible="helpOpen"
+      header="Keyboard shortcuts"
+      modal
+      :style="{ width: '480px' }"
+      dismissable-mask
+    >
+      <table class="keys">
+        <tbody>
+          <tr
+            v-for="[k, what] in shortcuts"
+            :key="k"
+          >
+            <td><kbd class="mono">{{ k }}</kbd></td>
+            <td>{{ what }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <template #footer>
+        <Button
+          label="Close"
+          severity="secondary"
+          @click="helpOpen = false"
+        />
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.version {
-  margin-left: 0.5rem;
-  opacity: 0.6;
-  font-size: 0.85em;
+.shell {
+  display: grid;
+  grid-template-columns: var(--iw-sidebar) minmax(0, 1fr);
+  min-height: 100%;
+  transition: grid-template-columns 160ms ease;
+}
+
+.shell.collapsed {
+  grid-template-columns: var(--iw-sidebar-collapsed) minmax(0, 1fr);
+}
+
+.shell-side {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.shell-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-content {
+  flex: 1;
+}
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px var(--iw-gutter);
+  font-size: 13px;
+  color: var(--iw-warn);
+  background: var(--iw-warn-soft);
+  border-bottom: 1px solid var(--iw-border);
+}
+
+.offline-banner a {
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.live-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+}
+
+.live-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 9px;
+  color: var(--iw-primary);
+  background: var(--iw-primary-soft);
+}
+
+.live-icon.secondary {
+  color: var(--iw-success);
+  background: var(--iw-success-soft);
+}
+
+.live-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.live-title {
+  font-weight: 600;
+}
+
+.live-detail {
+  font-size: 13px;
+  color: var(--iw-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.live-close {
+  border: 0;
+  background: none;
+  color: var(--iw-muted);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.keys {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.keys td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--iw-border);
+}
+
+kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--iw-border-strong);
+  background: var(--iw-elevated);
+  font-size: 12px;
+}
+
+@media (width <= 899px) {
+  .shell,
+  .shell.collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell-side {
+    display: none;
+  }
+}
+</style>
+
+<style>
+/* Toast surfaces use the app tokens (the container slot drops PrimeVue's colouring). */
+.p-toast-message {
+  background: var(--iw-surface) !important;
+  border: 1px solid var(--iw-border) !important;
+  box-shadow: var(--iw-shadow) !important;
+  color: var(--iw-text) !important;
+  backdrop-filter: none !important;
+}
+
+.mobile-drawer.p-drawer {
+  width: var(--iw-sidebar) !important;
 }
 </style>

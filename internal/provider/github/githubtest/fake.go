@@ -218,7 +218,7 @@ func (s *Server) authed(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) user(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"login": Login})
+	writeJSON(w, http.StatusOK, map[string]string{"login": Login, "avatar_url": "https://avatars.example/octo"})
 }
 
 func (s *Server) installations(w http.ResponseWriter, _ *http.Request) {

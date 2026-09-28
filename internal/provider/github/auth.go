@@ -69,6 +69,7 @@ type Token struct {
 	Expiry        time.Time `json:"expiry,omitzero"`        // zero = non-expiring
 	RefreshExpiry time.Time `json:"refreshExpiry,omitzero"` // zero = unknown
 	Login         string    `json:"login"`
+	AvatarURL     string    `json:"avatarUrl,omitempty"`
 }
 
 // OAuthError is an error body from github.com/login/oauth/*.
@@ -261,12 +262,12 @@ func (a *Auth) Exchange(ctx context.Context, code, verifier, redirectURI string)
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
 		"code_verifier": {verifier},
-	}, "")
+	}, "", "")
 }
 
 // tokenRequest posts to the token endpoint, resolves the login, stores the token.
-// login is reused when already known (refresh).
-func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login string) (Token, error) {
+// login/avatar are reused when already known (refresh).
+func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login, avatar string) (Token, error) {
 	var out struct {
 		OAuthError
 		AccessToken           string `json:"access_token"`
@@ -292,7 +293,7 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login string) 
 		return Token{}, errors.New("github: token response without access_token")
 	}
 	now := a.Now().UTC()
-	t := Token{AccessToken: out.AccessToken, RefreshToken: out.RefreshToken, Login: login}
+	t := Token{AccessToken: out.AccessToken, RefreshToken: out.RefreshToken, Login: login, AvatarURL: avatar}
 	if out.ExpiresIn > 0 {
 		t.Expiry = now.Add(time.Duration(out.ExpiresIn) * time.Second)
 	}
@@ -300,7 +301,7 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login string) 
 		t.RefreshExpiry = now.Add(time.Duration(out.RefreshTokenExpiresIn) * time.Second)
 	}
 	if t.Login == "" {
-		if t.Login, err = a.userLogin(ctx, t.AccessToken); err != nil {
+		if t.Login, t.AvatarURL, err = a.userProfile(ctx, t.AccessToken); err != nil {
 			return Token{}, err
 		}
 	}
@@ -310,20 +311,21 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login string) 
 	return t, nil
 }
 
-func (a *Auth) userLogin(ctx context.Context, accessToken string) (string, error) {
+func (a *Auth) userProfile(ctx context.Context, accessToken string) (login, avatar string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.APIURL+"/user", nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	var u struct {
-		Login string `json:"login"`
+		Login     string `json:"login"`
+		AvatarURL string `json:"avatar_url"`
 	}
 	if err := a.doJSON(req, http.StatusOK, &u); err != nil {
-		return "", fmt.Errorf("github: get user: %w", err)
+		return "", "", fmt.Errorf("github: get user: %w", err)
 	}
-	return u.Login, nil
+	return u.Login, u.AvatarURL, nil
 }
 
 func (a *Auth) saveToken(t *Token) error {
@@ -355,13 +357,19 @@ func (a *Auth) loadToken() (*Token, error) {
 
 // Login is the signed-in user, "" when signed out.
 func (a *Auth) Login() string {
+	login, _ := a.Profile()
+	return login
+}
+
+// Profile is the signed-in user's login and avatar URL ("" when signed out).
+func (a *Auth) Profile() (login, avatarURL string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	t, err := a.loadToken()
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return t.Login
+	return t.Login, t.AvatarURL
 }
 
 // AccessToken returns a valid user token, refreshing it shortly before expiry.
@@ -404,7 +412,7 @@ func (a *Auth) refresh(ctx context.Context, t *Token) (Token, error) {
 		"client_secret": {app.ClientSecret},
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {t.RefreshToken},
-	}, t.Login)
+	}, t.Login, t.AvatarURL)
 }
 
 // Logout forgets the user token (the app registration stays).
@@ -478,7 +486,7 @@ func (a *Auth) DevicePoll(ctx context.Context, dc DeviceCode) (Token, error) {
 			"client_id":   {app.ClientID},
 			"device_code": {dc.DeviceCode},
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-		}, "")
+		}, "", "")
 		var oe *OAuthError
 		switch {
 		case err == nil:

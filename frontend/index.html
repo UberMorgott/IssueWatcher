@@ -1,9 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>IssueWatcher</title>
+    <script>
+      // Apply the saved theme before first paint (no dark→light flash).
+      try {
+        if (localStorage.getItem('iw.theme') === 'light') document.documentElement.classList.remove('dark')
+      } catch (e) {
+        /* storage blocked: keep dark */
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
