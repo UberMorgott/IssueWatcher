@@ -1,25 +1,14 @@
-<!-- quality-gate -->
-## Completion gate (mandatory)
+# IssueWatcher — project rules
 
-After changing files, run `qgate` from the repository root. Use `qgate -All` when
-dependencies, build configuration, generated files or several stacks changed.
-Commits are gated by the pre-commit hook; uncommitted work is not, so run `qgate`
-before handing it off.
+## Verification: Aegis only (no qgate)
+- Owner decision (2026-09-28): this repo does NOT use qgate. No lefthook/pre-commit hook, and don't reinstall one.
+  This overrides the global "Quality gate (qgate)" rule for this project only.
+- Aegis is enabled here (`aegis on`). Navigate with `aegis.query` first, make edits via `aegis.change` or
+  normal edits, then `aegis.verify` for build/tests. Frontend: `npm run build` (vue-tsc) + eslint in `frontend/`.
+- Done = shown evidence: include the `aegis.verify` result (and the frontend build result if the UI changed).
+- Report Aegis problems and wins per the global "Aegis feedback" rule.
 
-Exit code 0 means done. Anything else means NOT done: the output names the exact
-failures -- fix them and run it again. Do not report completion while the gate is
-failing, and never edit or disable the gate to make it pass. Include the command
-you ran and its pass/fail result in your final response.
-
-If `qgate` is unavailable, report that as a blocker, do not skip it. It installs with
-`irm https://raw.githubusercontent.com/UberMorgott/quality-gate/main/bootstrap.ps1 | iex`
-
-If the gate itself is wrong -- it crashes, blames code that is provably correct,
-misses a whole stack, or cannot be satisfied at all -- do not work around it and do
-not disable it. Open an issue against the gate and say so in your final response:
-
-```powershell
-qgate where   # install path + commit, paste this into the issue
-gh issue create --repo UberMorgott/quality-gate --title "<what broke>" --body "<qgate output, the command you ran, the file it blamed, `qgate where` output>"
-```
-<!-- /quality-gate -->
+## Repo notes
+- Commit identity: `git -c user.name=UberMorgott -c user.email=UberMorgott@users.noreply.github.com commit`.
+- Parallel agents share one index: commit with `git commit --only -- <explicit paths>`, don't stage ahead of time.
+- Design and phases: `docs/ARCHITECTURE.md`; checklist: `TASKS.md`.
