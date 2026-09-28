@@ -1,0 +1,220 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/runner"
+	"github.com/UberMorgott/issuewatcher/internal/store"
+)
+
+// Agent jobs (docs/ARCHITECTURE.md → HTTP API, Runner):
+//
+//	GET  /api/jobs?state=&flow=&project=&item=&cursor=&limit=  keyset chunk, newest first
+//	POST /api/jobs {itemIds[], flow: fix|reply, profileId?}    one job per item → 201 {jobs:[{itemId, job?, error?}]}
+//	GET  /api/jobs/{id}                  job
+//	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
+//	GET  /api/jobs/{id}/diff?attempt=    unified diff (text/plain)
+//	POST /api/jobs/{id}/cancel|retry|dismiss|pr   job
+//	POST /api/jobs/{id}/reply {body}     post the (edited) reply draft
+//	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
+//
+// SSE: job.changed (job), job.log {id, attempt, steps}.
+
+// SSE event names of the runner.
+const (
+	EventJobChanged = "job.changed"
+	EventJobLog     = "job.log"
+)
+
+// JobSteps is the job.log payload.
+type JobSteps struct {
+	ID      int64         `json:"id"`
+	Attempt int           `json:"attempt"`
+	Steps   []runner.Step `json:"steps"`
+}
+
+func (s *Server) registerJobs(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/jobs", s.handleJobs)
+	mux.HandleFunc("POST /api/jobs", s.handleJobsCreate)
+	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
+	mux.HandleFunc("GET /api/jobs/{id}/log", s.handleJobLog)
+	mux.HandleFunc("GET /api/jobs/{id}/diff", s.handleJobDiff)
+	mux.HandleFunc("POST /api/jobs/{id}/reply", s.handleJobReply)
+	for action, f := range map[string]func(context.Context, int64) (store.Job, error){
+		"cancel": s.opts.Runner.Cancel, "retry": s.opts.Runner.Retry, "dismiss": s.opts.Runner.Dismiss, "pr": s.opts.Runner.CreatePR,
+	} {
+		mux.HandleFunc("POST /api/jobs/{id}/"+action, s.jobAction(f))
+	}
+	mux.HandleFunc("GET /api/agents/detect", s.handleDetect)
+}
+
+func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	project, err1 := queryInt(r, "project")
+	item, err2 := queryInt(r, "item")
+	limit, err3 := queryInt(r, "limit")
+	if err := errors.Join(err1, err2, err3); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	f := store.JobFilter{State: q.Get("state"), Flow: q.Get("flow"), ProjectID: project, ItemID: item, Cursor: q.Get("cursor"), Limit: int(min(limit, 1000))}
+	chunk, err := s.opts.Store.Jobs(r.Context(), f)
+	if errors.Is(err, store.ErrBadCursor) {
+		errJSON(w, http.StatusBadRequest, "bad cursor")
+		return
+	}
+	if err != nil {
+		s.internalError(w, "list jobs", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chunk)
+}
+
+func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ItemIDs   []int64 `json:"itemIds"`
+		Flow      string  `json:"flow"`
+		ProfileID string  `json:"profileId"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	out, err := s.opts.Runner.Enqueue(r.Context(), req.ItemIDs, req.Flow, req.ProfileID)
+	if errors.Is(err, runner.ErrBadRequest) {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.internalError(w, "queue jobs", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"jobs": out})
+}
+
+func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	j, err := s.opts.Store.Job(r.Context(), id)
+	if s.jobError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, j)
+}
+
+// attempt reads ?attempt= (default: the job's current attempt).
+func (s *Server) attempt(w http.ResponseWriter, r *http.Request) (int64, int, bool) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return 0, 0, false
+	}
+	a, err := queryInt(r, "attempt")
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return 0, 0, false
+	}
+	if a == 0 {
+		j, err := s.opts.Store.Job(r.Context(), id)
+		if s.jobError(w, err) {
+			return 0, 0, false
+		}
+		a = int64(j.Attempt)
+	}
+	return id, int(a), true
+}
+
+func (s *Server) handleJobLog(w http.ResponseWriter, r *http.Request) {
+	id, attempt, ok := s.attempt(w, r)
+	if !ok {
+		return
+	}
+	steps, err := s.opts.Runner.Log(id, attempt)
+	if err != nil {
+		s.internalError(w, "job log", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"attempt": attempt, "steps": steps})
+}
+
+func (s *Server) handleJobDiff(w http.ResponseWriter, r *http.Request) {
+	id, attempt, ok := s.attempt(w, r)
+	if !ok {
+		return
+	}
+	diff, err := s.opts.Runner.Diff(id, attempt)
+	if err != nil {
+		s.internalError(w, "job diff", err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(diff))
+}
+
+func (s *Server) jobAction(f func(context.Context, int64) (store.Job, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := pathID(w, r)
+		if !ok {
+			return
+		}
+		j, err := f(r.Context(), id)
+		if s.jobError(w, err) {
+			return
+		}
+		writeJSON(w, http.StatusOK, j)
+	}
+}
+
+func (s *Server) handleJobReply(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCommentBytes)).Decode(&req); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	j, err := s.opts.Runner.SendReply(r.Context(), id, req.Body)
+	if s.jobError(w, err) {
+		return
+	}
+	s.dataChanged("reply", j.ItemID)
+	writeJSON(w, http.StatusOK, j)
+}
+
+// jobError writes the HTTP error for a runner/store error; false when err is nil.
+// A publish that failed returns 502 with the job (state back to needs_review).
+func (s *Server) jobError(w http.ResponseWriter, err error) bool {
+	var rl *provider.RateLimitError
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, store.ErrNotFound):
+		errJSON(w, http.StatusNotFound, "not found")
+	case errors.Is(err, runner.ErrNotAllowed), errors.Is(err, store.ErrJobExists):
+		errJSON(w, http.StatusConflict, err.Error())
+	case errors.Is(err, runner.ErrBadRequest):
+		errJSON(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, runner.ErrUnavailable), errors.Is(err, provider.ErrNotSignedIn):
+		errJSON(w, http.StatusConflict, err.Error())
+	case errors.As(err, &rl):
+		errJSON(w, http.StatusTooManyRequests, err.Error())
+	default:
+		s.opts.Log.Error("api: job action", "err", err)
+		errJSON(w, http.StatusBadGateway, err.Error())
+	}
+	return true
+}
+
+func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.opts.Runner.Detect(r.Context()))
+}

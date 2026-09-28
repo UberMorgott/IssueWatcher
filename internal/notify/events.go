@@ -31,10 +31,14 @@ type Card struct {
 	Text   string    // snippet, wrapped to two lines
 	Time   time.Time // shown as HH:MM
 	ItemID string    // "" opens the unread list
+	Path   string    // explicit dashboard route (agent job cards); wins over ItemID
 }
 
 // Target is the dashboard route a click on the card opens.
 func (c Card) Target() string {
+	if c.Path != "" {
+		return c.Path
+	}
 	if c.Kind == KindGroup || c.ItemID == "" {
 		return UnreadPath
 	}
@@ -66,6 +70,20 @@ func Cards(events []store.Event, now time.Time) []Card {
 		out = append(out, c)
 	}
 	return out
+}
+
+// JobCard is the «Агент закончил: repo#N» card of a finished agent job; a click
+// opens the job. ok = review ready (✓ icon), otherwise it failed.
+func JobCard(jobID int64, repo string, number int, ok bool, text string, now time.Time) Card {
+	c := Card{Kind: KindClosed, Title: "Агент закончил", Ref: repo + "#" + strconv.Itoa(number), Time: now,
+		Text: clip(oneLine(text), 200), Path: "/jobs/" + strconv.FormatInt(jobID, 10)}
+	if !ok {
+		c.Kind, c.Title = KindIssue, "Агент: ошибка"
+	}
+	if c.Text == "" {
+		c.Text = "Результат готов к проверке"
+	}
+	return c
 }
 
 // SampleCard is the tray «Тестовое уведомление» card: kinds rotate with n,

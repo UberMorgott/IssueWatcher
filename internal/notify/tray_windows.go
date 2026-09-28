@@ -342,6 +342,19 @@ func (t *Tray) NotifyEvents(events []store.Event) int {
 	return len(cards)
 }
 
+// NotifyCard shows one app card (agent job finished) unless notifications are
+// off, quiet hours run or Windows is busy (full screen) and that is respected.
+func (t *Tray) NotifyCard(c Card) bool {
+	t.mu.Lock()
+	p := t.prefs
+	t.mu.Unlock()
+	if !p.Enabled || p.Quiet(time.Now()) || (p.RespectWindowsDnd && WindowsBusy()) {
+		return false
+	}
+	t.ShowCards(c)
+	return true
+}
+
 // SimulateCardClick clicks the newest shown card (dev/demo verification
 // without a mouse).
 func (t *Tray) SimulateCardClick() { t.popups.simulateClick() }

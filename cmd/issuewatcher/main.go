@@ -182,8 +182,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	live.Store(&lp)
 	var group atomic.Bool
 	group.Store(cfg.Notifications.Group)
+	gh := github.NewProvider(auth)
 	sy := syncer.New(syncer.Options{
-		Store: st, Provider: github.NewProvider(auth), Plan: syncPlan(cfg.Sync), Log: log,
+		Store: st, Provider: gh, Plan: syncPlan(cfg.Sync), Log: log,
 		OnUpdate: func(events []store.Event, unread int) {
 			popups := events
 			if group.Load() {
@@ -208,6 +209,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		}
 	})
 	var testN atomic.Int64
+	jobs := newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
 
 	focus := notify.FocusDashboard
 	if headless {
@@ -269,6 +271,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		// dashboard's browser window to the front, or open a new tab.
 		Focus:         focus,
 		SessionSecret: session,
+		Runner:        jobs,
 	})
 	if err != nil {
 		return err
@@ -316,6 +319,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	syncDone := make(chan struct{})
 	startSync := func() {
+		if err := jobs.Start(syncCtx); err != nil {
+			log.Error("agent jobs: start", "err", err)
+		}
 		go func() { sy.Run(syncCtx); close(syncDone) }()
 		go upd.Run(syncCtx) // automatic update checks (never installs)
 	}
@@ -326,6 +332,14 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		case <-syncDone:
 		case <-time.After(10 * time.Second):
 			log.Warn("sync did not stop in time")
+		}
+		// Running agents are killed by the cancelled context; wait for their outcome to be stored.
+		stopped := make(chan struct{})
+		go func() { jobs.Wait(); close(stopped) }()
+		select {
+		case <-stopped:
+		case <-time.After(10 * time.Second):
+			log.Warn("agent jobs did not stop in time")
 		}
 	}()
 	// What to show on start: after an update nothing (the open tab reconnects

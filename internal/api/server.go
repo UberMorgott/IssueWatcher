@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
@@ -68,6 +69,8 @@ type Options struct {
 	SessionSecret string
 	// Updates is the self-updater (GET /api/update, check, install); nil disables it.
 	Updates Updater
+	// Runner is the agent job queue (/api/jobs, /api/agents); nil disables it (needs Store).
+	Runner *runner.Runner
 }
 
 // Server serves the SPA and the loopback API.
@@ -135,6 +138,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Updates != nil {
 		s.registerUpdate(mux)
+	}
+	if opts.Runner != nil && opts.Store != nil {
+		s.registerJobs(mux)
 	}
 	if opts.TestNotification != nil {
 		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)
