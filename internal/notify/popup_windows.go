@@ -479,6 +479,7 @@ func (m *popupManager) click(id uint64) {
 	if ok {
 		m.log.Info("notification clicked", "path", path)
 		if m.onClick != nil {
+			allowForeground() // a new browser tab may raise its window
 			go m.onClick(path)
 		}
 	}

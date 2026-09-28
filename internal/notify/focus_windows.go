@@ -15,9 +15,22 @@ var (
 	procShowWindow        = user32.NewProc("ShowWindow")
 	procBringWindowToTop  = user32.NewProc("BringWindowToTop")
 	procAttachThreadInput = user32.NewProc("AttachThreadInput")
+
+	procAllowSetForegroundWindow = user32.NewProc("AllowSetForegroundWindow")
 )
 
-const swRestore = 9
+const (
+	swRestore = 9
+	asfwAny   = 0xFFFFFFFF // ASFW_ANY: (DWORD)-1
+)
+
+// allowForeground lets any process take the foreground, so the browser that
+// opens a new dashboard tab can raise its window. It only works while this
+// process holds that right, i.e. right after the user clicked one of its
+// windows (a popup card never activates, so the right is not used otherwise).
+func allowForeground() {
+	_, _, _ = procAllowSetForegroundWindow.Call(asfwAny)
+}
 
 // The EnumWindows callback is created once: Go never frees callbacks and caps
 // how many a process may create. focusMu guards the search result.

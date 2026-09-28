@@ -16,8 +16,14 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
-// openStream connects an SSE client and returns a line reader.
+// openStream connects the first SSE client and returns a line reader.
 func openStream(t *testing.T, s *Server) *bufio.Reader {
+	t.Helper()
+	return openStreamN(t, s, 1)
+}
+
+// openStreamN connects an SSE client that makes n clients in total.
+func openStreamN(t *testing.T, s *Server, n int) *bufio.Reader {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -35,7 +41,7 @@ func openStream(t *testing.T, s *Server) *bufio.Reader {
 		t.Fatalf("events: status %d, type %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 	br := bufio.NewReader(resp.Body)
-	waitFor(t, func() bool { return s.Clients() == 1 })
+	waitFor(t, func() bool { return s.Clients() == n })
 	return br
 }
 

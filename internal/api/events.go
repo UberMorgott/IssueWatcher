@@ -63,15 +63,17 @@ type sseMsg struct {
 // hub fans events out to connected SSE clients.
 type hub struct {
 	mu      sync.Mutex
-	clients map[chan sseMsg]struct{}
+	seq     uint64
+	clients map[chan sseMsg]uint64 // → connect order; the highest is the active tab
 }
 
-func newHub() *hub { return &hub{clients: map[chan sseMsg]struct{}{}} }
+func newHub() *hub { return &hub{clients: map[chan sseMsg]uint64{}} }
 
 func (h *hub) subscribe() chan sseMsg {
 	ch := make(chan sseMsg, sseBuffer)
 	h.mu.Lock()
-	h.clients[ch] = struct{}{}
+	h.seq++
+	h.clients[ch] = h.seq
 	h.mu.Unlock()
 	return ch
 }
@@ -108,15 +110,48 @@ func (h *hub) publish(m sseMsg) int {
 	defer h.mu.Unlock()
 	n := 0
 	for ch := range h.clients {
-		select {
-		case ch <- m:
+		if h.sendLocked(ch, m) {
 			n++
-		default:
-			delete(h.clients, ch)
-			close(ch)
 		}
 	}
 	return n
+}
+
+// publishLatest sends to the most recently connected client only: the active
+// tab (a newer tab supersedes the older ones, and a taken-over tab reconnects).
+func (h *hub) publishLatest(m sseMsg) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var latest chan sseMsg
+	var top uint64
+	for ch, seq := range h.clients {
+		if seq > top {
+			latest, top = ch, seq
+		}
+	}
+	return latest != nil && h.sendLocked(latest, m)
+}
+
+// send delivers to one client and reports whether it got the message.
+func (h *hub) send(ch chan sseMsg, m sseMsg) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, ok := h.clients[ch]; !ok {
+		return false
+	}
+	return h.sendLocked(ch, m)
+}
+
+// sendLocked queues m for ch; a full buffer disconnects the client. h.mu held.
+func (h *hub) sendLocked(ch chan sseMsg, m sseMsg) bool {
+	select {
+	case ch <- m:
+		return true
+	default:
+		delete(h.clients, ch)
+		close(ch)
+		return false
+	}
 }
 
 // Publish sends a live event to all open dashboard tabs; it returns the number
@@ -133,17 +168,19 @@ func (s *Server) Publish(event string, data any) int {
 // Clients is the number of connected dashboard tabs.
 func (s *Server) Clients() int { return s.hub.count() }
 
-// navigate steers the open tabs to path ("" = just bring to front) and
-// reports whether any tab received it.
+// navigate steers the active tab (the most recently connected one, never a
+// superseded tab) to path ("" = just bring to front) and reports whether it
+// received the event.
 func (s *Server) navigate(path string) bool {
 	if path != "" {
 		path = safeNext(path)
 	}
-	n := s.Publish(EventNavigate, map[string]string{"path": path})
-	if n > 0 {
-		s.opts.Log.Info("api: navigate sent", "path", path, "clients", n)
+	b, _ := json.Marshal(map[string]string{"path": path}) // map[string]string never fails
+	ok := s.hub.publishLatest(sseMsg{event: EventNavigate, data: b})
+	if ok {
+		s.opts.Log.Info("api: navigate sent to the active tab", "path", path, "clients", s.hub.count())
 	}
-	return n > 0
+	return ok
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +195,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ch := s.hub.subscribe()
-	defer s.hub.unsubscribe(ch)
 	s.opts.Log.Info("api: events client connected", "clients", s.hub.count())
-	defer func() { s.opts.Log.Info("api: events client gone", "clients", s.hub.count()) }()
+	defer func() {
+		s.hub.unsubscribe(ch)
+		s.opts.Log.Info("api: events client gone", "clients", s.hub.count()) // count after leaving
+	}()
+	s.tabConnected(ch) // a tab this server opened: deliver the route queued for it
 
 	tick := time.NewTicker(sseHeartbeat)
 	defer tick.Stop()
