@@ -91,6 +91,19 @@ func migrate(raw map[string]any) bool {
 		}
 		delete(raw, "pollIntervalMinutes")
 	}
+	// v3 → v4: fix jobs run in the mapped folder by default; say so explicitly
+	// for every project that already has agent settings.
+	if ag, ok := raw["agents"].(map[string]any); ok {
+		if projects, ok := ag["projects"].(map[string]any); ok {
+			for _, p := range projects {
+				if pm, ok := p.(map[string]any); ok {
+					if m, _ := pm["mode"].(string); m == "" {
+						pm["mode"] = ModeDirect
+					}
+				}
+			}
+		}
+	}
 	raw["schemaVersion"] = SchemaVersion
 	return true
 }
