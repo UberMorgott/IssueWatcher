@@ -94,6 +94,10 @@ const en = {
     githubConnected: 'GitHub connected',
     signedInAs: 'Signed in as {login}. First sync is running.',
     dismiss: 'Dismiss',
+    superseded: 'The dashboard is open in another tab',
+    supersededText: 'This tab no longer receives live updates.',
+    takeOver: 'Use this tab',
+    inactiveTitle: 'Inactive · IssueWatcher',
     shortcutsTitle: 'Keyboard shortcuts',
     keys: {
       search: 'Search issues',

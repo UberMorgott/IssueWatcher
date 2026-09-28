@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
 /** Live event names served by GET /api/events (internal/api/events.go). */
-export const LIVE_EVENTS = ['item.new', 'comment.new', 'item.closed', 'sync.status', 'data.changed', 'auth.changed', 'navigate'] as const
+export const LIVE_EVENTS = ['item.new', 'comment.new', 'item.closed', 'sync.status', 'data.changed', 'auth.changed', 'navigate', 'superseded'] as const
 export type LiveEventName = (typeof LIVE_EVENTS)[number]
 
 export type LiveHandler = (name: LiveEventName, data: unknown) => void

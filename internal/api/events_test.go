@@ -119,6 +119,39 @@ func TestOpenNavigatesOpenTab(t *testing.T) {
 	}
 }
 
+// Desktop shell: a tab whose window can be focused is steered; otherwise a new
+// tab opens and the old ones are told they are superseded.
+func TestOpenFocusesOrSupersedes(t *testing.T) {
+	s, opened := newTestServer(t, 0)
+	focusOK := true
+	s.opts.Focus = func() (string, bool) { return "IssueWatcher · Обзор - Chrome", focusOK }
+	br := openStream(t, s)
+
+	s.OpenBrowser("/issues")
+	if name, data := readEvent(t, br); name != EventNavigate || data != `{"path":"/issues"}` {
+		t.Fatalf("focused: got %s %s", name, data)
+	}
+	select {
+	case u := <-opened:
+		t.Fatalf("new tab %q although the window was focused", u)
+	default:
+	}
+
+	focusOK = false
+	s.OpenBrowser("/item/3")
+	if name, _ := readEvent(t, br); name != EventSuperseded {
+		t.Fatalf("not found: got %s, want superseded", name)
+	}
+	select {
+	case u := <-opened:
+		if !strings.Contains(u, "/auth?t=") {
+			t.Fatalf("opened %q", u)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no new tab opened")
+	}
+}
+
 // The first sync is silent for notifications but must still tell open tabs that
 // data changed, report per-project progress, and end with sync.status done.
 func TestFirstSyncPublishesProgressAndDataChanged(t *testing.T) {

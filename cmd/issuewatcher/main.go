@@ -42,6 +42,7 @@ const (
 	envPort      = "IW_PORT"       // preferred port, used only if free
 	envNoBrowser = "IW_NO_BROWSER" // =1: log browser URLs instead of opening them
 	envDemo      = "IW_DEMO"       // =1: scripted badge + notification + simulated click
+	envDebug     = "IW_DEBUG"      // =1: debug log level (every tray callback message)
 )
 
 func main() {
@@ -155,6 +156,9 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		Sync:           sy,
 		OnUnreadChange: refreshBadge,
 		Settings:       settings,
+		// Tray/notification clicks give this process foreground rights: bring the
+		// dashboard's browser window to the front, or open a new tab.
+		Focus: notify.FocusDashboard,
 	})
 	if err != nil {
 		return err
@@ -190,21 +194,6 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		log.Info("notification shown", "item", id, "err", err)
 	}
 
-	// showDashboard steers an open tab to path and brings its browser window to the
-	// front (the tray click gave this process foreground rights); without a tab it
-	// opens one.
-	showDashboard := func(path string) {
-		srv.OpenBrowser(path)
-		if srv.Clients() == 0 {
-			return
-		}
-		if title, ok := notify.FocusDashboard(); ok {
-			log.Info("dashboard window focused", "title", title)
-		} else {
-			log.Info("dashboard window not found by title (tab not active?): navigate + title flash only")
-		}
-	}
-
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	defer stopSync()
 
@@ -215,8 +204,9 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 	err = notify.RunTray(notify.TrayOptions{
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
+		Log:     log,
 		Menu: []notify.MenuItem{
-			{Title: "Открыть", OnClick: func() { showDashboard("") }}, // "": an open tab keeps its page
+			{Title: "Открыть", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
 			{Title: "Тестовое уведомление", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
@@ -228,15 +218,15 @@ func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store,
 		},
 		OnClick: func() {
 			log.Info("tray click")
-			showDashboard("")
+			srv.OpenBrowser("")
 		},
 		OnBalloonClick: func(id string) {
 			log.Info("notification clicked", "item", id)
 			if id == "" { // summary balloon
-				showDashboard("/")
+				srv.OpenBrowser("/")
 				return
 			}
-			showDashboard("/item/" + url.PathEscape(id))
+			srv.OpenBrowser("/item/" + url.PathEscape(id))
 		},
 	}, func(t *notify.Tray) {
 		tray = t
@@ -307,6 +297,8 @@ func handOff(log *slog.Logger, dataDir string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+rt.Token)
+	// This launch came from the user: let the running instance take the foreground.
+	allowForeground(rt.PID)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -346,8 +338,19 @@ func openLog(dataDir string) (*slog.Logger, func(), error) {
 		_ = f.Close()
 		return nil, nil, fmt.Errorf("crash output: %w", err)
 	}
-	h := slog.NewTextHandler(io.MultiWriter(f, os.Stderr), &slog.HandlerOptions{Level: slog.LevelInfo})
+	level := slog.LevelInfo
+	if os.Getenv(envDebug) == "1" {
+		level = slog.LevelDebug
+	}
+	h := slog.NewTextHandler(io.MultiWriter(f, os.Stderr), &slog.HandlerOptions{Level: level})
 	return slog.New(h), func() { _ = f.Close() }, nil
+}
+
+var procAllowSetForegroundWindow = windows.NewLazySystemDLL("user32.dll").NewProc("AllowSetForegroundWindow")
+
+// allowForeground lets process pid bring a window to the front (best effort).
+func allowForeground(pid int) {
+	_, _, _ = procAllowSetForegroundWindow.Call(uintptr(pid))
 }
 
 func msgBox(caption, text string) {

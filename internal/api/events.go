@@ -13,7 +13,7 @@ import (
 // Live events for open dashboard tabs (GET /api/events, Server-Sent Events).
 //
 // Event names: item.new, comment.new, item.closed, sync.status, data.changed,
-// auth.changed, navigate {path}. The hub also tells the tray whether a tab is
+// auth.changed, navigate {path}, superseded. The hub also tells the tray whether a tab is
 // open, so a tray click can steer that tab (navigate) instead of opening a new one.
 
 // SSE event names.
@@ -25,6 +25,7 @@ const (
 	EventDataChanged = "data.changed" // DataChange: pages refetch what they show
 	EventAuthChanged = "auth.changed"
 	EventNavigate    = "navigate"
+	EventSuperseded  = "superseded" // a new dashboard tab replaces the open ones
 )
 
 // DataChange is the data.changed payload: why the stored data changed and, for

@@ -51,6 +51,9 @@ type Options struct {
 	Sync           *syncer.Syncer // poller status, sync now, replies
 	OnUnreadChange func()         // called after the user marks an item read
 	Settings       SettingsStore  // GET/PUT /api/settings
+	// Focus brings the browser window showing the dashboard to the front
+	// (desktop shell, internal/notify); nil = SSE navigate only.
+	Focus func() (title string, ok bool)
 }
 
 // Server serves the SPA and the loopback API.
@@ -177,12 +180,26 @@ func (s *Server) LaunchURL(next string) string {
 	return s.BaseURL() + "/auth?t=" + t
 }
 
-// OpenBrowser shows the dashboard at route next ("" = keep the current page):
-// an open tab is steered there over SSE; only without one does a new browser
-// tab open (via a one-time launch URL).
+// OpenBrowser shows the dashboard at route next ("" = keep the current page).
+// With Options.Focus (the desktop shell): when a tab is open and its browser
+// window can be brought to the front, that tab is steered there over SSE;
+// otherwise (background tab, other window) a new tab opens and the old tabs get
+// "superseded", so a click never does visibly nothing. Without Focus an open tab
+// is only steered over SSE.
 func (s *Server) OpenBrowser(next string) {
-	if s.navigate(next) {
-		return
+	if s.hub.count() > 0 {
+		if s.opts.Focus == nil {
+			if s.navigate(next) {
+				return
+			}
+		} else if title, ok := s.opts.Focus(); ok {
+			s.opts.Log.Info("api: dashboard window brought to front", "title", title)
+			s.navigate(next)
+			return
+		} else {
+			n := s.Publish(EventSuperseded, map[string]string{})
+			s.opts.Log.Info("api: dashboard window not found by title; opening a new tab", "superseded", n)
+		}
 	}
 	s.opts.Open(s.LaunchURL(next))
 }

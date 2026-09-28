@@ -14,6 +14,7 @@ import { connectLive, type LiveEventName } from './api/live'
 import type { LiveItemEvent, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useShortcuts } from './lib/shortcuts'
+import { updateDocumentTitle } from './router'
 
 const app = useAppStore()
 const router = useRouter()
@@ -60,6 +61,9 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'navigate':
       onNavigate(((data as { path?: string }) ?? {}).path ?? '')
       return
+    case 'superseded':
+      supersede()
+      return
     case 'auth.changed': {
       const a = (data ?? {}) as { state?: string; login?: string }
       if (a.state === 'connected' && !app.githubConnected) {
@@ -99,6 +103,42 @@ function openFromToast(msg: unknown, close: () => void) {
 
 let stopLive: (() => void) | undefined
 
+function startLive() {
+  stopLive?.()
+  stopLive = connectLive(onLive, () => {
+    void app.loadAuth()
+    void app.loadSync()
+    app.bump()
+  })
+}
+
+// --- one active dashboard tab: a newer tab (tray opened one, or the user did)
+// supersedes this one — via BroadcastChannel between tabs and the server's
+// "superseded" event. The old tab dims, drops live updates and its title marker
+// (so the tray no longer brings it to the front) until the user takes it over.
+const superseded = ref(false)
+const tabId = Math.random().toString(36).slice(2)
+let channel: BroadcastChannel | undefined
+function supersede() {
+  if (superseded.value) return
+  superseded.value = true
+  stopLive?.()
+  stopLive = undefined
+  document.title = t('app.inactiveTitle')
+}
+function announce() {
+  channel?.postMessage({ type: 'active', id: tabId })
+}
+function takeOver() {
+  superseded.value = false
+  announce()
+  startLive()
+  void app.loadAuth()
+  void app.loadSync()
+  app.bump()
+  updateDocumentTitle()
+}
+
 useShortcuts({
   sync: () => {
     if (app.githubConnected && !app.syncing) void app.syncNow()
@@ -114,14 +154,20 @@ useShortcuts({
 
 onMounted(() => {
   void app.init()
-  stopLive = connectLive(onLive, () => {
-    void app.loadAuth()
-    void app.loadSync()
-    app.bump()
-  })
+  startLive()
+  if ('BroadcastChannel' in window) {
+    channel = new BroadcastChannel('issuewatcher')
+    channel.onmessage = (e: MessageEvent<{ type?: string; id?: string }>) => {
+      if (e.data?.type === 'active' && e.data.id !== tabId) supersede()
+    }
+    announce()
+  }
 })
 
-onBeforeUnmount(() => stopLive?.())
+onBeforeUnmount(() => {
+  stopLive?.()
+  channel?.close()
+})
 
 const shortcuts = computed(() => [
   ['/', t('app.keys.search')],
@@ -239,6 +285,27 @@ const shortcuts = computed(() => [
         />
       </template>
     </Dialog>
+
+    <div
+      v-if="superseded"
+      class="superseded"
+      role="alertdialog"
+      aria-modal="true"
+      :aria-label="t('app.superseded')"
+    >
+      <div class="superseded-card panel">
+        <i class="pi pi-clone" />
+        <h2>{{ t('app.superseded') }}</h2>
+        <p class="muted">
+          {{ t('app.supersededText') }}
+        </p>
+        <Button
+          :label="t('app.takeOver')"
+          icon="pi pi-arrow-down-left"
+          @click="takeOver"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -334,6 +401,41 @@ const shortcuts = computed(() => [
   color: var(--iw-muted);
   cursor: pointer;
   padding: 2px;
+}
+
+.superseded {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--iw-bg) 72%, transparent);
+  backdrop-filter: blur(3px) grayscale(0.6);
+}
+
+.superseded-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  padding: 28px 32px;
+  text-align: center;
+  box-shadow: var(--iw-shadow);
+}
+
+.superseded-card i {
+  font-size: 24px;
+  color: var(--iw-primary);
+}
+
+.superseded-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.superseded-card p {
+  margin: 0 0 6px;
 }
 
 .keys {

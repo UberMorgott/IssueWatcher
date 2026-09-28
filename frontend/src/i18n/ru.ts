@@ -95,6 +95,10 @@ const ru: Messages = {
     githubConnected: 'GitHub подключён',
     signedInAs: 'Вход как {login}. Идёт первая синхронизация.',
     dismiss: 'Скрыть',
+    superseded: 'Дашборд открыт в другой вкладке',
+    supersededText: 'Эта вкладка больше не получает живые обновления.',
+    takeOver: 'Работать здесь',
+    inactiveTitle: 'Неактивно · IssueWatcher',
     shortcutsTitle: 'Горячие клавиши',
     keys: {
       search: 'Поиск по issues',

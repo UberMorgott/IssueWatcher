@@ -5,8 +5,10 @@ package notify
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -55,9 +57,21 @@ const (
 
 	wmTrayCallback = wmApp + 1
 
+	wmMouseMove     = 0x0200
+	wmLButtonDown   = 0x0201
+	wmLButtonUp     = 0x0202
+	wmLButtonDblClk = 0x0203
+	wmRButtonDown   = 0x0204
+	wmRButtonUp     = 0x0205
+
 	ninSelect           = wmUser + 0
 	ninKeySelect        = wmUser + 1
+	ninBalloonShow      = wmUser + 2
+	ninBalloonHide      = wmUser + 3
+	ninBalloonTimeout   = wmUser + 4
 	ninBalloonUserClick = wmUser + 5
+	ninPopupOpen        = wmUser + 6
+	ninPopupClose       = wmUser + 7
 
 	nimAdd        = 0
 	nimModify     = 1
@@ -140,7 +154,11 @@ type TrayOptions struct {
 	Menu           []MenuItem
 	OnClick        func()           // left click / keyboard select on the icon
 	OnBalloonClick func(tag string) // click on the last notification
+	Log            *slog.Logger     // optional; every callback message at debug level
 }
+
+// selectDebounce folds the two NIN_SELECT messages of a double-click into one open.
+const selectDebounce = 400 * time.Millisecond
 
 // Tray is a running tray icon. Methods are safe from any goroutine.
 type Tray struct {
@@ -151,6 +169,9 @@ type Tray struct {
 	mu         sync.Mutex
 	icon       windows.Handle
 	balloonTag string
+
+	lastSelect     time.Time // message-loop thread only
+	balloonShownAt time.Time // message-loop thread only
 }
 
 var (
@@ -332,11 +353,29 @@ func (t *Tray) showMenu() {
 }
 
 func (t *Tray) handleCallback(event uint16) {
+	if l := t.opts.Log; l != nil {
+		l.Debug("tray callback", "msg", fmt.Sprintf("0x%04X", event), "name", callbackName(event))
+	}
 	switch event {
 	case ninSelect, ninKeySelect:
+		now := time.Now()
+		if now.Sub(t.lastSelect) < selectDebounce {
+			return // second click of a double-click
+		}
+		t.lastSelect = now
 		dispatch(t.opts.OnClick)
 	case wmContextMenu:
 		t.showMenu()
+	case ninBalloonShow:
+		t.balloonShownAt = time.Now()
+	case ninBalloonTimeout:
+		// Shown and timed out at once = Windows never showed a banner (Do Not
+		// Disturb / Focus assist, banners off for this app, full-screen app): the
+		// notification went straight to the notification center, and clicks there
+		// are not reported to legacy tray balloons.
+		if l := t.opts.Log; l != nil && time.Since(t.balloonShownAt) < time.Second {
+			l.Info("notification suppressed by Windows: no banner; clicks in the notification center are not reported")
+		}
 	case ninBalloonUserClick:
 		t.mu.Lock()
 		tag := t.balloonTag
@@ -345,6 +384,43 @@ func (t *Tray) handleCallback(event uint16) {
 			go h(tag)
 		}
 	}
+}
+
+// callbackName names NOTIFYICON_VERSION_4 callback events for the debug log.
+func callbackName(event uint16) string {
+	switch event {
+	case ninSelect:
+		return "NIN_SELECT"
+	case ninKeySelect:
+		return "NIN_KEYSELECT"
+	case ninBalloonShow:
+		return "NIN_BALLOONSHOW"
+	case ninBalloonHide:
+		return "NIN_BALLOONHIDE"
+	case ninBalloonTimeout:
+		return "NIN_BALLOONTIMEOUT"
+	case ninBalloonUserClick:
+		return "NIN_BALLOONUSERCLICK"
+	case ninPopupOpen:
+		return "NIN_POPUPOPEN"
+	case ninPopupClose:
+		return "NIN_POPUPCLOSE"
+	case wmContextMenu:
+		return "WM_CONTEXTMENU"
+	case wmMouseMove:
+		return "WM_MOUSEMOVE"
+	case wmLButtonDown:
+		return "WM_LBUTTONDOWN"
+	case wmLButtonUp:
+		return "WM_LBUTTONUP"
+	case wmLButtonDblClk:
+		return "WM_LBUTTONDBLCLK"
+	case wmRButtonDown:
+		return "WM_RBUTTONDOWN"
+	case wmRButtonUp:
+		return "WM_RBUTTONUP"
+	}
+	return ""
 }
 
 func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
