@@ -1,0 +1,11 @@
+{
+  "extends": [
+    "stylelint-config-standard-scss",
+    "stylelint-config-recommended-vue/scss"
+  ],
+  "ignoreFiles": [
+    "dist/**",
+    "coverage/**",
+    ".cache/**"
+  ]
+}

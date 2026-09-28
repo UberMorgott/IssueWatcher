@@ -1,0 +1,36 @@
+:root {
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  color-scheme: light dark;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.shell-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.brand {
+  font-weight: 600;
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell-main {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
