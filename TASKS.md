@@ -11,7 +11,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Tray (own Win32): dynamic badge icon, menu Open dashboard / Test notification / Quit, left-click opens browser
 - [x] Balloon notification; click → browser at `/item/:id` (verified via simulated `NIN_BALLOONUSERCLICK`)
 - [x] Single instance: named mutex per data dir; second launch → `POST /api/open` to running instance
-- [x] Dashboard placeholder (PrimeVue DataTable, mock rows, checkbox selection) + `/item/:id` route
+- [x] Dashboard placeholder (PrimeVue DataTable, mock rows, checkbox selection) + `/item/:id` route — replaced by the Phase 1 SPA
 - [ ] Manual visual check: tray icon/badge look, menu, real balloon click, DataTable in browser
 - [ ] App icon + manifest resource for the exe (go-winres)
 
@@ -22,7 +22,14 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Notifications: new issue / new comment / closed → tray balloon; badge = unread items
 - [x] Sign-in callback focuses an open dashboard tab via SSE `navigate` (uses the SPA agent's hub in `internal/api/events.go`)
 - [ ] **Manual live test (user)** — see below
-- [ ] Dashboard UI (SPA agent): table on real API, filters, multi-select, detail + reply form, stats charts, device-flow code display + clipboard copy; switch client to contract routes, then drop legacy aliases
+- [x] Dashboard SPA (design spec from Codex): collapsible sidebar (Overview / Issues / Projects / Agents / Connections / Settings), top bar (sync status popover, sync now, theme, account menu), dark default + light toggle, history routing
+- [x] Overview: stat cards, ECharts weekly opened/closed + per-project bars, needs attention, recent/live activity; "Connect GitHub" onboarding when nothing is connected or synced
+- [x] Issues: lazy DataTable on `/api/items`, URL-backed filters (source/project/label/state/unread/text), multi-select bulk bar ("Send to agent" disabled → Phase 2, mark read), J/K/Enter/X keys; `/item/:id` detail with thread + reply composer (Ctrl+Enter)
+- [x] Projects (counts, progress, `localPath` column, per-project chart), Connections (GitHub wired incl. device code + copy; CurseForge / Nexus Mods / Steam planned), Agents + Settings pages
+- [x] SSE hub `GET /api/events` (`internal/api/events.go`) + client with backoff, toasts; tray / notification / second launch reuse an open tab via `navigate{path}` (new tab only when no client is connected)
+- [x] PrimeUI license: `VITE_PRIMEUI_LICENSE` in gitignored `frontend/.env` → `registerLicense` (as in `E:\DEV\1сEPD\web`); `frontend/.env.example` documents it
+- [ ] Drop legacy `/api/repos`, `/api/issues`, `/api/auth/{start,logout,device}` aliases (SPA no longer uses them)
+- [ ] Manual check with a real GitHub account: onboarding → connect → live toasts; tray click focusing the existing tab in a real (non-headless) browser
 - [ ] Repo ↔ local folder mapping + auto-discovery
 - [ ] Optional: revoke token on logout (`DELETE /applications/{client_id}/token`)
 

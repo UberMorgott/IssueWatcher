@@ -3,12 +3,15 @@ import { computed, ref } from 'vue'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
 import { useConfirm } from 'primevue/useconfirm'
+import { useToast } from 'primevue/usetoast'
 import PlatformIcon from '../components/PlatformIcon.vue'
+import { api } from '../api/client'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime } from '../lib/format'
 
 const app = useAppStore()
 const confirm = useConfirm()
+const toast = useToast()
 const busy = ref(false)
 
 const planned = [
@@ -32,6 +35,29 @@ async function connect() {
   busy.value = true
   await app.connect('github')
   busy.value = false
+}
+
+// Device flow: fallback when the loopback redirect cannot work (needs
+// "Enable Device Flow" in the GitHub App settings).
+const deviceError = ref('')
+async function startDevice() {
+  deviceError.value = ''
+  busy.value = true
+  const r = await api.authDevice()
+  busy.value = false
+  if (!r.ok) deviceError.value = r.error
+  await app.loadAuth()
+}
+
+const copied = ref(false)
+async function copyCode(code: string) {
+  try {
+    await navigator.clipboard.writeText(code)
+    copied.value = true
+    window.setTimeout(() => (copied.value = false), 1500)
+  } catch {
+    toast.add({ severity: 'warn', summary: 'Copy failed', detail: 'Select the code and copy it manually.', life: 3000 })
+  }
 }
 
 function disconnect() {
@@ -141,12 +167,29 @@ function disconnect() {
           v-if="gh?.device?.pending && gh.device.userCode"
           class="device"
         >
-          Enter code <b class="mono">{{ gh.device.userCode }}</b> at
+          Enter code <b class="mono code">{{ gh.device.userCode }}</b>
+          <Button
+            v-tooltip.top="copied ? 'Copied' : 'Copy code'"
+            :icon="copied ? 'pi pi-check' : 'pi pi-copy'"
+            size="small"
+            severity="secondary"
+            text
+            rounded
+            aria-label="Copy code"
+            @click="copyCode(gh.device.userCode)"
+          />
+          at
           <a
             :href="gh.device.verificationUri"
             target="_blank"
             rel="noopener noreferrer"
           >{{ gh.device.verificationUri }}</a>
+        </p>
+        <p
+          v-if="deviceError"
+          class="err"
+        >
+          <i class="pi pi-exclamation-triangle" /> {{ deviceError }}
         </p>
 
         <footer class="card-foot">
@@ -182,14 +225,25 @@ function disconnect() {
               text
             />
           </template>
-          <Button
-            v-else
-            label="Connect GitHub"
-            icon="pi pi-github"
-            :loading="busy"
-            :disabled="!app.authLoaded || !gh"
-            @click="connect"
-          />
+          <template v-else>
+            <Button
+              label="Connect GitHub"
+              icon="pi pi-github"
+              :loading="busy"
+              :disabled="!app.authLoaded || !gh"
+              @click="connect"
+            />
+            <Button
+              v-if="gh && !gh.setupNeeded"
+              v-tooltip.top="'If the browser redirect fails: sign in with a one-time code (enable Device Flow in the app settings first)'"
+              label="Use a device code"
+              icon="pi pi-key"
+              severity="secondary"
+              text
+              :disabled="busy"
+              @click="startDevice"
+            />
+          </template>
         </footer>
       </article>
 
