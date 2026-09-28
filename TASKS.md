@@ -82,4 +82,17 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [ ] **Manual (user, real desktop)**: tray «Тестовое уведомление» → card bottom-right, focus stays in the current window, hover pauses, × closes, click opens the item; taskbar on top/left; DPI change
 - [ ] Focus assist / DND has no public API: `respectWindowsDnd` covers only full-screen / presentation mode (`SHQueryUserNotificationState`)
 
-## Phase 2+ — see ARCHITECTURE.md
+## Phase 2 — agent jobs (ARCHITECTURE.md → Runner)
+- [x] Design review with Codex (state machine, worktrees, CLI contracts, structured results, publishing, safety)
+- [x] Settings › Агенты: profiles (CLI, path + PATH auto-detect, model, args, timeout, max parallel, budget), roles coder/responder/verifier, prompt layers (system, fix, reply, review; per-project prompt + verify command + noAegis); config.json v3
+- [x] Job queue in SQLite (migration 005): one unfinished job per item+flow, states, attempts, per-attempt logs/diffs in `data\jobs\<id>\`, restart → interrupted; 1 per project + profile/global limits
+- [x] Runner: worktree per fix job on `iw/<n>-<slug>`, claude stream-json / codex --json adapters → log steps over SSE, Windows Job Object cancel + timeout, diff + verify (+ aegis verify) + optional verifier review → needs_review
+- [x] Publishing on click only: «Создать PR» (commit if needed, push with the user token via env, draft PR "Fixes #N"), «Отправить» for reply drafts, «Отклонить» / cancel clean worktree + branch
+- [x] UI: Issues bulk «Отправить агенту» (flow + profile + confirm), item page buttons + job card, Задачи list (virtual, keyset), job page (live log, diff viewer with highlight.js, verify, review, actions), issue row job badges, tray «Агент закончил» cards, ru + en
+- [x] Tests: fake CLI (claude/codex formats; ok/noop/fail/hang), queue, concurrency, cancel (process tree), timeout, restart recovery, worktree lifecycle on temp git repos, draft PR + push against the fake GitHub + local bare remote, API
+- [x] E2E smoke (real claude 2.1.284 + codex-cli 0.157.1, headless instance, throwaway repo): fix job → needs_review with a correct diff and `go test` verify passed; reply job → draft; cancel of a running claude kills its tree
+- [ ] **Manual (user, real GitHub)**: «Создать PR» on a real repo (push with the GitHub App user token, draft PR); «Отправить» a reply draft; tray card click opens the job
+- [ ] Open decisions (owner): (1) worktrees share the mapped clone's `.git` (refs, config, hooks) — keep, or a private clone in `data\repos\<project>` as Codex suggests; (2) agents run with the user's rights and user-level CLI config (CLAUDE.md, hooks, MCP, language rules — e2e summaries came back in Russian) — add `--setting-sources project` / `--safe-mode` / a separate profile per role?; (3) claude `--permission-mode auto` vs `acceptEdits` + allowlist; (4) earlier attempts keep only log + diff (no per-attempt result history); (5) no Codex cost cap (tokens shown only)
+- [ ] Jobs count badge in the sidebar (needs an active-count endpoint)
+
+## Phase 3+ — see ARCHITECTURE.md
