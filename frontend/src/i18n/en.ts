@@ -126,7 +126,6 @@ const en = {
     },
   },
   overview: {
-    sub: 'What changed across your projects and what needs a reply.',
     plannedText: 'Mod comments and bug reports — planned',
     statOpen: 'Open',
     acrossProjects: 'across {n} project | across {n} projects',
@@ -165,7 +164,6 @@ const en = {
     perProjectLabel: 'Open issues per project',
   },
   issues: {
-    sub: 'Every issue from every connected platform and project.',
     searchPlaceholder: 'Search title, body or #number   /',
     searchAria: 'Search issues',
     source: 'Source',
@@ -217,7 +215,6 @@ const en = {
     back: 'Back to issues',
     open: 'Open',
     closed: 'Closed',
-    openedThis: '{author} opened this {time}',
     openOnGithub: 'Open on GitHub',
     opened: 'opened {time}',
     commented: 'commented {time}',
@@ -245,7 +242,6 @@ const en = {
     agentSoon: 'Coming in Phase 2',
   },
   projects: {
-    sub: 'Repositories and mod pages you watch, with their local working folders.',
     filter: 'Filter projects',
     discoverTip: 'Scan folders for git remotes — coming soon',
     discover: 'Auto-discover folders',
@@ -273,7 +269,6 @@ const en = {
   },
   agents: {
     sub: 'Local AI agents that work through issues for you — on your own subscriptions, on this machine.',
-    coming: 'Coming in Phase 2 / 3',
     coder: 'Coder',
     coderText: 'Fixes bugs in an isolated git worktree of the mapped local folder and proposes a draft PR. Your working copy stays untouched.',
     responder: 'Responder',

@@ -127,7 +127,6 @@ const ru: Messages = {
     },
   },
   overview: {
-    sub: 'Что изменилось в ваших проектах и где ждут ответа.',
     plannedText: 'Комментарии и баг-репорты к модам — в планах',
     statOpen: 'Открыто',
     acrossProjects: 'в {n} проекте | в {n} проектах | в {n} проектах',
@@ -166,7 +165,6 @@ const ru: Messages = {
     perProjectLabel: 'Открытые issues по проектам',
   },
   issues: {
-    sub: 'Все issues со всех подключённых платформ и проектов.',
     searchPlaceholder: 'Поиск по заголовку, тексту или #номеру   /',
     searchAria: 'Поиск по issues',
     source: 'Источник',
@@ -218,7 +216,6 @@ const ru: Messages = {
     back: 'К списку issues',
     open: 'Открыт',
     closed: 'Закрыт',
-    openedThis: '{author} · открыт {time}',
     openOnGithub: 'Открыть на GitHub',
     opened: 'открыт {time}',
     commented: 'комментарий {time}',
@@ -246,7 +243,6 @@ const ru: Messages = {
     agentSoon: 'Появится на этапе 2',
   },
   projects: {
-    sub: 'Репозитории и страницы модов, за которыми вы следите, и их локальные папки.',
     filter: 'Фильтр проектов',
     discoverTip: 'Поиск папок с git remote — скоро',
     discover: 'Найти папки',
@@ -274,7 +270,6 @@ const ru: Messages = {
   },
   agents: {
     sub: 'Локальные ИИ-агенты разбирают issues за вас — на ваших подписках, на этом компьютере.',
-    coming: 'Этапы 2–3',
     coder: 'Кодер',
     coderText: 'Чинит баги в изолированном git worktree привязанной папки и предлагает черновой PR. Ваша рабочая копия не трогается.',
     responder: 'Ответчик',

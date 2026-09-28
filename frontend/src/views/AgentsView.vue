@@ -43,17 +43,9 @@ const prompts = computed(() => [
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.agents') }}
-        </h2>
-        <p class="page-sub">
-          {{ t('agents.sub') }}
-        </p>
-      </div>
-      <span class="phase-badge"><i class="pi pi-clock" /> {{ t('agents.coming') }}</span>
-    </div>
+    <p class="page-intro">
+      {{ t('agents.sub') }}
+    </p>
 
     <div class="profiles">
       <article

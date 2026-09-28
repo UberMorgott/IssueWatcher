@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { liveConnected } from '../api/live'
 import { routeTitle } from '../router'
+import { crumbs } from '../lib/crumbs'
 import { absTime, duration, relTime } from '../lib/format'
 
 defineEmits<{ menu: [] }>()
@@ -61,7 +62,44 @@ const accountItems = computed(() => [
     >
       <i class="pi pi-bars" />
     </button>
-    <h1 class="topbar-title">
+    <nav
+      v-if="crumbs.length"
+      class="topbar-title crumbs"
+      :aria-label="t('item.breadcrumb')"
+    >
+      <template
+        v-for="(c, i) in crumbs"
+        :key="i"
+      >
+        <i
+          v-if="i > 0"
+          class="pi pi-angle-right sep"
+        />
+        <RouterLink
+          v-if="c.to && i < crumbs.length - 1"
+          :to="c.to"
+          class="crumb-link"
+          :class="{ mono: c.mono }"
+        >
+          {{ c.label }}
+        </RouterLink>
+        <h1
+          v-else-if="i === crumbs.length - 1"
+          class="crumb-current"
+          :class="{ mono: c.mono }"
+        >
+          {{ c.label }}
+        </h1>
+        <span
+          v-else
+          :class="{ mono: c.mono }"
+        >{{ c.label }}</span>
+      </template>
+    </nav>
+    <h1
+      v-else
+      class="topbar-title"
+    >
       {{ title }}
     </h1>
 
@@ -175,8 +213,36 @@ const accountItems = computed(() => [
 }
 
 .topbar-title {
+  min-width: 0;
   font-size: 16px;
   font-weight: 600;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.crumbs h1 {
+  overflow: hidden;
+  font-size: inherit;
+  text-overflow: ellipsis;
+}
+
+.crumb-link {
+  color: var(--iw-muted);
+  font-weight: 500;
+}
+
+.crumb-link:hover {
+  color: var(--iw-text);
+}
+
+.crumbs .sep {
+  font-size: 12px;
+  color: var(--iw-dimmed);
 }
 
 .topbar-right {

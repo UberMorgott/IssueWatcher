@@ -108,19 +108,11 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.projects') }}
-        </h2>
-        <p class="page-sub">
-          {{ t('projects.sub') }}
-        </p>
-      </div>
-      <div
-        v-if="app.repos.length"
-        class="summary muted"
-      >
+    <div
+      v-if="app.repos.length"
+      class="page-head"
+    >
+      <div class="summary muted">
         <b class="mono">{{ app.repos.length }}</b> {{ t('words.projects', app.repos.length) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }} · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
       </div>
     </div>

@@ -124,17 +124,6 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.overview') }}
-        </h2>
-        <p class="page-sub">
-          {{ t('overview.sub') }}
-        </p>
-      </div>
-    </div>
-
     <template v-if="!app.authLoaded || !app.reposLoaded">
       <div class="stats-row">
         <Skeleton

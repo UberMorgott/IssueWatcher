@@ -81,23 +81,16 @@ function disconnect() {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.connections') }}
-        </h2>
-        <i18n-t
-          keypath="connections.sub"
-          tag="p"
-          class="page-sub"
-          scope="global"
-        >
-          <template #path>
-            <span class="mono">data\secrets</span>
-          </template>
-        </i18n-t>
-      </div>
-    </div>
+    <i18n-t
+      keypath="connections.sub"
+      tag="p"
+      class="page-intro"
+      scope="global"
+    >
+      <template #path>
+        <span class="mono">data\secrets</span>
+      </template>
+    </i18n-t>
 
     <div class="cards">
       <article class="panel card primary-card">

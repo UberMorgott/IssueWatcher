@@ -58,5 +58,6 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 
 ## Block 5 — settings, palettes, tiered sync, session
 - [x] No PrimeUI license key in the exe: `frontend/scripts/primevue-local.mjs` (npm `postinstall`, also before `dev`/`build`) strips PrimeVue 5.0.1's license check; exact-hash guarded, idempotent, fails on any other PrimeVue version (`npm test`)
+- [x] One page title: the top bar is the heading (breadcrumb on detail pages via `lib/crumbs.ts`: Issues › owner/repo#N); body H1s and filler subtitles removed; repeated counts/labels dropped (Issues total when equal to the state counter, item author/opened line, Agents phase badge, project name twice)
 
 ## Phase 2+ — see ARCHITECTURE.md

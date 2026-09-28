@@ -12,7 +12,8 @@ import { api } from '../api/client'
 import type { IssueDetail } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, num, relTime, shortRepo } from '../lib/format'
+import { absTime, num, relTime } from '../lib/format'
+import { useCrumbs } from '../lib/crumbs'
 import { useChunks } from '../lib/chunks'
 
 const props = defineProps<{ id: string }>()
@@ -84,6 +85,15 @@ watch(
 
 const repo = computed(() => app.repos.find((r) => r.id === item.value?.repoId))
 
+// The top bar is the page heading: Issues › owner/repo#12.
+useCrumbs(() => {
+  const it = item.value
+  return [
+    { label: t('nav.issues'), to: '/issues' },
+    it ? { label: `${it.repo}#${it.number}` } : { label: props.id },
+  ]
+})
+
 async function send() {
   const it = item.value
   const body = reply.value.trim()
@@ -115,27 +125,6 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 
 <template>
   <div class="page">
-    <nav
-      class="crumbs"
-      :aria-label="t('item.breadcrumb')"
-    >
-      <RouterLink to="/issues">
-        {{ t('nav.issues') }}
-      </RouterLink>
-      <i class="pi pi-angle-right" />
-      <template v-if="item">
-        <RouterLink :to="{ name: 'issues', query: { repo: String(item.repoId), state: 'all' } }">
-          {{ item.repo }}
-        </RouterLink>
-        <i class="pi pi-angle-right" />
-        <span class="mono">#{{ item.number }}</span>
-      </template>
-      <span
-        v-else
-        class="mono"
-      >{{ id }}</span>
-    </nav>
-
     <template v-if="state === 'loading'">
       <Skeleton
         height="40px"
@@ -164,7 +153,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
       <header class="head">
         <div class="head-main">
           <h2 class="title">
-            {{ item.title }} <span class="num mono">#{{ item.number }}</span>
+            {{ item.title }}
           </h2>
           <div class="head-meta">
             <span
@@ -174,10 +163,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               <i :class="item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'" />
               {{ item.state === 'closed' ? t('item.closed') : t('item.open') }}
             </span>
-            <span class="muted"><i18n-t
-              keypath="item.openedThis"
-              scope="global"
-            ><template #author><b>{{ item.author || t('common.unknown') }}</b></template><template #time><span v-tooltip.bottom="absTime(item.createdAt)">{{ relTime(item.createdAt) }}</span></template></i18n-t> · {{ t('words.comments', item.comments) }}</span>
+            <span class="muted">{{ t('words.comments', item.comments) }}</span>
           </div>
         </div>
         <Button
@@ -321,11 +307,8 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             <dt>{{ t('item.metaProject') }}</dt>
             <dd>
               <RouterLink :to="{ name: 'issues', query: { repo: String(item.repoId), state: 'all' } }">
-                {{ shortRepo(item.repo) }}
-              </RouterLink>
-              <div class="muted small">
                 {{ item.repo }}
-              </div>
+              </RouterLink>
             </dd>
             <dt>{{ t('item.metaSource') }}</dt>
             <dd class="src">
@@ -394,18 +377,6 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 </template>
 
 <style scoped>
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--iw-muted);
-}
-
-.crumbs i {
-  font-size: 11px;
-}
-
 .head {
   display: flex;
   align-items: flex-start;
@@ -420,21 +391,12 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
   letter-spacing: -0.01em;
 }
 
-.num {
-  color: var(--iw-dimmed);
-  font-weight: 400;
-}
-
 .head-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-}
-
-.head-meta b {
-  color: var(--iw-text);
 }
 
 .layout {

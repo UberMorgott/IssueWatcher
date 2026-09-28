@@ -39,23 +39,16 @@ const langs = computed(() => LANGS.map((l) => ({ label: t('lang.' + l), value: l
 
 <template>
   <div class="page narrow">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.settings') }}
-        </h2>
-        <i18n-t
-          keypath="settings.sub"
-          tag="p"
-          class="page-sub"
-          scope="global"
-        >
-          <template #path>
-            <span class="mono">data\</span>
-          </template>
-        </i18n-t>
-      </div>
-    </div>
+    <i18n-t
+      keypath="settings.sub"
+      tag="p"
+      class="page-intro"
+      scope="global"
+    >
+      <template #path>
+        <span class="mono">data\</span>
+      </template>
+    </i18n-t>
 
     <section class="panel">
       <div class="panel-head">

@@ -241,6 +241,12 @@ const counts = computed(() => {
   const repos = filters.value.repo ? app.repos.filter((r) => r.id === filters.value.repo) : app.repos
   return repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed, unread: a.unread + r.unread }), { open: 0, closed: 0, unread: 0 })
 })
+/** Counter above that already shows the list size for the current state filter (the total is then not repeated). */
+const stateCount = computed(() => {
+  const c = counts.value
+  if (filters.value.unread) return c.unread
+  return filters.value.state === 'open' ? c.open : filters.value.state === 'closed' ? c.closed : c.open + c.closed
+})
 
 function open(it: Row) {
   if (!it.skeleton) void router.push(`/item/${it.id}`)
@@ -307,19 +313,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 class="page-title">
-          {{ t('nav.issues') }}
-        </h2>
-        <p class="page-sub">
-          {{ t('issues.sub') }}
-        </p>
-      </div>
-      <div
-        v-if="!app.onboarding"
-        class="counters"
-      >
+    <div
+      v-if="!app.onboarding"
+      class="page-head"
+    >
+      <div class="counters">
         <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> {{ t('words.open', counts.open) }}</span>
         <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed }}</b> {{ t('words.closed', counts.closed) }}</span>
         <span class="counter"><span class="unread-dot" /> <b class="mono">{{ counts.unread }}</b> {{ t('words.unread', counts.unread) }}</span>
@@ -397,7 +395,7 @@ onBeforeUnmount(() => {
           @click="reset"
         />
         <span
-          v-if="total !== null"
+          v-if="total !== null && total !== stateCount"
           class="f-total"
         ><b class="mono">{{ total }}</b> {{ t('words.issues', total) }}</span>
       </div>

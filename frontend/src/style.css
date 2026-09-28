@@ -129,15 +129,9 @@ h3 {
   flex-wrap: wrap;
 }
 
-.page-title {
-  font-size: 28px;
-  line-height: 34px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.page-sub {
-  margin: 4px 0 0;
+/* Pages have no in-body title: the top bar is the heading. An intro line only when it adds information. */
+.page-intro {
+  margin: 0;
   color: var(--iw-muted);
 }
 
@@ -215,11 +209,6 @@ h3 {
 @media (width <= 767px) {
   :root {
     --iw-gutter: 16px;
-  }
-
-  .page-title {
-    font-size: 22px;
-    line-height: 28px;
   }
 }
 
