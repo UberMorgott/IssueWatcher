@@ -19,3 +19,4 @@ frontend/.env.local
 coverage.out
 .serena/
 .claude/
+build/release/
