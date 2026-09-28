@@ -55,11 +55,13 @@ type Server struct {
 	*httptest.Server
 	Mu sync.Mutex
 
-	Repos        []string // owner/name reachable through installation 1
-	Issues       []*Issue
-	PullRequests []*Issue // listed by the REST issues endpoint only
-	ExpiresIn    int      // seconds; 0 = non-expiring user tokens
-	PollInterval int      // X-Poll-Interval seconds on change checks; 0 = none
+	Repos         []string // owner/name reachable through installation 1
+	Issues        []*Issue
+	PullRequests  []*Issue // listed by the REST issues endpoint only
+	ExpiresIn     int      // seconds; 0 = non-expiring user tokens
+	PollInterval  int      // X-Poll-Interval seconds on change checks; 0 = none
+	DefaultBranch string   // GET /repos/{o}/{r} default_branch; "" = main
+	Pulls         []*Pull  // pull requests opened through the REST API
 
 	hits Hits
 	fail *failure
@@ -86,6 +88,9 @@ func New(t *testing.T) *Server {
 	mux.HandleFunc("POST /graphql", s.authed(s.graphql))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues", s.authed(s.restIssues))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/comments", s.authed(s.restComments))
+	mux.HandleFunc("GET /repos/{owner}/{repo}", s.authed(s.repo))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", s.authed(s.listPulls))
+	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", s.authed(s.createPull))
 	s.Server = httptest.NewServer(mux)
 	t.Cleanup(s.Close)
 	return s

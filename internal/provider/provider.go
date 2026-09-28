@@ -82,6 +82,21 @@ type Item struct {
 	Comments   []Comment
 }
 
+// PullRequest is an opened (draft) pull request.
+type PullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+}
+
+// NewPullRequest describes a pull request to open from branch Head into Base.
+type NewPullRequest struct {
+	Title string
+	Head  string
+	Base  string
+	Body  string
+	Draft bool
+}
+
 // Provider is one platform adapter.
 type Provider interface {
 	Platform() string
