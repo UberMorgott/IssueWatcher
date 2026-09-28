@@ -50,7 +50,7 @@ data/                   runtime (gitignored): issuewatcher.db, runtime.json, con
 ## Build & dev switches
 
 - `pwsh -File build.ps1` → `build\bin\issuewatcher.exe` (npm build + `go build -H windowsgui`).
-- Env: `IW_DATA_DIR` (data dir override), `IW_PORT` (preferred port, used only if free), `IW_NO_BROWSER=1` (log launch URLs instead of opening), `IW_DEMO=1` (scripted badge + four popup cards + simulated click, for log-based verification), `IW_POPUP_SNAPSHOT=<dir>` (render sample popup PNG files — dark/light single, closed, stack — at 150 % and exit, no window).
+- Env: `IW_DATA_DIR` (data dir override), `IW_PORT` (preferred port, used only if free), `IW_NO_BROWSER=1` (log launch URLs instead of opening), `IW_HEADLESS=1` (automated runs: server + sync only — no tray icon, no popups, no browser, no window focusing, in-memory autostart instead of the registry), `IW_DEMO=1` (scripted badge + four popup cards + simulated click, for log-based verification), `IW_POPUP_SNAPSHOT=<dir>` (render sample popup PNG files — dark/light single, closed, stack — at 150 % and exit, no window).
 - Fatal panics go to `data\logs\issuewatcher.log` (`debug.SetCrashOutput`); startup errors also show a MessageBox.
 
 ## GitHub auth

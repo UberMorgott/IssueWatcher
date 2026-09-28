@@ -66,6 +66,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Tiered sync: conditional REST change checks (ETag per exact URL, 304 = free) on `issues?state=all&since=` + `issues/comments?since=`, targeted GraphQL fetch of changed items, periodic full GraphQL reconcile; scheduler with active/idle intervals, jitter, bounded concurrency, hourly budget, `X-Poll-Interval`, `Retry-After` / secondary-limit backoff; generic `provider.Poller` + `Scheduling` for future platforms; Settings → Синхронизация shows quota, budget, 304s, next reconcile. Tests on the fake GitHub: 304 path, change path, rate-limit pause, budget, X-Poll-Interval
 - [ ] **Manual (user, real GitHub)**: comment on an issue → toast within the active interval (default 5 min, fast 2); Settings → Синхронизация «бесплатных» grows while nothing changes
 - [x] Session persistence: browser session secret kept in `data\secrets\session.json` (cookie `Max-Age` 400 d); tabs and the app window stay signed in across restarts (verified: cookie from run 1 → 200 on run 2 with a new port and bearer token); bearer token still per run. Needed by the self-update block (same-port restart)
+- [x] `IW_HEADLESS=1` for automated runs: server + sync only (no tray icon, popups, browser, window focusing; in-memory autostart)
 
 ## Own popup notifications (replace Windows tray balloons)
 

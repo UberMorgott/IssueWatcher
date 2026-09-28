@@ -43,6 +43,9 @@ const (
 	envDemo      = "IW_DEMO"           // =1: scripted badge + popup cards + simulated click
 	envDebug     = "IW_DEBUG"          // =1: debug log level (tray callbacks except mouse moves)
 	envSnapshot  = "IW_POPUP_SNAPSHOT" // =<dir>: render sample popup PNG files there and exit
+	// =1: server + sync only, for automated runs: no tray icon, no popups, no
+	// browser launch (URLs are logged), no window focusing, no autostart registry writes.
+	envHeadless = "IW_HEADLESS"
 )
 
 // snapshotScale renders IW_POPUP_SNAPSHOT samples at 144 DPI.
@@ -103,22 +106,27 @@ func run() error {
 	if p, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = p
 	}
-	// Portable folder moved: keep the autostart entry pointing at this exe.
-	if wrote, err := autostart.Default.Refresh(cfg.General.StartWithWindows, exe); err != nil {
+	headless := os.Getenv(envHeadless) == "1"
+	var entry runEntry = autostart.Default
+	if headless {
+		entry = &memEntry{} // never touch the real Run key from an automated run
+		log.Info("headless: no tray, no popups, no browser, no autostart writes")
+	} else if wrote, err := autostart.Default.Refresh(cfg.General.StartWithWindows, exe); err != nil {
+		// Portable folder moved: keep the autostart entry pointing at this exe.
 		log.Error("autostart refresh", "err", err)
 	} else if wrote {
 		log.Info("autostart entry updated", "exe", exe)
 	}
-	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: autostart.Default}
+	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: entry}
 	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized)
-	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized)
+	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized, headless)
 }
 
 func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, auth *github.Auth,
-	settings *appSettings, minimized bool,
+	settings *appSettings, minimized, headless bool,
 ) error {
 	open := func(u string) { go openBrowser(log, u) }
-	if os.Getenv(envNoBrowser) == "1" {
+	if headless || os.Getenv(envNoBrowser) == "1" {
 		open = func(u string) { log.Info("browser open suppressed", "url", u) }
 	}
 	preferred, _ := strconv.Atoi(os.Getenv(envPort))
@@ -155,7 +163,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 			if group.Load() {
 				popups = groupRepeats(events)
 			}
-			tray.NotifyEvents(popups) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
+			if tray != nil {
+				tray.NotifyEvents(popups) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
+			}
 			setBadge(int64(unread))
 			publishLive(srv, live.Load().Filter(events, time.Now()))
 		},
@@ -173,6 +183,10 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	var testN atomic.Int64
 
+	focus := notify.FocusDashboard
+	if headless {
+		focus = nil // never raise the user's own dashboard window
+	}
 	session, err := loadSession(filepath.Join(dataDir, "secrets"))
 	if err != nil {
 		log.Error("session secret: per-run fallback", "err", err) // tabs sign in again after a restart
@@ -190,12 +204,14 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Settings:       settings,
 		TestNotification: func() {
 			c := notify.SampleCard(testN.Add(1), time.Now())
-			tray.ShowCards(c)
-			log.Info("test notification shown", "item", c.ItemID)
+			if tray != nil {
+				tray.ShowCards(c)
+			}
+			log.Info("test notification shown", "item", c.ItemID, "headless", tray == nil)
 		},
 		// Tray/notification clicks give this process foreground rights: bring the
 		// dashboard's browser window to the front, or open a new tab.
-		Focus:         notify.FocusDashboard,
+		Focus:         focus,
 		SessionSecret: session,
 	})
 	if err != nil {
@@ -221,6 +237,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}
 	setBadge = func(n int64) {
 		unread.Store(n)
+		if tray == nil {
+			return // headless
+		}
 		icon, err := notify.TrayIcon(int(n))
 		if err == nil {
 			err = tray.SetIcon(icon)
@@ -231,6 +250,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	defer stopSync()
 
+	if headless {
+		return runHeadless(syncCtx, log, srv, sy)
+	}
 	icon, err := notify.TrayIcon(int(unread.Load()))
 	if err != nil {
 		return err

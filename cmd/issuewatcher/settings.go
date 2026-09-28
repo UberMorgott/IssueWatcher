@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/UberMorgott/issuewatcher/internal/api"
-	"github.com/UberMorgott/issuewatcher/internal/autostart"
 	"github.com/UberMorgott/issuewatcher/internal/config"
 )
 
@@ -33,7 +32,7 @@ type appSettings struct {
 	dataDir string
 	exe     string
 	version string
-	entry   autostart.Entry
+	entry   runEntry
 }
 
 func (a *appSettings) doc(s config.Settings) api.SettingsDoc {
