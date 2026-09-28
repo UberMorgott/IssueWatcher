@@ -46,6 +46,8 @@ export const useAppStore = defineStore('app', () => {
     save('iw.sidebar', sidebarCollapsed.value ? 'collapsed' : 'expanded')
   }
   const version = ref('')
+  /** A newer release is available (Settings › Updates; set by the update status). */
+  const updateAvailable = ref(false)
 
   // --- connections
   const providers = ref<Provider[]>([])
@@ -193,6 +195,7 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed,
     toggleSidebar,
     version,
+    updateAvailable,
     providers,
     authLoaded,
     authError,

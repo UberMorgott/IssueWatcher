@@ -64,10 +64,20 @@ const active = (match: string[]) => match.includes(String(route.name))
     </ul>
 
     <div class="foot">
-      <span
+      <RouterLink
         v-if="app.version"
+        to="/settings/updates"
         class="version mono"
-      >{{ app.version }}</span>
+        :title="t('nav.versionTip')"
+        @click="emit('navigate')"
+      >
+        {{ app.version }}
+        <span
+          v-if="app.updateAvailable"
+          class="update-dot"
+          :aria-label="t('nav.updateAvailable')"
+        />
+      </RouterLink>
       <button
         v-if="!mobile"
         v-tooltip.right="app.sidebarCollapsed ? t('nav.expandTip') : undefined"
@@ -232,8 +242,22 @@ const active = (match: string[]) => match.includes(String(route.name))
 }
 
 .version {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 0 12px;
   font-size: calc(11px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
+}
+
+.version:hover {
+  color: var(--iw-text);
+}
+
+.update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--iw-primary);
 }
 </style>

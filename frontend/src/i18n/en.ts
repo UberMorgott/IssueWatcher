@@ -49,6 +49,8 @@ const en = {
     expandTip: 'Expand sidebar  [',
     collapse: 'Collapse sidebar',
     collapseLabel: 'Collapse',
+    versionTip: 'Version — open updates',
+    updateAvailable: 'Update available',
   },
   title: {
     overview: 'Overview',

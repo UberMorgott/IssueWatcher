@@ -50,6 +50,8 @@ const ru: Messages = {
     expandTip: 'Развернуть панель  [',
     collapse: 'Свернуть панель',
     collapseLabel: 'Свернуть',
+    versionTip: 'Версия — открыть обновления',
+    updateAvailable: 'Доступно обновление',
   },
   title: {
     overview: 'Обзор',
