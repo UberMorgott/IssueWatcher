@@ -83,7 +83,7 @@ Discussion:
 {comments}
 
 Make the smallest correct change, add or update tests when the project has them, and run the relevant checks if you can.
-Finish with a short summary: what was wrong, what you changed, how you checked it. If the issue cannot be fixed (unclear, not reproducible, not a bug), change nothing and explain why.`
+Finish with a short summary in the language of the issue: what was wrong, what you changed, how you checked it. If the issue cannot be fixed (unclear, not reproducible, not a bug), change nothing and explain why.`
 	DefaultReplyPrompt = `Draft a reply to issue #{issue.number} "{issue.title}" in {repo}, written as the maintainer.
 
 Issue:
@@ -118,6 +118,22 @@ func defaultAgents() Agents {
 			System: DefaultSystemPrompt, Fix: DefaultFixPrompt, Reply: DefaultReplyPrompt, Review: DefaultReviewPrompt,
 		},
 		Projects: map[string]ProjectAgent{},
+	}
+}
+
+// blankDefaultPrompts stores prompts equal to the built-in text as "" in the
+// file, so improved defaults of a newer build reach users who never edited them.
+func blankDefaultPrompts(known map[string]any) {
+	ag, _ := known["agents"].(map[string]any)
+	pr, _ := ag["prompts"].(map[string]any)
+	if pr == nil {
+		return
+	}
+	d := defaultAgents().Prompts
+	for k, def := range map[string]string{"system": d.System, "fix": d.Fix, "reply": d.Reply, "review": d.Review} {
+		if pr[k] == def {
+			pr[k] = ""
+		}
 	}
 }
 

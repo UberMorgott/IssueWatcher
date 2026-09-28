@@ -102,6 +102,7 @@ func (s *Store) write() error {
 	if err != nil {
 		return err
 	}
+	blankDefaultPrompts(known)
 	out := deepCopy(s.raw)
 	mergeKnown(out, known)
 	s.raw = out

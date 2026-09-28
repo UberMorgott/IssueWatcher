@@ -32,6 +32,12 @@ func TestAgentsDefaultsAndMigration(t *testing.T) {
 		got.Agents.Projects["octo/app"].Verify != "go test ./..." {
 		t.Fatalf("patched: %+v", got.Agents)
 	}
+	// Default prompt texts are not frozen into the file: a newer build's defaults apply.
+	ag, _ := read(t, dir)["agents"].(map[string]any)
+	pr, _ := ag["prompts"].(map[string]any)
+	if pr["fix"] != "" || pr["system"] != "" {
+		t.Fatalf("default prompts written to the file: %v", pr)
+	}
 }
 
 func TestAgentsValidation(t *testing.T) {
