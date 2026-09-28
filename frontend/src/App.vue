@@ -16,6 +16,7 @@ import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
+import { jobOutcome } from './lib/jobs'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
@@ -95,9 +96,22 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'data.changed':
       app.invalidate((data as DataChange | null) ?? undefined)
       return
-    case 'job.changed':
-      jobs.emitJob(data)
+    case 'job.changed': {
+      const done = jobs.emitJob(data)
+      if (done) {
+        const outcome = jobOutcome(done)
+        const label = outcome ? t('jobs.outcome.' + outcome) : t('jobs.state.' + done.state)
+        toast.add({
+          group: 'live',
+          severity: done.state === 'failed' || outcome === 'failed' ? 'error' : 'info',
+          summary: t('app.agentFinished', { ref: `${done.repo}#${done.number}`, outcome: label }),
+          detail: done.title,
+          life: 10000,
+          data: { id: done.itemId, icon: done.state === 'failed' ? 'pi pi-times-circle' : 'pi pi-sparkles' },
+        } as never)
+      }
       return
+    }
     case 'job.log':
       jobs.emitLog(data)
       return
@@ -138,6 +152,7 @@ function startLive() {
     void settings.load()
     void app.loadAuth()
     void app.loadSync()
+    void jobs.seed()
     app.bump()
   })
 }
@@ -166,6 +181,7 @@ function takeOver() {
   void settings.load()
   void app.loadAuth()
   void app.loadSync()
+  void jobs.seed()
   app.bump()
   updateDocumentTitle()
 }
@@ -187,6 +203,7 @@ onMounted(() => {
   void settings.load()
   void app.init()
   void updates.load()
+  void jobs.seed()
   startLive()
   if ('BroadcastChannel' in window) {
     channel = new BroadcastChannel('issuewatcher')
@@ -442,6 +459,11 @@ const shortcuts = computed(() => [
 .live-icon.secondary {
   color: var(--iw-success);
   background: var(--iw-success-soft);
+}
+
+.live-icon.error {
+  color: var(--iw-danger);
+  background: var(--iw-danger-soft);
 }
 
 .live-body {

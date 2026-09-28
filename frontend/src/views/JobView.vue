@@ -11,11 +11,13 @@ import { useI18n } from 'vue-i18n'
 import EmptyState from '../components/EmptyState.vue'
 import JobBadge from '../components/JobBadge.vue'
 import JobLog from '../components/JobLog.vue'
+import JobProgress from '../components/JobProgress.vue'
+import DirectResult from '../components/DirectResult.vue'
 import DiffViewer from '../components/DiffViewer.vue'
 import { api } from '../api/client'
 import type { AgentResult, Job } from '../api/types'
 import { absTime, elapsed, num, relTime, usd } from '../lib/format'
-import { FLOW_ICON, isActive, jobCost, jobDuration } from '../lib/jobs'
+import { canPush, FLOW_ICON, isActive, isDirect, jobCost, jobDuration, jobOutcome, usePush } from '../lib/jobs'
 import { useCrumbs } from '../lib/crumbs'
 import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
@@ -99,15 +101,27 @@ const showDiff = computed(() => job.value?.flow === 'fix' && (!current.value || 
 
 const can = computed(() => {
   const j = job.value
-  if (!j) return { cancel: false, retry: false, dismiss: false, pr: false, reply: false }
+  if (!j) return { cancel: false, retry: false, dismiss: false, pr: false, push: false, reply: false }
   return {
     cancel: j.state === 'queued' || j.state === 'running',
     retry: j.state === 'failed' || j.state === 'cancelled' || j.state === 'needs_review',
     dismiss: j.state === 'needs_review' || j.state === 'failed',
-    pr: j.flow === 'fix' && j.state === 'needs_review',
+    pr: j.flow === 'fix' && j.state === 'needs_review' && !isDirect(j),
+    push: canPush(j),
     reply: j.flow === 'reply' && j.state === 'needs_review',
   }
 })
+const direct = computed(() => !!job.value && isDirect(job.value))
+const logOpen = ref(false)
+
+const pusher = usePush()
+async function push() {
+  const j = job.value
+  if (!j || busy.value) return
+  const r = await pusher.push(j)
+  if (r) setJob(r)
+  else void load(true) // a failed push puts the job back to needs_review with publishError
+}
 
 async function run(action: 'cancel' | 'retry' | 'dismiss' | 'pr') {
   const j = job.value
@@ -133,7 +147,7 @@ function ask(action: 'dismiss' | 'pr' | 'reply') {
   if (!j) return
   confirm.require({
     header: t('job.confirm.' + action + 'Title'),
-    message: t('job.confirm.' + action, { ref: `${j.repo}#${j.number}` }),
+    message: t('job.confirm.' + (action === 'dismiss' && isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}` }),
     icon: action === 'dismiss' ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
     acceptProps: { label: t('job.actions.' + action), severity: action === 'dismiss' ? 'danger' : undefined },
@@ -208,13 +222,24 @@ function agentStats(a: AgentResult): string[] {
         <div class="head-top">
           <div class="head-main">
             <div class="head-line">
-              <JobBadge :state="job.state" />
+              <JobBadge
+                :state="job.state"
+                :outcome="jobOutcome(job)"
+              />
               <span
-                v-if="job.phase && isActive(job.state)"
+                v-if="job.phase && isActive(job.state) && job.state !== 'running'"
                 class="phase"
               ><i class="pi pi-spin pi-cog" /> {{ t('jobs.phase.' + job.phase) }}</span>
-              <span class="flow"><i :class="FLOW_ICON[job.flow]" /> {{ t('jobs.flow.' + job.flow) }}</span>
+              <span class="flow"><i :class="FLOW_ICON[job.flow]" /> {{ t('jobs.flow.' + job.flow) }}<template v-if="direct"> · {{ t('jobs.directMode') }}</template></span>
             </div>
+            <JobProgress
+              v-if="job.state === 'running'"
+              :id="job.id"
+              :attempt="job.attempt"
+              :started-at="job.startedAt"
+              :phase="job.phase"
+              class="progress"
+            />
             <RouterLink
               :to="'/item/' + job.itemId"
               class="title"
@@ -231,6 +256,14 @@ function agentStats(a: AgentResult): string[] {
               :loading="busy === 'cancel'"
               :disabled="!!busy"
               @click="run('cancel')"
+            />
+            <Button
+              v-if="can.push"
+              :label="t('job.actions.push')"
+              icon="pi pi-upload"
+              :loading="pusher.busy.value"
+              :disabled="!!busy || pusher.busy.value"
+              @click="push"
             />
             <span
               v-if="can.pr"
@@ -286,10 +319,16 @@ function agentStats(a: AgentResult): string[] {
               {{ job.attempt }}
             </dd>
           </div>
-          <div v-if="job.branch">
+          <div v-if="direct && job.localPath">
+            <dt>{{ t('job.folder') }}</dt>
+            <dd class="mono small">
+              {{ job.localPath }}
+            </dd>
+          </div>
+          <div v-if="job.branch || res.local?.branch">
             <dt>{{ t('job.branch') }}</dt>
             <dd class="mono small">
-              {{ job.branch }}<span
+              {{ job.branch || res.local?.branch }}<span
                 v-if="res.baseBranch"
                 class="muted"
               > ← {{ res.baseBranch }}</span>
@@ -380,6 +419,21 @@ function agentStats(a: AgentResult): string[] {
         >{{ t('item.openComment') }}</a>
       </Message>
 
+      <!-- direct fix: outcome, commits in the mapped folder, warnings -->
+      <section
+        v-if="direct && (res.local || job.state === 'failed')"
+        class="panel card"
+      >
+        <div class="card-head">
+          <span class="panel-title"><i class="pi pi-folder" /> {{ t('job.direct.title') }}</span>
+          <span
+            v-if="res.local?.startSha && res.local.headSha"
+            class="muted small mono"
+          >{{ res.local.startSha.slice(0, 7) }}..{{ res.local.headSha.slice(0, 7) }}</span>
+        </div>
+        <DirectResult :job="job" />
+      </section>
+
       <!-- reply draft -->
       <section
         v-if="can.reply"
@@ -443,6 +497,12 @@ function agentStats(a: AgentResult): string[] {
             <summary>{{ t('job.notes') }}</summary>
             <p class="prose">
               {{ res.agent.notes }}
+            </p>
+          </details>
+          <details v-if="res.agent.verify">
+            <summary>{{ t('job.agentVerify') }}</summary>
+            <p class="prose">
+              {{ res.agent.verify }}
             </p>
           </details>
           <Message
@@ -554,12 +614,24 @@ function agentStats(a: AgentResult): string[] {
       <section class="panel card">
         <div class="card-head">
           <span class="panel-title"><i class="pi pi-list" /> {{ t('job.log.title') }}</span>
-          <span
-            v-if="current && job.state === 'running'"
-            class="live muted small"
-          ><span class="dot" /> {{ t('common.live') }}</span>
+          <span class="log-head">
+            <span
+              v-if="current && job.state === 'running'"
+              class="live muted small"
+            ><span class="dot" /> {{ t('common.live') }}</span>
+            <Button
+              :label="logOpen ? t('job.log.hide') : t('job.log.show')"
+              :icon="logOpen ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"
+              size="small"
+              severity="secondary"
+              text
+              :aria-expanded="logOpen"
+              @click="logOpen = !logOpen"
+            />
+          </span>
         </div>
         <JobLog
+          v-if="logOpen"
           :job-id="job.id"
           :attempt="attempt"
         />
@@ -752,6 +824,16 @@ details summary {
 
 .attempts {
   display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progress {
+  font-size: calc(13px * var(--iw-fs, 1));
+}
+
+.log-head {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
 }

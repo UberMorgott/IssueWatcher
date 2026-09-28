@@ -3,6 +3,7 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
+import Select from 'primevue/select'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
@@ -12,7 +13,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useAppStore } from '../../stores/app'
 import { useSave } from '../../lib/save'
 import { api } from '../../api/client'
-import type { FolderRow, FolderSuggestion } from '../../api/types'
+import type { FolderRow, FolderSuggestion, RunMode } from '../../api/types'
 
 const { t } = useI18n()
 const settings = useSettingsStore()
@@ -65,6 +66,16 @@ async function setPath(id: number, path: string) {
   return true
 }
 const mapped = computed(() => rows.value.filter((r) => r.localPath).length)
+
+// --- run mode of fix jobs per project (settings.agents.projects[name].mode; "" = direct)
+const modeOptions = computed(() => [
+  { label: t('settings.folders.modeDirect'), value: 'direct' },
+  { label: t('settings.folders.modeWorktree'), value: 'worktree-pr' },
+])
+const modeOf = (name: string): RunMode => settings.doc?.settings.agents.projects[name]?.mode || 'direct'
+function setMode(name: string, mode: RunMode) {
+  if (mode !== modeOf(name)) void save({ agents: { projects: { [name]: { mode } } } })
+}
 
 const STATUS: Record<FolderRow['status'], 'success' | 'warn' | 'danger' | 'secondary'> = {
   ok: 'success',
@@ -246,7 +257,10 @@ async function acceptAll() {
       </p>
     </SettingsPanel>
 
-    <SettingsPanel :title="t('settings.folders.mapping', { n: mapped, total: rows.length })">
+    <SettingsPanel
+      :title="t('settings.folders.mapping', { n: mapped, total: rows.length })"
+      :text="t('settings.folders.modeHint')"
+    >
       <p
         v-if="loaded && !rows.length"
         class="hint"
@@ -295,6 +309,16 @@ async function acceptAll() {
             @click="setPath(r.projectId, '')"
           />
         </form>
+        <Select
+          :model-value="modeOf(r.name)"
+          :options="modeOptions"
+          option-label="label"
+          option-value="value"
+          size="small"
+          :aria-label="t('settings.folders.modeFor', { name: r.name })"
+          class="mode"
+          @update:model-value="(v: RunMode) => setMode(r.name, v)"
+        />
       </div>
     </SettingsPanel>
   </template>
@@ -372,7 +396,7 @@ async function acceptAll() {
 
 .map-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.4fr) 190px;
   align-items: center;
   gap: 12px;
   padding: 4px 0;
@@ -394,6 +418,10 @@ async function acceptAll() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mode {
+  width: 100%;
 }
 
 .status {

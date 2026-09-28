@@ -174,9 +174,9 @@ const profileOptions = computed(() => (ag.value?.profiles ?? []).map((p) => ({ l
 const verifierOptions = computed(() => [{ label: t('settings.agents.noVerifier'), value: '' }, ...profileOptions.value])
 
 // --- prompts -----------------------------------------------------------------
-type PromptKey = 'system' | 'fix' | 'reply' | 'review'
+type PromptKey = 'system' | 'fixDirect' | 'fix' | 'reply' | 'review'
 const promptTab = ref<PromptKey>('system')
-const promptTabs = computed(() => (['system', 'fix', 'reply', 'review'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
+const promptTabs = computed(() => (['system', 'fixDirect', 'fix', 'reply', 'review'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
 const prompt = useDraft(() => ag.value?.prompts[promptTab.value])
 watch(promptTab, () => prompt.sync())
 const promptBox = ref<{ $el: HTMLTextAreaElement } | null>(null)

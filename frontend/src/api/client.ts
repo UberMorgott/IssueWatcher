@@ -31,6 +31,8 @@ import { t, te } from '../i18n'
  */
 export type Result<T> = { ok: true; data: T; status: number } | { ok: false; status: number; error: string }
 
+export type JobAction = 'cancel' | 'retry' | 'dismiss' | 'pr' | 'push'
+
 async function call<T>(method: string, url: string, body?: unknown): Promise<Result<T>> {
   let res: Response
   try {
@@ -188,8 +190,11 @@ export const api = {
   job: (id: number | string) => jobCall('GET', `/api/jobs/${encodeURIComponent(String(id))}`),
   jobLog: (id: number, attempt?: number) => call<{ attempt: number; steps: JobStep[] }>('GET', `/api/jobs/${id}/log` + (attempt ? `?attempt=${attempt}` : '')),
   jobDiff: (id: number, attempt?: number) => textCall(`/api/jobs/${id}/diff` + (attempt ? `?attempt=${attempt}` : '')),
-  /** cancel | retry | dismiss (Отклонить) | pr (Создать PR; 502 = publish failed, job back to needs_review). */
-  jobAction: (id: number, action: 'cancel' | 'retry' | 'dismiss' | 'pr') => jobCall('POST', `/api/jobs/${id}/${action}`),
+  /**
+   * cancel | retry | dismiss (Отклонить) | pr (Создать PR, worktree jobs) | push (direct fix jobs);
+   * pr/push: 502 = publish failed, job back to needs_review with result.publishError.
+   */
+  jobAction: (id: number, action: JobAction) => jobCall('POST', `/api/jobs/${id}/${action}`),
   jobReply: (id: number, body: string) => jobCall('POST', `/api/jobs/${id}/reply`, { body }),
   detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
 }
@@ -232,8 +237,10 @@ export type SettingsResult =
 
 /** Localised name of a settings field path (sync.providers.github.activeMinutes → "Active projects"). */
 function fieldLabel(field: string): string {
-  const last = field.split('.').filter((p) => !/^\d+$/.test(p)).pop() ?? field
-  for (const k of ['settings.fields.' + last, 'settings.sync.fields.' + last]) if (te(k)) return t(k)
+  const parts = field.split('.').filter((p) => !/^\d+$/.test(p))
+  const last = parts.pop() ?? field
+  // Section-specific name first (agents.projects.<name>.mode → fields.agents_mode).
+  for (const k of ['settings.fields.' + parts[0] + '_' + last, 'settings.fields.' + last, 'settings.sync.fields.' + last]) if (te(k)) return t(k)
   return field
 }
 

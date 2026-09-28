@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import type { JobFlow, JobState } from '../api/types'
-import { FLOW_ICON, STATE_ICON } from '../lib/jobs'
+import { computed } from 'vue'
+import type { JobFlow, JobState, LocalOutcome } from '../api/types'
+import { FLOW_ICON, OUTCOME_TONE, STATE_ICON } from '../lib/jobs'
 
 // Job state pill: state colour + flow icon (+ state text unless `compact`).
+// A direct fix job's outcome replaces the state text and colour once it is known.
 // With `id` it links to the job page (clicks do not reach the row under it).
-defineProps<{ state: JobState; flow?: JobFlow; id?: number; compact?: boolean }>()
+const props = defineProps<{ state: JobState; flow?: JobFlow; id?: number; compact?: boolean; outcome?: LocalOutcome | '' }>()
 const { t } = useI18n()
+const shown = computed(() => (props.outcome && props.state !== 'running' && props.state !== 'queued' ? props.outcome : ''))
+const label = computed(() => (shown.value ? t('jobs.outcome.' + shown.value) : t('jobs.state.' + props.state)))
 </script>
 
 <template>
@@ -14,8 +18,8 @@ const { t } = useI18n()
     :is="id ? 'RouterLink' : 'span'"
     :to="id ? '/jobs/' + id : undefined"
     class="job-badge"
-    :class="state.replace('_', '-')"
-    :title="(flow ? t('jobs.flow.' + flow) + ' · ' : '') + t('jobs.state.' + state)"
+    :class="shown ? OUTCOME_TONE[shown] : state.replace('_', '-')"
+    :title="(flow ? t('jobs.flow.' + flow) + ' · ' : '') + label"
     @click.stop
   >
     <i
@@ -27,7 +31,7 @@ const { t } = useI18n()
       v-else
       :class="STATE_ICON[state]"
     />
-    <span v-if="!compact">{{ t('jobs.state.' + state) }}</span>
+    <span v-if="!compact">{{ label }}</span>
     <i
       v-else-if="state === 'running'"
       class="pi pi-spin pi-spinner"
@@ -41,6 +45,8 @@ const { t } = useI18n()
   align-items: center;
   gap: 5px;
   flex: none;
+  max-width: 100%;
+  overflow: hidden;
   padding: 1px 8px;
   border-radius: 999px;
   font-size: calc(11.5px * var(--iw-fs, 1));
@@ -53,6 +59,11 @@ const { t } = useI18n()
 
 .job-badge i {
   font-size: calc(10.5px * var(--iw-fs, 1));
+}
+
+.job-badge > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 a.job-badge:hover {

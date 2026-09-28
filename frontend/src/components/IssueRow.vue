@@ -3,15 +3,25 @@ import Skeleton from 'primevue/skeleton'
 import { useI18n } from 'vue-i18n'
 import LabelTag from './LabelTag.vue'
 import PlatformIcon from './PlatformIcon.vue'
+import { computed } from 'vue'
 import JobBadge from './JobBadge.vue'
+import JobProgress from './JobProgress.vue'
 import type { IssueRowData as Row } from '../api/types'
 import { absTime, relTime, repoOwner, shortRepo } from '../lib/format'
+import { jobOutcome } from '../lib/jobs'
+import { useJobsStore } from '../stores/jobs'
 
 // One virtualised row of the issues list. Props are primitives or the row object
 // itself, so a row that stays in view never re-renders while the list scrolls.
-defineProps<{ item: Row; top: number; selected: boolean; active: boolean }>()
+const props = defineProps<{ item: Row; top: number; selected: boolean; active: boolean }>()
 const emit = defineEmits<{ toggle: []; open: [] }>()
 const { t } = useI18n()
+
+// The row's job as the live job events know it (fresher than the list row).
+const jobs = useJobsStore()
+const live = computed(() => (props.item.job ? jobs.byId.get(props.item.job.id) : undefined))
+const jobState = computed(() => live.value?.state ?? props.item.job?.state)
+const outcome = computed(() => (live.value ? jobOutcome(live.value) : ''))
 </script>
 
 <template>
@@ -70,14 +80,30 @@ const { t } = useI18n()
               :title="item.title.length > 80 ? item.title : undefined"
             >{{ item.title }}</span>
             <JobBadge
-              v-if="item.job"
+              v-if="item.job && jobState"
               :id="item.job.id"
-              :state="item.job.state"
+              :state="jobState"
               :flow="item.job.flow"
+              :outcome="outcome"
               compact
             />
           </span>
-          <span class="t-meta"><span class="mono">#{{ item.number }}</span> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
+          <span
+            v-if="item.job && jobState === 'running'"
+            class="t-meta t-run"
+          ><span class="mono">#{{ item.number }}</span><JobProgress
+            :id="item.job.id"
+            :attempt="live?.attempt ?? 1"
+            :started-at="live?.startedAt"
+            :phase="live?.phase"
+          /></span>
+          <span
+            v-else
+            class="t-meta"
+          ><span class="mono">#{{ item.number }}</span><template v-if="outcome"> · <span
+            class="outcome"
+            :class="outcome"
+          >{{ t('jobs.outcome.' + outcome) }}</span> ·</template> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
         </span>
       </span>
       <span
@@ -220,6 +246,33 @@ const { t } = useI18n()
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.t-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.outcome {
+  color: var(--iw-warn);
+}
+
+.outcome.pushed {
+  color: var(--iw-primary);
+}
+
+.outcome.closed {
+  color: var(--iw-success);
+}
+
+.outcome.failed {
+  color: var(--iw-danger);
+}
+
+.outcome.not_reproduced {
+  color: var(--iw-muted);
 }
 
 .c-project {

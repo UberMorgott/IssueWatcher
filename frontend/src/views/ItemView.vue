@@ -12,7 +12,10 @@ import { api } from '../api/client'
 import type { IssueDetail, Job, JobFlow } from '../api/types'
 import SplitButton from 'primevue/splitbutton'
 import JobBadge from '../components/JobBadge.vue'
-import { isActive, useDispatchToast } from '../lib/jobs'
+import JobProgress from '../components/JobProgress.vue'
+import JobLog from '../components/JobLog.vue'
+import DirectResult from '../components/DirectResult.vue'
+import { canPush, isActive, isDirect, jobOutcome, useDispatchToast, usePush } from '../lib/jobs'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
@@ -142,6 +145,16 @@ useJobEvents({
   },
 })
 const activeJob = (flow: JobFlow) => itemJobs.value.find((j) => j.flow === flow && isActive(j.state))
+/** The newest job and unfinished ones show their details (result, Push, log). */
+const detailed = (j: Job, i: number) => i === 0 || isActive(j.state)
+const logOpen = ref<Record<number, boolean>>({})
+
+const pusher = usePush()
+async function push(j: Job) {
+  const r = await pusher.push(j)
+  if (r) itemJobs.value = itemJobs.value.map((x) => (x.id === r.id ? r : x))
+  else void loadJobs() // a failed push leaves the job in needs_review with publishError
+}
 
 const jobsStore = useJobsStore()
 const report = useDispatchToast()
@@ -410,22 +423,75 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             <div class="agent-title">
               {{ t('item.agentTitle') }}
             </div>
-            <RouterLink
-              v-for="j in itemJobs"
+            <div
+              v-for="(j, i) in itemJobs"
               :key="j.id"
-              :to="'/jobs/' + j.id"
-              class="job-card"
+              class="job-block"
             >
-              <JobBadge
-                :state="j.state"
-                :flow="j.flow"
-              />
-              <span class="job-card-text">
-                <span>{{ t('jobs.flow.' + j.flow) }}<template v-if="j.phase && isActive(j.state)"> · {{ t('jobs.phase.' + j.phase) }}</template></span>
-                <span class="muted small">{{ relTime(j.createdAt) }}<template v-if="j.attempt > 1"> · ×{{ j.attempt }}</template></span>
-              </span>
-              <i class="pi pi-angle-right muted" />
-            </RouterLink>
+              <RouterLink
+                :to="'/jobs/' + j.id"
+                class="job-card"
+              >
+                <JobBadge
+                  :state="j.state"
+                  :flow="j.flow"
+                  :outcome="jobOutcome(j)"
+                />
+                <span class="job-card-text">
+                  <span>{{ t('jobs.flow.' + j.flow) }}<template v-if="j.phase && isActive(j.state) && j.state !== 'running'"> · {{ t('jobs.phase.' + j.phase) }}</template></span>
+                  <JobProgress
+                    v-if="j.state === 'running'"
+                    :id="j.id"
+                    :attempt="j.attempt"
+                    :started-at="j.startedAt"
+                    :phase="j.phase"
+                  />
+                  <span
+                    v-else
+                    class="muted small"
+                  >{{ relTime(j.createdAt) }}<template v-if="j.attempt > 1"> · ×{{ j.attempt }}</template></span>
+                </span>
+                <i class="pi pi-angle-right muted" />
+              </RouterLink>
+              <template v-if="detailed(j, i)">
+                <DirectResult
+                  v-if="isDirect(j) && (j.result.local || j.state === 'failed')"
+                  :job="j"
+                />
+                <Message
+                  v-if="j.result.publishError"
+                  severity="error"
+                  size="small"
+                >
+                  {{ t('job.publishError', { error: j.result.publishError }) }}
+                </Message>
+                <div class="job-actions">
+                  <Button
+                    v-if="canPush(j)"
+                    :label="t('job.actions.push')"
+                    icon="pi pi-upload"
+                    size="small"
+                    :loading="pusher.busy.value"
+                    :disabled="pusher.busy.value"
+                    @click="push(j)"
+                  />
+                  <Button
+                    :label="logOpen[j.id] ? t('job.log.hide') : t('job.log.show')"
+                    :icon="logOpen[j.id] ? 'pi pi-chevron-up' : 'pi pi-list'"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :aria-expanded="!!logOpen[j.id]"
+                    @click="logOpen[j.id] = !logOpen[j.id]"
+                  />
+                </div>
+                <JobLog
+                  v-if="logOpen[j.id]"
+                  :job-id="j.id"
+                  :attempt="j.attempt"
+                />
+              </template>
+            </div>
             <SplitButton
               v-for="f in (['fix', 'reply'] as const)"
               :key="f"
@@ -630,6 +696,20 @@ dd {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--iw-dimmed);
+}
+
+.job-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .job-card {

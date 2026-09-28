@@ -2,9 +2,10 @@
 import Skeleton from 'primevue/skeleton'
 import { useI18n } from 'vue-i18n'
 import JobBadge from './JobBadge.vue'
+import JobProgress from './JobProgress.vue'
 import type { JobRowData as Row } from '../api/types'
 import { absTime, elapsed, relTime, usd } from '../lib/format'
-import { FLOW_ICON, isActive, jobCost, jobDuration } from '../lib/jobs'
+import { FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome } from '../lib/jobs'
 
 // One virtualised row of the jobs list (same contract as IssueRow).
 defineProps<{ item: Row; top: number; profile: string }>()
@@ -38,9 +39,12 @@ const { t } = useI18n()
         class="c-state"
         role="gridcell"
       >
-        <JobBadge :state="item.state" />
+        <JobBadge
+          :state="item.state"
+          :outcome="jobOutcome(item)"
+        />
         <span
-          v-if="item.phase && isActive(item.state)"
+          v-if="item.phase && isActive(item.state) && item.state !== 'running'"
           class="phase"
         >{{ t('jobs.phase.' + item.phase) }}</span>
       </span>
@@ -52,7 +56,19 @@ const { t } = useI18n()
           class="t-title"
           :title="item.title.length > 80 ? item.title : undefined"
         >{{ item.title }}</span>
-        <span class="t-meta"><span class="mono">{{ item.repo }}#{{ item.number }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
+        <span
+          v-if="item.state === 'running'"
+          class="t-meta t-run"
+        ><span class="mono">{{ item.repo }}#{{ item.number }}</span><JobProgress
+          :id="item.id"
+          :attempt="item.attempt"
+          :started-at="item.startedAt"
+          :phase="item.phase"
+        /></span>
+        <span
+          v-else
+          class="t-meta"
+        ><span class="mono">{{ item.repo }}#{{ item.number }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
       </span>
       <span
         class="c-flow"
@@ -144,6 +160,13 @@ const { t } = useI18n()
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.t-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .err {

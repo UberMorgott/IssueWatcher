@@ -224,10 +224,15 @@ export interface AgentProfile {
   maxBudgetUsd: number
 }
 
+/** How a fix job runs: in the mapped folder itself, or in a worktree published as a PR. */
+export type RunMode = 'direct' | 'worktree-pr'
+
 export interface ProjectAgent {
   prompt: string
   verify: string
   noAegis: boolean
+  /** Missing or "" = 'direct'. */
+  mode?: RunMode | ''
 }
 
 /** settings.agents (internal/config Agents). */
@@ -235,7 +240,8 @@ export interface Agents {
   maxParallel: number
   profiles: AgentProfile[]
   roles: { coder: string; responder: string; verifier: string }
-  prompts: { system: string; fix: string; reply: string; review: string }
+  /** fixDirect: the direct fix flow; "" = built-in default (like fix). */
+  prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string }
   /** Keyed by project name (owner/repo). */
   projects: Record<string, ProjectAgent>
 }
@@ -244,7 +250,7 @@ export interface Agents {
 
 export type JobState = 'queued' | 'running' | 'needs_review' | 'done' | 'failed' | 'cancelled'
 export type JobFlow = 'fix' | 'reply'
-export type JobPhase = '' | 'prepare' | 'agent' | 'verify' | 'review' | 'publish'
+export type JobPhase = '' | 'prepare' | 'agent' | 'check' | 'verify' | 'review' | 'publish'
 
 /** Issue row badge: the item's newest job. */
 export interface JobBadge {
@@ -257,10 +263,14 @@ export interface AgentResult {
   profile: string
   cli: string
   model?: string
-  status?: 'fixed' | 'partial' | 'cannot_fix' | 'needs_info'
+  status?: 'fixed' | 'partial' | 'cannot_fix' | 'needs_info' | 'not_reproduced' | 'failed'
   verdict?: 'ok' | 'concerns'
   summary?: string
   notes?: string
+  /** Commits the agent reports (direct mode). */
+  commits?: string[]
+  /** The agent's own verify note. */
+  verify?: string
   reply?: string
   final?: string
   costUsd?: number
@@ -300,7 +310,35 @@ export interface VerifyResult {
 
 export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'git' | 'interrupted'
 
+export interface LocalCommit {
+  sha: string
+  subject: string
+  /** The message carries "Fixes #N" for this issue. */
+  fixes: boolean
+}
+
+export type LocalOutcome = 'fixed_local' | 'pushed' | 'closed' | 'not_reproduced' | 'needs_info' | 'no_commit' | 'failed'
+
+/** Git facts of a direct fix job, checked after the agent (phase check). */
+export interface LocalResult {
+  dir: string
+  branch: string
+  startSha: string
+  headSha: string
+  commits: LocalCommit[]
+  fixesRef: boolean
+  dirtyBefore?: string[]
+  dirtyAfter?: string[]
+  outcome: LocalOutcome
+  pushed: boolean
+  pushedAt?: string
+  closed: boolean
+}
+
 export interface JobResult {
+  /** Absent = an older worktree-pr job. */
+  mode?: RunMode
+  local?: LocalResult
   errorCode?: JobErrorCode | string
   agent?: AgentResult
   diff?: DiffSummary
@@ -325,6 +363,8 @@ export interface Job {
   phase: JobPhase
   branch: string
   worktree: string
+  /** The project's mapped folder (direct jobs run here). */
+  localPath: string
   baseSha: string
   error: string
   result: JobResult
