@@ -92,7 +92,18 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Tests: fake CLI (claude/codex formats; ok/noop/fail/hang), queue, concurrency, cancel (process tree), timeout, restart recovery, worktree lifecycle on temp git repos, draft PR + push against the fake GitHub + local bare remote, API
 - [x] E2E smoke (real claude 2.1.284 + codex-cli 0.157.1, headless instance, throwaway repo): fix job → needs_review with a correct diff and `go test` verify passed; reply job → draft; cancel of a running claude kills its tree
 - [ ] **Manual (user, real GitHub)**: «Создать PR» on a real repo (push with the GitHub App user token, draft PR); «Отправить» a reply draft; tray card click opens the job
-- [ ] Open decisions (owner): (1) worktrees share the mapped clone's `.git` (refs, config, hooks) — keep, or a private clone in `data\repos\<project>` as Codex suggests; (2) agents run with the user's rights and user-level CLI config (CLAUDE.md, hooks, MCP, language rules — e2e summaries came back in Russian) — add `--setting-sources project` / `--safe-mode` / a separate profile per role?; (3) claude `--permission-mode auto` vs `acceptEdits` + allowlist; (4) earlier attempts keep only log + diff (no per-attempt result history); (5) no Codex cost cap (tokens shown only)
+- [x] ~~Open decisions~~ (2), (1) settled by Phase 2b: direct mode in the folder with the user's own settings is the default; worktree-pr stays optional. Still open: (3)–(5). Original list: (1) worktrees share the mapped clone's `.git` (refs, config, hooks) — keep, or a private clone in `data\repos\<project>` as Codex suggests; (2) agents run with the user's rights and user-level CLI config (CLAUDE.md, hooks, MCP, language rules — e2e summaries came back in Russian) — add `--setting-sources project` / `--safe-mode` / a separate profile per role?; (3) claude `--permission-mode auto` vs `acceptEdits` + allowlist; (4) earlier attempts keep only log + diff (no per-attempt result history); (5) no Codex cost cap (tokens shown only)
 - [ ] Jobs count badge in the sidebar (needs an active-count endpoint)
+
+## Phase 2b — direct mode (owner decision 2026-09-28; replaces the Phase 2 defaults)
+- [x] Per-project run mode `direct` (default) | `worktree-pr` (Settings › Проекты и папки); config v4 migration: existing projects → direct; `prompts.fixDirect`
+- [x] Direct fix: agent in the mapped folder with the user's own CLI settings/rules/MCP + our appended prompt (claude `--append-system-prompt-file`, codex input); commit `Fixes #N`, no push; dirty tree allowed but recorded before/after + warning; one job per folder
+- [x] Facts after exit: `start..HEAD` commits, `Fixes #N`, working tree, on-remote check after fetch → outcome (`fixed_local` «Исправлено локально — ждёт push», pushed, closed, not_reproduced, needs_info, no_commit, failed)
+- [x] «Push» (manual, app token via env) → done; sync seeing the issue closed → done / closed
+- [x] No zombies: suspended start → job object → resume; tree ended + emptiness check on exit/cancel/timeout/shutdown; owned pipes; `procs.json` pids + creation times; orphans killed on start
+- [x] UI: spinner + elapsed + current step on Issues/item/Jobs, collapsed log, outcomes + warnings, Push, finish toast/tray card → issue; ru + en
+- [x] Tests: direct flow on temp git repos (commit detection, Fixes #N, dirty tree, push, close, not reproduced, one job per folder), grandchild killed on normal exit, orphan kill with pid-reuse guard, migration, API
+- [ ] **Manual (user)**: a direct fix on a real project; «Push» to GitHub closes the issue and the job turns «Закрыто» after the next sync
+- [ ] Codex direct fix not E2E-tested: its `workspace-write` sandbox may refuse writes to `.git` (commit) — check, else document `-s danger-full-access` in the profile args
 
 ## Phase 3+ — see ARCHITECTURE.md
