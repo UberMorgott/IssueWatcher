@@ -147,30 +147,42 @@ func (c *client) retryAt(h http.Header) time.Time {
 type gqlError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+	Path    []any  `json:"path"` // the failed field, e.g. ["repository", "i0"]
 }
 
-// graphql runs query with vars and decodes data into out.
+// graphql runs query with vars and decodes data into out; any error fails it.
 func (c *client) graphql(ctx context.Context, query string, vars map[string]any, out any, reserve int) error {
+	errs, err := c.graphqlPartial(ctx, query, vars, out, reserve)
+	if err == nil && len(errs) > 0 {
+		err = errors.New("github graphql: " + errs[0].Message)
+	}
+	return err
+}
+
+// graphqlPartial is graphql for queries whose fields can fail one by one (a
+// NOT_FOUND alias comes back null next to an error naming its path): data is
+// decoded and the errors are returned for the caller to sort out.
+func (c *client) graphqlPartial(ctx context.Context, query string, vars map[string]any, out any, reserve int) ([]gqlError, error) {
 	var resp struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []gqlError      `json:"errors"`
 	}
 	in := map[string]any{"query": query, "variables": vars}
 	if err := c.do(ctx, http.MethodPost, c.auth.APIURL+"/graphql", in, &resp, reserve); err != nil {
-		return err
+		return nil, err
 	}
-	if len(resp.Errors) > 0 {
-		for _, e := range resp.Errors {
-			if e.Type == "RATE_LIMITED" {
-				return &provider.RateLimitError{Reset: c.now().Add(time.Minute)}
-			}
+	for _, e := range resp.Errors {
+		if e.Type == "RATE_LIMITED" {
+			return nil, &provider.RateLimitError{Reset: c.now().Add(time.Minute)}
 		}
-		return errors.New("github graphql: " + resp.Errors[0].Message)
+	}
+	if len(resp.Errors) > 0 && (len(resp.Data) == 0 || string(resp.Data) == "null") {
+		return nil, errors.New("github graphql: " + resp.Errors[0].Message)
 	}
 	if err := json.Unmarshal(resp.Data, out); err != nil {
-		return fmt.Errorf("github graphql: decode: %w", err)
+		return nil, fmt.Errorf("github graphql: decode: %w", err)
 	}
-	return nil
+	return resp.Errors, nil
 }
 
 // condResult is a conditional GET's answer.

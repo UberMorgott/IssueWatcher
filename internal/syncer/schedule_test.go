@@ -132,6 +132,34 @@ func TestChangeFetchesOnlyTheItem(t *testing.T) {
 	}
 }
 
+// A PR and a PR comment in the since window (the REST endpoints list both)
+// must not fail the change check; the issue changed alongside is still fetched.
+func TestPullRequestActivityDoesNotFailTheCheck(t *testing.T) {
+	s, gh, clk, updates := tiered(t, []string{"octo/a"}, plan5())
+	s.Step(t.Context())
+	clk.Add(6 * time.Minute)
+	s.Step(t.Context())
+	drain(updates)
+
+	gh.Mu.Lock()
+	gh.PullRequests = []*githubtest.Issue{{Repo: "octo/a", Number: 5, UpdatedAt: clk.Now(),
+		Comments: []githubtest.Comment{{ID: "C_pr", Author: "bob", Body: "lgtm", CreatedAt: clk.Now()}}}}
+	is := gh.Issues[0] // octo/a#1
+	is.Comments = append(is.Comments, githubtest.Comment{ID: "C_9", Author: "bob", Body: "hi", CreatedAt: clk.Now()})
+	is.UpdatedAt = clk.Now()
+	gh.Mu.Unlock()
+
+	clk.Add(6 * time.Minute)
+	s.Step(t.Context())
+	evs := drain(updates)
+	if len(evs) != 1 || evs[0].Kind != store.EventNewComment || evs[0].Repo != "octo/a" {
+		t.Fatalf("events %+v", evs)
+	}
+	if st := s.Status(); st.LastError != "" {
+		t.Fatalf("status error %q", st.LastError)
+	}
+}
+
 func TestRateLimitPausesTheSchedule(t *testing.T) {
 	s, gh, clk, updates := tiered(t, []string{"octo/a"}, plan5())
 	s.Step(t.Context())

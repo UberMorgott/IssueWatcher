@@ -123,25 +123,30 @@ func (s *Server) restComments(w http.ResponseWriter, r *http.Request) {
 	repo := r.PathValue("owner") + "/" + r.PathValue("repo")
 	from := since(r)
 	type row struct {
-		n   int
-		c   Comment
-		url string
+		c       Comment
+		url     string
+		htmlURL string
 	}
 	var rows []row
-	for _, is := range s.Issues {
-		if is.Repo != repo {
-			continue
-		}
-		for _, c := range is.Comments {
-			if !c.CreatedAt.Before(from) {
-				rows = append(rows, row{is.Number, c, fmt.Sprintf("%s/repos/%s/issues/%d", s.URL, repo, is.Number)})
+	// PR conversation comments are listed too: issue_url says /issues/N like
+	// an issue's, html_url says /pull/N.
+	for kind, list := range map[string][]*Issue{"issues": s.Issues, "pull": s.PullRequests} {
+		for _, is := range list {
+			if is.Repo != repo {
+				continue
+			}
+			for _, c := range is.Comments {
+				if !c.CreatedAt.Before(from) {
+					rows = append(rows, row{c, fmt.Sprintf("%s/repos/%s/issues/%d", s.URL, repo, is.Number),
+						fmt.Sprintf("%s/%s/%s/%d#issuecomment-%s", s.URL, repo, kind, is.Number, c.ID)})
+				}
 			}
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].c.CreatedAt.Before(rows[j].c.CreatedAt) })
 	out := []map[string]any{}
 	for _, x := range rows[:min(len(rows), perPage(r))] {
-		out = append(out, map[string]any{"id": x.c.ID, "issue_url": x.url, "updated_at": x.c.CreatedAt, "body": x.c.Body})
+		out = append(out, map[string]any{"id": x.c.ID, "issue_url": x.url, "html_url": x.htmlURL, "updated_at": x.c.CreatedAt, "body": x.c.Body})
 	}
 	s.writeConditional(w, r, out)
 }
@@ -155,10 +160,12 @@ func perPage(r *http.Request) int {
 }
 
 // issuesByNumber answers `repository { iN: issue(number: X) {...} }` (aliased
-// targeted fetches); unknown numbers (pull requests) are null.
+// targeted fetches). As on GitHub, a number that is not an issue (a pull
+// request, a deleted issue) is null plus a NOT_FOUND error naming its alias.
 func (s *Server) issuesByNumber(w http.ResponseWriter, query string, vars map[string]any) {
 	repo := str(vars["owner"]) + "/" + str(vars["name"])
 	out := map[string]any{}
+	var errs []map[string]any
 	for line := range strings.SplitSeq(query, "\n") {
 		alias, rest, ok := strings.Cut(strings.TrimSpace(line), ": issue(number: ")
 		if !ok {
@@ -171,6 +178,14 @@ func (s *Server) issuesByNumber(w http.ResponseWriter, query string, vars map[st
 				out[alias] = issueNode(is)
 			}
 		}
+		if out[alias] == nil {
+			errs = append(errs, map[string]any{"type": "NOT_FOUND", "path": []string{"repository", alias},
+				"message": fmt.Sprintf("Could not resolve to an Issue with the number of %d.", n)})
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"repository": out}})
+	resp := map[string]any{"data": map[string]any{"repository": out}}
+	if errs != nil {
+		resp["errors"] = errs
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

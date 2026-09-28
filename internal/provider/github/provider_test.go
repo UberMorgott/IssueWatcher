@@ -55,6 +55,45 @@ func TestProviderListsReposAndPagesIssues(t *testing.T) {
 	}
 }
 
+// Pull requests share the REST issues and comments endpoints; they are not
+// synced, so a PR and a PR comment in the since window must not reach the
+// targeted issue(number:) fetch, and a PR number that gets there anyway only
+// skips itself.
+func TestChangeCheckSkipsPullRequests(t *testing.T) {
+	gh := githubtest.New(t)
+	seed(gh)
+	t1 := t0.Add(11 * time.Hour)
+	gh.Mu.Lock()
+	is := gh.Issues[1] // octo/app#2
+	is.Comments = append(is.Comments, githubtest.Comment{ID: "C_new", Author: "bob", Body: "more", CreatedAt: t1})
+	is.UpdatedAt = t1
+	gh.PullRequests = []*githubtest.Issue{{Repo: "octo/app", Number: 9, UpdatedAt: t1,
+		Comments: []githubtest.Comment{{ID: "C_pr", Author: "bob", Body: "lgtm", CreatedAt: t1}}}}
+	gh.Mu.Unlock()
+	a := newAuth(t, gh)
+	signIn(t, gh, a)
+	p := NewProvider(a)
+	project := provider.Project{ExternalID: "octo/app"}
+
+	st := provider.PollState{IssuesSince: t0.Add(10 * time.Hour), CommentsSince: t0.Add(10 * time.Hour)}
+	ch, err := p.DetectChanges(t.Context(), project, &st)
+	if err != nil || len(ch.Numbers) != 1 || ch.Numbers[0] != 2 {
+		t.Fatalf("changes %+v %v, want only #2", ch, err)
+	}
+	if !st.IssuesSince.Equal(t1) || !st.CommentsSince.Equal(t1) {
+		t.Fatalf("since not advanced past the PR: %+v", st)
+	}
+
+	items, err := p.FetchChanged(t.Context(), project, []int{2, 9})
+	sk, ok := errors.AsType[*provider.SkippedError](err)
+	if !ok || len(sk.Items) != 1 || sk.Items[9] == nil {
+		t.Fatalf("err %v, want #9 skipped", err)
+	}
+	if len(items) != 1 || items[0].Number != 2 || len(items[0].Comments) != 2 {
+		t.Fatalf("items %+v", items)
+	}
+}
+
 func TestProviderReply(t *testing.T) {
 	gh := githubtest.New(t)
 	seed(gh)

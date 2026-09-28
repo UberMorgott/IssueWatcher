@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -38,12 +39,26 @@ type Changes struct {
 	MinInterval time.Duration
 }
 
+// SkippedError is a partial FetchChanged result: the items it lists could not
+// be loaded (deleted, transferred, not an issue); every other item was. The
+// caller keeps the items, logs these and moves on: re-requesting them would
+// fail the same way.
+type SkippedError struct {
+	Items map[int]error // item number → why it was skipped
+}
+
+func (e *SkippedError) Error() string {
+	return fmt.Sprintf("%d item(s) skipped", len(e.Items))
+}
+
 // Poller is the optional tiered-sync side of a provider.
 type Poller interface {
 	Scheduling() Scheduling
 	// DetectChanges does the cheap check for project and updates st in place.
 	DetectChanges(ctx context.Context, project Project, st *PollState) (Changes, error)
 	// FetchChanged loads the given items with their full comment threads.
+	// Items that cannot be loaded one by one come back as a *SkippedError
+	// alongside the loaded items.
 	FetchChanged(ctx context.Context, project Project, numbers []int) ([]Item, error)
 	// FullReconcile re-reads every item updated at or after since.
 	FullReconcile(ctx context.Context, project Project, since time.Time) ([]Item, error)

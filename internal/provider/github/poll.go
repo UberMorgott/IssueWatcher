@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -74,9 +75,11 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 		ch.Overflow = ch.Overflow || len(issues) >= pollPage
 	}
 
-	// Comments (issues and pull requests share this endpoint).
+	// Comments (issues and pull requests share this endpoint; a PR comment's
+	// issue_url still says /issues/N, only its html_url says /pull/N).
 	var comments []struct {
 		IssueURL  string    `json:"issue_url"`
+		HTMLURL   string    `json:"html_url"`
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 	u = base + "/issues/comments?" + pollQuery(st.CommentsSince, false)
@@ -92,6 +95,9 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 			}
 			if c.UpdatedAt.After(st.CommentsSince) {
 				st.CommentsSince = c.UpdatedAt
+			}
+			if strings.Contains(c.HTMLURL, "/pull/") {
+				continue // pull requests are not synced (the reconcile reads issues only)
 			}
 			if n, err := strconv.Atoi(c.IssueURL[strings.LastIndex(c.IssueURL, "/")+1:]); err == nil {
 				nums[n] = true
@@ -164,26 +170,43 @@ func changedQuery(numbers []int) string {
 const maxBatch = 20
 
 // FetchChanged implements provider.Poller: GraphQL issue(number:) per changed
-// number, 20 per request. Pull request numbers resolve to null and are skipped.
+// number, 20 per request. A number that does not resolve to an issue (a pull
+// request, a deleted or transferred issue) fails only its own alias: it is
+// reported in a *provider.SkippedError and the rest of the batch is kept.
 func (p *Provider) FetchChanged(ctx context.Context, project provider.Project, numbers []int) ([]provider.Item, error) {
 	owner, name, ok := strings.Cut(project.ExternalID, "/")
 	if !ok {
 		return nil, fmt.Errorf("github: bad repo id %q", project.ExternalID)
 	}
 	var items []provider.Item
+	skipped := map[int]error{}
 	for start := 0; start < len(numbers); start += maxBatch {
 		batch := numbers[start:min(start+maxBatch, len(numbers))]
 		var out struct {
 			Repository map[string]*gqlIssue `json:"repository"`
 		}
 		vars := map[string]any{"owner": owner, "name": name}
-		if err := p.c.graphql(ctx, changedQuery(batch), vars, &out, minRemaining); err != nil {
+		errs, err := p.c.graphqlPartial(ctx, changedQuery(batch), vars, &out, minRemaining)
+		if err != nil {
 			return nil, err
 		}
-		for i := range batch {
-			n := out.Repository["i"+strconv.Itoa(i)]
+		failed := map[string]string{} // alias → message
+		for _, e := range errs {
+			alias, ok := aliasOf(e)
+			if !ok {
+				return nil, errors.New("github graphql: " + e.Message)
+			}
+			failed[alias] = e.Message
+		}
+		for i, num := range batch {
+			alias := "i" + strconv.Itoa(i)
+			if msg, bad := failed[alias]; bad {
+				skipped[num] = errors.New("github graphql: " + msg)
+				continue
+			}
+			n := out.Repository[alias]
 			if n == nil {
-				continue // a pull request or deleted issue
+				continue // deleted without an error: nothing to load
 			}
 			it, err := p.toItem(ctx, n)
 			if err != nil {
@@ -193,5 +216,18 @@ func (p *Provider) FetchChanged(ctx context.Context, project provider.Project, n
 		}
 	}
 	slices.SortFunc(items, func(a, b provider.Item) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
+	if len(skipped) > 0 {
+		return items, &provider.SkippedError{Items: skipped}
+	}
 	return items, nil
+}
+
+// aliasOf returns the changedQuery alias a GraphQL error is scoped to
+// (path ["repository", "iN", ...]).
+func aliasOf(e gqlError) (string, bool) {
+	if len(e.Path) < 2 || e.Path[0] != "repository" {
+		return "", false
+	}
+	alias, ok := e.Path[1].(string)
+	return alias, ok && strings.HasPrefix(alias, "i")
 }

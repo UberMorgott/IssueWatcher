@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -349,18 +350,27 @@ func (s *Syncer) checkOne(ctx context.Context, pl provider.Poller, t *target) ch
 	if t.poll.CommentsSince.IsZero() {
 		t.poll.CommentsSince = t.Cursor
 	}
+	prev := t.poll // a failed check leaves the poll state as it was: the changes are re-detected next time
+	prev.ETags = maps.Clone(t.poll.ETags)
 	ch, err := pl.DetectChanges(ctx, p, &t.poll)
 	r := checkResult{t: t, ch: ch, err: err, cost: ch.Requests}
-	if err != nil {
-		return r
-	}
 	switch {
+	case err != nil:
 	case ch.Overflow:
 		r.items, r.err = pl.FullReconcile(ctx, p, t.Cursor)
 		r.cost += 1 + len(r.items)/50
 	case len(ch.Numbers) > 0:
 		r.items, r.err = pl.FetchChanged(ctx, p, ch.Numbers)
 		r.cost += (len(ch.Numbers) + 19) / 20
+		if sk, ok := errors.AsType[*provider.SkippedError](r.err); ok {
+			for n, e := range sk.Items { // not retried: they would fail the same way
+				s.opts.Log.Warn("sync: item skipped", "project", t.ExternalID, "number", n, "err", e)
+			}
+			r.err = nil
+		}
+	}
+	if r.err != nil {
+		t.poll = prev
 	}
 	return r
 }
