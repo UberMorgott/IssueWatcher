@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
 import Skeleton from 'primevue/skeleton'
@@ -13,6 +13,7 @@ import type { IssueDetail } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, num, relTime, shortRepo } from '../lib/format'
+import { useChunks } from '../lib/chunks'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -47,8 +48,39 @@ async function load(quiet = false) {
   }
 }
 
-watch(() => props.id, () => load(), { immediate: true })
-watch(() => app.dataVersion, () => load(true))
+// Comments arrive in chunks while the reader scrolls towards the end (sentinel
+// ~2 screens ahead); skeleton posts mark the loading tail.
+const comments = useChunks((cursor) => api.comments(Number(props.id), cursor))
+const commentItems = comments.items
+const commentsLoading = comments.loading
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | undefined
+watch(sentinel, (el) => {
+  observer?.disconnect()
+  if (!el) return
+  observer = new IntersectionObserver((e) => {
+    if (e.some((x) => x.isIntersecting)) void comments.loadMore()
+  }, { rootMargin: '0px 0px 1600px 0px' })
+  observer.observe(el)
+})
+onBeforeUnmount(() => observer?.disconnect())
+
+watch(
+  () => props.id,
+  () => {
+    comments.reset()
+    void load()
+    void comments.loadMore()
+  },
+  { immediate: true },
+)
+watch(
+  () => app.dataVersion,
+  () => {
+    void load(true)
+    if (comments.done.value) void comments.loadTail() // new comments land at the end
+  },
+)
 
 const repo = computed(() => app.repos.find((r) => r.id === item.value?.repoId))
 
@@ -64,7 +96,8 @@ async function send() {
     replyError.value = r.status === 409 ? t('item.notSignedIn') : r.error
     return
   }
-  item.value = { ...it, comments: it.comments + 1, commentsList: [...it.commentsList, r.data] }
+  item.value = { ...it, comments: it.comments + 1 }
+  if (comments.done.value) void comments.loadTail()
   reply.value = ''
   toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: `${it.repo}#${it.number}`, life: 3000 })
 }
@@ -188,7 +221,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
           </article>
 
           <article
-            v-for="c in item.commentsList"
+            v-for="c in commentItems"
             :key="c.id"
             class="post panel"
           >
@@ -230,6 +263,18 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               {{ c.body }}
             </div>
           </article>
+          <template v-if="commentsLoading">
+            <Skeleton
+              v-for="i in 2"
+              :key="'cs' + i"
+              height="96px"
+              border-radius="12px"
+            />
+          </template>
+          <div
+            ref="sentinel"
+            aria-hidden="true"
+          />
 
           <section class="composer panel">
             <div class="composer-head">

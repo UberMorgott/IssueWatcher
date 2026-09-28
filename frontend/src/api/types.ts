@@ -57,11 +57,40 @@ export interface Issue {
   closedAt: string
 }
 
-export interface IssuePage {
-  total: number
-  page: number
-  perPage: number
+/** A row of the virtual issues list: an issue or a loading placeholder. */
+export type IssueRowData = Issue & { skeleton?: true }
+
+/** Keyset chunk of GET /api/items (newest update first). */
+export interface IssueChunk {
   items: Issue[]
+  /** Cursor of the first row: `after` for a later head refresh. */
+  headCursor: string
+  /** Cursor of the last row: `cursor` for the next chunk. */
+  nextCursor: string
+  /** Older rows follow (cursor), or more newer rows than the limit (after). */
+  more: boolean
+  /** Rows matching the filter (first chunk and `after` only). */
+  total?: number
+}
+
+export interface CommentChunk {
+  items: Comment[]
+  nextCursor: string
+  more: boolean
+}
+
+export interface RepoChunk {
+  items: Repo[]
+  nextCursor: string
+  more: boolean
+  total: number
+}
+
+/** data.changed live event. */
+export interface DataChange {
+  reason: 'sync' | 'read' | 'reply'
+  itemId?: number
+  repo?: string
 }
 
 export interface Comment {
@@ -75,7 +104,6 @@ export interface Comment {
 
 export interface IssueDetail extends Issue {
   body: string
-  commentsList: Comment[]
 }
 
 export interface Week {
@@ -130,8 +158,10 @@ export interface IssueQuery {
   label?: string
   q?: string
   unread?: boolean
-  page?: number
-  perPage?: number
+  cursor?: string
+  after?: string
+  ids?: number[]
+  limit?: number
 }
 
 /** Payload of item.new / comment.new / item.closed live events. */

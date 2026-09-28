@@ -1,12 +1,14 @@
 import type {
   AppSettings,
   Comment,
+  CommentChunk,
   Health,
   IssueDetail,
-  IssuePage,
+  IssueChunk,
   IssueQuery,
   Provider,
   Repo,
+  RepoChunk,
   Stats,
   SyncStatus,
 } from './types'
@@ -107,6 +109,12 @@ export const api = {
   authDevice: () => call<{ userCode?: string; verificationUri?: string }>('POST', '/api/auth/github/device'),
 
   repos: () => call<Repo[]>('GET', '/api/projects'),
+  reposChunk(sort: string, desc: boolean, text: string, cursor: string, limit = 50) {
+    const p = new URLSearchParams({ sort, dir: desc ? 'desc' : 'asc', limit: String(limit) })
+    if (text) p.set('q', text)
+    if (cursor) p.set('cursor', cursor)
+    return call<RepoChunk>('GET', '/api/projects?' + p.toString())
+  },
 
   issues(q: IssueQuery) {
     const p = new URLSearchParams()
@@ -116,11 +124,15 @@ export const api = {
     if (q.label) p.set('label', q.label)
     if (q.q) p.set('q', q.q)
     if (q.unread) p.set('unread', '1')
-    if (q.page) p.set('page', String(q.page))
-    if (q.perPage) p.set('per', String(q.perPage))
+    if (q.cursor) p.set('cursor', q.cursor)
+    if (q.after) p.set('after', q.after)
+    if (q.ids?.length) p.set('ids', q.ids.join(','))
+    if (q.limit) p.set('limit', String(q.limit))
     const qs = p.toString()
-    return call<IssuePage>('GET', '/api/items' + (qs ? '?' + qs : ''))
+    return call<IssueChunk>('GET', '/api/items' + (qs ? '?' + qs : ''))
   },
+  comments: (id: number, cursor: string, limit = 50) =>
+    call<CommentChunk>('GET', `/api/items/${id}/comments?limit=${limit}` + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')),
   issue: (id: number | string) => call<IssueDetail>('GET', `/api/items/${encodeURIComponent(String(id))}`),
   markRead: (id: number) => call<void>('POST', `/api/items/${id}/read`),
   reply: (id: number, body: string) => call<Comment>('POST', `/api/items/${id}/comments`, { body }),

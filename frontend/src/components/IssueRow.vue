@@ -1,0 +1,276 @@
+<script setup lang="ts">
+import Skeleton from 'primevue/skeleton'
+import { useI18n } from 'vue-i18n'
+import LabelTag from './LabelTag.vue'
+import PlatformIcon from './PlatformIcon.vue'
+import type { IssueRowData as Row } from '../api/types'
+import { absTime, relTime, repoOwner, shortRepo } from '../lib/format'
+
+// One virtualised row of the issues list. Props are primitives or the row object
+// itself, so a row that stays in view never re-renders while the list scrolls.
+defineProps<{ item: Row; top: number; selected: boolean; active: boolean }>()
+const emit = defineEmits<{ toggle: []; open: [] }>()
+const { t } = useI18n()
+</script>
+
+<template>
+  <div
+    class="vrow"
+    :class="{ skeleton: item.skeleton, unread: item.unread, selected, active }"
+    :style="{ transform: `translateY(${top}px)` }"
+    role="row"
+    :aria-selected="selected"
+    @click="!item.skeleton && emit('open')"
+  >
+    <span
+      class="c-sel"
+      role="gridcell"
+      @click.stop
+    >
+      <input
+        v-if="!item.skeleton"
+        type="checkbox"
+        :checked="selected"
+        :aria-label="'#' + item.number"
+        @change="emit('toggle')"
+      >
+    </span>
+    <template v-if="item.skeleton">
+      <span class="c-title t-skel"><Skeleton
+        width="70%"
+        height="14px"
+      /><Skeleton
+        width="40%"
+        height="10px"
+      /></span>
+      <span class="c-project"><Skeleton
+        width="60%"
+        height="12px"
+      /></span>
+    </template>
+    <template v-else>
+      <span
+        class="c-title"
+        role="gridcell"
+      >
+        <span
+          class="state-icon"
+          :class="item.state"
+        ><i :class="item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'" /></span>
+        <span class="t-main">
+          <span class="t-line">
+            <span
+              v-if="item.unread"
+              class="unread-dot"
+              :aria-label="t('issues.unreadAria')"
+            />
+            <span
+              class="t-title"
+              :title="item.title.length > 80 ? item.title : undefined"
+            >{{ item.title }}</span>
+          </span>
+          <span class="t-meta"><span class="mono">#{{ item.number }}</span> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
+        </span>
+      </span>
+      <span
+        class="c-project"
+        role="gridcell"
+      >
+        <PlatformIcon
+          platform="github"
+          :size="14"
+        />
+        <span class="p-name"><span class="p-owner">{{ repoOwner(item.repo) }}/</span>{{ shortRepo(item.repo) }}</span>
+      </span>
+      <span
+        class="c-labels"
+        role="gridcell"
+      >
+        <LabelTag
+          v-for="l in item.labels.slice(0, 2)"
+          :key="l"
+          :name="l"
+        />
+        <span
+          v-if="item.labels.length > 2"
+          class="l-more"
+          :title="item.labels.slice(2).join(', ')"
+        >+{{ item.labels.length - 2 }}</span>
+      </span>
+      <span
+        class="c-num"
+        role="gridcell"
+        :class="{ zero: !item.comments }"
+      ><i class="pi pi-comment" /> <span class="mono">{{ item.comments }}</span></span>
+      <span
+        class="c-upd"
+        role="gridcell"
+        :title="absTime(item.updatedAt)"
+      >{{ relTime(item.updatedAt) }}</span>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.vrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--row, 60px);
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  column-gap: 12px;
+  padding: 0 16px 0 12px;
+  border-bottom: 1px solid var(--iw-border);
+  cursor: pointer;
+  contain: strict;
+}
+
+.vrow:hover {
+  background: var(--iw-hover);
+}
+
+.vrow.skeleton {
+  cursor: default;
+}
+
+.vrow.selected {
+  background: var(--iw-primary-soft);
+}
+
+.vrow.active {
+  box-shadow: inset 3px 0 0 var(--iw-primary);
+  background: var(--iw-primary-soft);
+}
+
+.c-sel {
+  display: grid;
+  place-items: center;
+  height: 100%;
+}
+
+.c-sel input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--iw-primary);
+  cursor: pointer;
+}
+
+.c-title {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.t-skel {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.state-icon {
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.state-icon.open {
+  color: var(--iw-success);
+}
+
+.state-icon.closed {
+  color: var(--iw-dimmed);
+}
+
+.t-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.t-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.t-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unread .t-title {
+  font-weight: 650;
+}
+
+.t-meta {
+  font-size: 12px;
+  color: var(--iw-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.c-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--iw-text);
+}
+
+.p-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p-owner {
+  color: var(--iw-dimmed);
+}
+
+.c-labels {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.l-more {
+  font-size: 12px;
+  color: var(--iw-muted);
+}
+
+.c-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--iw-muted);
+}
+
+.c-num.zero {
+  opacity: 0.5;
+}
+
+.c-upd {
+  color: var(--iw-muted);
+  white-space: nowrap;
+}
+
+@media (width <= 1023px) {
+  .c-labels {
+    display: none;
+  }
+}
+
+@media (width <= 767px) {
+  .c-project,
+  .c-num {
+    display: none;
+  }
+}
+</style>

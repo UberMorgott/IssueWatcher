@@ -14,15 +14,16 @@ import (
 
 // Data API (all JSON, session or bearer required; docs/ARCHITECTURE.md → HTTP API):
 //
-//	GET  /api/projects                   projects with open/closed/unread counts, localPath, lastSync
-//	GET  /api/items?source=&project=&state=&label=&q=&unread=1&page=&per=
-//	GET  /api/items/{id}                 item + body + comments
+//	GET  /api/projects[?sort=&dir=&q=&cursor=&limit=]  all projects with counts; with limit a keyset chunk
+//	GET  /api/items?source=&project=&state=&label=&q=&unread=1&cursor=|after=|ids=&limit=
+//	GET  /api/items/{id}                 item + body
+//	GET  /api/items/{id}/comments?cursor=&limit=  comments, oldest first, in chunks
 //	POST /api/items/{id}/read            clear unread (tray badge)
 //	POST /api/items/{id}/comments {body} reply on the platform
 //	GET  /api/stats?project=&weeks=      totals + weekly opened/closed; per-project totals when project omitted
 //	GET  /api/sync   POST /api/sync       poller status / sync now
 //
-// Legacy aliases: /api/repos, /api/issues[/{id}[/read|/comments]], repo=, per_page=.
+// Legacy aliases: /api/repos, /api/issues[/{id}[/read|/comments]], repo=.
 func (s *Server) registerData(mux *http.ServeMux) {
 	for _, base := range []string{"/api/projects", "/api/repos"} {
 		mux.HandleFunc("GET "+base, s.handleRepos)
@@ -30,6 +31,7 @@ func (s *Server) registerData(mux *http.ServeMux) {
 	for _, base := range []string{"/api/items", "/api/issues"} {
 		mux.HandleFunc("GET "+base, s.handleIssues)
 		mux.HandleFunc("GET "+base+"/{id}", s.handleIssue)
+		mux.HandleFunc("GET "+base+"/{id}/comments", s.handleComments)
 		mux.HandleFunc("POST "+base+"/{id}/read", s.handleRead)
 		mux.HandleFunc("POST "+base+"/{id}/comments", s.handleReply)
 	}
@@ -75,28 +77,54 @@ func queryInt(r *http.Request, names ...string) (int64, error) {
 	return n, nil
 }
 
+// handleRepos: without limit the whole list (dashboard filters, badge); with
+// limit a keyset chunk {items, nextCursor, more, total} sorted by sort (name,
+// open, closed, unread, lastSync) and dir (asc|desc).
 func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
-	repos, err := s.opts.Store.Repos(r.Context())
+	q := r.URL.Query()
+	if q.Get("limit") == "" {
+		repos, err := s.opts.Store.Repos(r.Context())
+		if err != nil {
+			s.internalError(w, "list repos", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, repos)
+		return
+	}
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rq := store.RepoQuery{Sort: q.Get("sort"), Desc: q.Get("dir") == "desc", Text: q.Get("q"), Cursor: q.Get("cursor"), Limit: int(min(limit, 1000))}
+	if _, ok := store.RepoSorts[rq.Sort]; !ok && rq.Sort != "" {
+		errJSON(w, http.StatusBadRequest, "bad sort")
+		return
+	}
+	chunk, err := s.opts.Store.ReposChunk(r.Context(), rq)
+	if errors.Is(err, store.ErrBadCursor) {
+		errJSON(w, http.StatusBadRequest, "bad cursor")
+		return
+	}
 	if err != nil {
 		s.internalError(w, "list repos", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, repos)
+	writeJSON(w, http.StatusOK, chunk)
 }
 
+// handleIssues: keyset chunks (cursor = next chunk, after = newer than the head,
+// ids = re-check loaded rows) with the dashboard filters.
 func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	var f store.IssueFilter
-	var nums [3]int64
-	for i, names := range [][]string{{"project", "repo"}, {"page"}, {"per", "per_page"}} {
-		n, err := queryInt(r, names...)
-		if err != nil {
-			errJSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		nums[i] = n
+	repo, err1 := queryInt(r, "project", "repo")
+	limit, err2 := queryInt(r, "limit")
+	if err := errors.Join(err1, err2); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	f.RepoID, f.Page, f.PerPage = nums[0], int(min(nums[1], 1<<20)), int(min(nums[2], 1000))
+	f.RepoID, f.Limit = repo, int(min(limit, 1000))
 	switch st := q.Get("state"); st {
 	case "", "all":
 	case "open", "closed":
@@ -105,13 +133,50 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "bad state")
 		return
 	}
+	if v := q.Get("ids"); v != "" {
+		for part := range strings.SplitSeq(v, ",") {
+			id, err := strconv.ParseInt(part, 10, 64)
+			if err != nil || id <= 0 || len(f.IDs) >= store.MaxIDs {
+				errJSON(w, http.StatusBadRequest, "bad ids")
+				return
+			}
+			f.IDs = append(f.IDs, id)
+		}
+	}
 	f.Platform, f.Label, f.Text, f.Unread = q.Get("source"), q.Get("label"), q.Get("q"), q.Get("unread") == "1"
-	page, err := s.opts.Store.Issues(r.Context(), f)
+	f.Cursor, f.After = q.Get("cursor"), q.Get("after")
+	chunk, err := s.opts.Store.Issues(r.Context(), f)
+	if errors.Is(err, store.ErrBadCursor) {
+		errJSON(w, http.StatusBadRequest, "bad cursor")
+		return
+	}
 	if err != nil {
 		s.internalError(w, "list issues", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	writeJSON(w, http.StatusOK, chunk)
+}
+
+func (s *Server) handleComments(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	chunk, err := s.opts.Store.Comments(r.Context(), id, r.URL.Query().Get("cursor"), int(min(limit, 1000)))
+	if errors.Is(err, store.ErrBadCursor) {
+		errJSON(w, http.StatusBadRequest, "bad cursor")
+		return
+	}
+	if err != nil {
+		s.internalError(w, "list comments", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chunk)
 }
 
 func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {

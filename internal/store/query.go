@@ -53,7 +53,95 @@ func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
 	return out, nil
 }
 
-// IssueFilter selects issues for the dashboard table.
+// RepoSorts maps GET /api/projects?sort= to the keyset sort expression.
+var RepoSorts = map[string]string{
+	"name":     "lower(r.name)",
+	"open":     "r.open",
+	"closed":   "r.closed",
+	"unread":   "r.unread",
+	"lastSync": "r.synced_at",
+}
+
+// RepoQuery selects a chunk of the project list.
+type RepoQuery struct {
+	Sort   string // key of RepoSorts, default name
+	Desc   bool
+	Text   string // name substring
+	Cursor string
+	Limit  int
+}
+
+// RepoChunk is one slice of the project list.
+type RepoChunk struct {
+	Items      []Repo `json:"items"`
+	NextCursor string `json:"nextCursor"`
+	More       bool   `json:"more"`
+	Total      int    `json:"total"`
+}
+
+// ReposChunk returns active projects sorted by q.Sort (id breaks ties), a chunk at a time.
+func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) {
+	limit := clampLimit(q.Limit)
+	key, ok := RepoSorts[q.Sort]
+	if !ok {
+		key = RepoSorts["name"]
+	}
+	cmp, dir := ">", "ASC"
+	if q.Desc {
+		cmp, dir = "<", "DESC"
+	}
+	inner := `SELECT p.id, p.name, p.url, s.platform, p.local_path, p.synced_at,
+		count(i.id) FILTER (WHERE i.status = 'open') AS open,
+		count(i.id) FILTER (WHERE i.status = 'closed') AS closed,
+		count(i.id) FILTER (WHERE i.unread = 1) AS unread
+		FROM projects p JOIN sources s ON s.id = p.source_id
+		LEFT JOIN items i ON i.project_id = p.id
+		WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\') GROUP BY p.id`
+	chunk := RepoChunk{Items: []Repo{}}
+	like := ""
+	if t := strings.TrimSpace(q.Text); t != "" {
+		like = "%" + likeEscape(t) + "%"
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM projects p WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\')`, like).Scan(&chunk.Total); err != nil {
+		return chunk, fmt.Errorf("store: count repos: %w", err)
+	}
+	where, args := "", []any{like}
+	if q.Cursor != "" {
+		k, err := decodeCursor(q.Cursor)
+		if err != nil {
+			return chunk, err
+		}
+		where = " WHERE (" + key + " " + cmp + " ?2 OR (" + key + " = ?2 AND r.id " + cmp + " ?3))"
+		args = append(args, k.Value, k.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT r.id, r.name, r.url, r.platform, r.local_path, r.synced_at, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
+		" FROM ("+inner+") r"+where+" ORDER BY "+key+" "+dir+", r.id "+dir+" LIMIT ?", append(args, limit+1)...)
+	if err != nil {
+		return chunk, fmt.Errorf("store: repos: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var sortVal any
+	for rows.Next() {
+		var r Repo
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.LocalPath, &r.LastSync, &r.Open, &r.Closed, &r.Unread, &sortVal); err != nil {
+			return chunk, fmt.Errorf("store: scan repo: %w", err)
+		}
+		if len(chunk.Items) == limit {
+			chunk.More = true
+			break
+		}
+		r.SyncedAt = r.LastSync
+		chunk.Items = append(chunk.Items, r)
+		chunk.NextCursor = encodeCursor(sortVal, r.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return chunk, fmt.Errorf("store: repos: %w", err)
+	}
+	return chunk, nil
+}
+
+// IssueFilter selects issues for the dashboard table (keyset pagination: newest
+// update first, id breaks ties).
 type IssueFilter struct {
 	Platform string // source platform (github, ...), "" = all
 	RepoID   int64  // 0 = all
@@ -61,8 +149,10 @@ type IssueFilter struct {
 	Label    string // exact label name
 	Text     string // substring of title/body, or #number
 	Unread   bool
-	Page     int // 1-based
-	PerPage  int // default 50, max 200
+	IDs      []int64 // only these items, still matching the filter (live patching; max 500)
+	Cursor   string  // rows after this one (older): the next chunk
+	After    string  // rows before this one (newer): head refresh
+	Limit    int     // chunk size, default 50, max 200
 }
 
 // Issue is a table row.
@@ -84,14 +174,17 @@ type Issue struct {
 	ClosedAt  string   `json:"closedAt"`
 }
 
-// IssuePage is one page of issues plus the total match count.
-type IssuePage struct {
-	Total   int     `json:"total"`
-	Page    int     `json:"page"`
-	PerPage int     `json:"perPage"`
-	Items   []Issue `json:"items"`
+// IssueChunk is one slice of the issue list.
+type IssueChunk struct {
+	Items      []Issue `json:"items"`
+	HeadCursor string  `json:"headCursor"`      // cursor of the first row (After for a later head refresh), "" when empty
+	NextCursor string  `json:"nextCursor"`      // cursor of the last row (Cursor for the next chunk), "" when empty
+	More       bool    `json:"more"`            // Cursor/first chunk: older rows follow; After: more than Limit newer rows
+	Total      *int    `json:"total,omitempty"` // rows matching the filter (first chunk and After only)
 }
 
+// MaxIDs bounds IssueFilter.IDs.
+const MaxIDs = 500
 const issueColumns = `i.id, i.project_id, p.name, i.number, i.title, i.url, i.author, i.status, i.raw_status,
 	i.labels, (SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.unread, i.created_at, i.updated_at, i.closed_at`
 
@@ -111,14 +204,9 @@ func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 	return is, nil
 }
 
-// Issues returns a filtered page, most recently updated first.
-func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssuePage, error) {
-	if f.PerPage <= 0 {
-		f.PerPage = 50
-	}
-	f.PerPage = min(f.PerPage, 200)
-	f.Page = max(f.Page, 1)
-
+// Issues returns a chunk of the filtered list, most recently updated first.
+func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
+	limit := clampLimit(f.Limit)
 	where := []string{"p.active = 1"}
 	var args []any
 	if f.RepoID != 0 {
@@ -145,29 +233,65 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssuePage, error) {
 			args = append(args, like, like)
 		}
 	}
-	from := " FROM items i JOIN projects p ON p.id = i.project_id WHERE " + strings.Join(where, " AND ")
-
-	page := IssuePage{Page: f.Page, PerPage: f.PerPage, Items: []Issue{}}
-	if err := s.db.QueryRowContext(ctx, "SELECT count(*)"+from, args...).Scan(&page.Total); err != nil {
-		return page, fmt.Errorf("store: count issues: %w", err)
+	chunk := IssueChunk{Items: []Issue{}}
+	if len(f.IDs) > 0 {
+		ids := f.IDs[:min(len(f.IDs), MaxIDs)]
+		where = append(where, "i.id IN (?"+strings.Repeat(",?", len(ids)-1)+")")
+		for _, id := range ids {
+			args = append(args, id)
+		}
+		limit = len(ids)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+issueColumns+from+" ORDER BY i.updated_at DESC, i.id DESC LIMIT ? OFFSET ?", //nolint:gosec // G202: WHERE built from constant fragments; all values are bound args
-		append(args, f.PerPage, (f.Page-1)*f.PerPage)...)
+	from := " FROM items i JOIN projects p ON p.id = i.project_id WHERE " + strings.Join(where, " AND ")
+	if len(f.IDs) == 0 && f.Cursor == "" {
+		var n int
+		if err := s.db.QueryRowContext(ctx, "SELECT count(*)"+from, args...).Scan(&n); err != nil {
+			return chunk, fmt.Errorf("store: count issues: %w", err)
+		}
+		chunk.Total = &n
+	}
+	keyset := ""
+	switch {
+	case f.Cursor != "":
+		k, err := decodeCursor(f.Cursor)
+		if err != nil {
+			return chunk, err
+		}
+		keyset = " AND (i.updated_at < ? OR (i.updated_at = ? AND i.id < ?))"
+		args = append(args, k.Value, k.Value, k.ID)
+	case f.After != "":
+		k, err := decodeCursor(f.After)
+		if err != nil {
+			return chunk, err
+		}
+		keyset = " AND (i.updated_at > ? OR (i.updated_at = ? AND i.id > ?))"
+		args = append(args, k.Value, k.Value, k.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+issueColumns+from+keyset+" ORDER BY i.updated_at DESC, i.id DESC LIMIT ?", //nolint:gosec // G202: WHERE built from constant fragments; all values are bound args
+		append(args, limit+1)...)
 	if err != nil {
-		return page, fmt.Errorf("store: issues: %w", err)
+		return chunk, fmt.Errorf("store: issues: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		is, err := scanIssue(rows)
 		if err != nil {
-			return page, fmt.Errorf("store: scan issue: %w", err)
+			return chunk, fmt.Errorf("store: scan issue: %w", err)
 		}
-		page.Items = append(page.Items, is)
+		chunk.Items = append(chunk.Items, is)
 	}
 	if err := rows.Err(); err != nil {
-		return page, fmt.Errorf("store: issues: %w", err)
+		return chunk, fmt.Errorf("store: issues: %w", err)
 	}
-	return page, nil
+	if len(chunk.Items) > limit {
+		chunk.Items, chunk.More = chunk.Items[:limit], true
+	}
+	if n := len(chunk.Items); n > 0 {
+		first, last := chunk.Items[0], chunk.Items[n-1]
+		chunk.HeadCursor = encodeCursor(first.UpdatedAt, first.ID)
+		chunk.NextCursor = encodeCursor(last.UpdatedAt, last.ID)
+	}
+	return chunk, nil
 }
 
 // Comment is a stored comment (API shape).
@@ -180,14 +304,13 @@ type Comment struct {
 	UpdatedAt  string `json:"updatedAt"`
 }
 
-// IssueDetail is an issue with its body and comments.
+// IssueDetail is an issue with its body; comments come in chunks (Comments).
 type IssueDetail struct {
 	Issue
-	Body         string    `json:"body"`
-	CommentsList []Comment `json:"commentsList"`
+	Body string `json:"body"`
 }
 
-// Issue returns one issue with comments, oldest first.
+// Issue returns one issue with its body.
 func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 	var d IssueDetail
 	row := s.db.QueryRowContext(ctx, "SELECT "+issueColumns+", i.body FROM items i JOIN projects p ON p.id = i.project_id WHERE i.id = ?", id)
@@ -199,24 +322,56 @@ func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 	if err != nil {
 		return d, fmt.Errorf("store: issue %d: %w", id, err)
 	}
-	d.Issue, d.Body, d.CommentsList = is, body, []Comment{}
-	rows, err := s.db.QueryContext(ctx, `SELECT external_id, author, body, url, created_at, updated_at
-		FROM comments WHERE item_id = ? ORDER BY created_at, id`, id)
+	d.Issue, d.Body = is, body
+	return d, nil
+}
+
+// CommentChunk is one slice of an item's comments, oldest first.
+type CommentChunk struct {
+	Items      []Comment `json:"items"`
+	NextCursor string    `json:"nextCursor"` // cursor of the last row; also finds comments added later
+	More       bool      `json:"more"`
+}
+
+// Comments returns up to limit comments of item id after cursor ("" = from the first).
+func (s *Store) Comments(ctx context.Context, id int64, cursor string, limit int) (CommentChunk, error) {
+	limit = clampLimit(limit)
+	chunk := CommentChunk{Items: []Comment{}}
+	q := `SELECT id, external_id, author, body, url, created_at, updated_at FROM comments WHERE item_id = ?`
+	args := []any{id}
+	if cursor != "" {
+		k, err := decodeCursor(cursor)
+		if err != nil {
+			return chunk, err
+		}
+		q += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
+		args = append(args, k.Value, k.Value, k.ID)
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY created_at, id LIMIT ?`, append(args, limit+1)...)
 	if err != nil {
-		return d, fmt.Errorf("store: comments: %w", err)
+		return chunk, fmt.Errorf("store: comments: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	var lastID int64
 	for rows.Next() {
 		var c Comment
-		if err := rows.Scan(&c.ExternalID, &c.Author, &c.Body, &c.URL, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return d, fmt.Errorf("store: scan comment: %w", err)
+		if err := rows.Scan(&lastID, &c.ExternalID, &c.Author, &c.Body, &c.URL, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return chunk, fmt.Errorf("store: scan comment: %w", err)
 		}
-		d.CommentsList = append(d.CommentsList, c)
+		if len(chunk.Items) == limit {
+			chunk.More = true
+			break
+		}
+		chunk.Items = append(chunk.Items, c)
+		chunk.NextCursor = encodeCursor(c.CreatedAt, lastID)
 	}
 	if err := rows.Err(); err != nil {
-		return d, fmt.Errorf("store: comments: %w", err)
+		return chunk, fmt.Errorf("store: comments: %w", err)
 	}
-	return d, nil
+	if cursor != "" && len(chunk.Items) == 0 {
+		chunk.NextCursor = cursor // nothing new: keep the position
+	}
+	return chunk, nil
 }
 
 type scanFunc func(dst ...any) error

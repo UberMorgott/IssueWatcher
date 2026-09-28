@@ -11,7 +11,7 @@ import { useToast } from 'primevue/usetoast'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
 import { connectLive, type LiveEventName } from './api/live'
-import type { LiveItemEvent, SyncProgress } from './api/types'
+import type { DataChange, LiveItemEvent, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useShortcuts } from './lib/shortcuts'
 import { updateDocumentTitle } from './router'
@@ -78,7 +78,7 @@ function onLive(name: LiveEventName, data: unknown) {
       void app.onSyncStatus(data as SyncProgress | null)
       return
     case 'data.changed':
-      app.invalidate()
+      app.invalidate((data as DataChange | null) ?? undefined)
       return
     case 'item.new':
     case 'comment.new':
@@ -90,7 +90,7 @@ function onLive(name: LiveEventName, data: unknown) {
       const detail =
         name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
       toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon } } as never)
-      app.invalidate()
+      app.invalidate({ reason: 'sync', itemId: e.id })
     }
   }
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -158,7 +159,7 @@ func TestSyncProjectsDeactivatesMissing(t *testing.T) {
 		t.Fatalf("repos %+v %v", repos, err)
 	}
 	page, err := s.Issues(t.Context(), IssueFilter{})
-	if err != nil || page.Total != 0 {
+	if err != nil || page.Total == nil || *page.Total != 0 {
 		t.Fatalf("issues of inactive repo visible: %+v %v", page, err)
 	}
 }
@@ -185,7 +186,6 @@ func TestIssuesFiltersAndDetail(t *testing.T) {
 		{IssueFilter{Text: "#1"}, []int{1}},
 		{IssueFilter{Text: "body I1"}, []int{1}},
 		{IssueFilter{RepoID: p.ID + 1}, []int{}},
-		{IssueFilter{PerPage: 1, Page: 2}, []int{1}},
 	}
 	for _, c := range cases {
 		page, err := s.Issues(ctx, c.f)
@@ -202,7 +202,7 @@ func TestIssuesFiltersAndDetail(t *testing.T) {
 	}
 	page, _ := s.Issues(ctx, IssueFilter{Text: "#1"})
 	d, err := s.Issue(ctx, page.Items[0].ID)
-	if err != nil || d.Body != "body I1" || len(d.CommentsList) != 2 || d.Comments != 2 || d.Labels[0] != "bug" || d.Repo != "o/app" {
+	if err != nil || d.Body != "body I1" || d.Comments != 2 || d.Labels[0] != "bug" || d.Repo != "o/app" {
 		t.Fatalf("detail %+v %v", d, err)
 	}
 	if _, err := s.Issue(ctx, 9999); !errors.Is(err, ErrNotFound) {
@@ -211,6 +211,17 @@ func TestIssuesFiltersAndDetail(t *testing.T) {
 	c, err := s.AddComment(ctx, d.ID, comment("C9", "me"))
 	if err != nil || c.ExternalID != "C9" {
 		t.Fatalf("add comment %+v %v", c, err)
+	}
+	ch, err := s.Comments(ctx, d.ID, "", 2)
+	if err != nil || len(ch.Items) != 2 || !ch.More {
+		t.Fatalf("comments chunk 1 %+v %v", ch, err)
+	}
+	ch, err = s.Comments(ctx, d.ID, ch.NextCursor, 2)
+	if err != nil || len(ch.Items) != 1 || ch.More || ch.Items[0].ExternalID != "C9" {
+		t.Fatalf("comments chunk 2 %+v %v", ch, err)
+	}
+	if again, _ := s.Comments(ctx, d.ID, ch.NextCursor, 2); len(again.Items) != 0 || again.NextCursor != ch.NextCursor {
+		t.Fatalf("comments tail %+v", again)
 	}
 	ref, err := s.ItemRef(ctx, d.ID)
 	if err != nil || ref.ExternalID != "I1" || ref.Platform != "github" {
@@ -241,5 +252,81 @@ func TestStatsWeekly(t *testing.T) {
 	st, err = s.Stats(ctx, p.ID+1, 3, now)
 	if err != nil || st.Open != 0 || st.Weekly[1].Opened != 0 {
 		t.Fatalf("other repo stats %+v %v", st, err)
+	}
+}
+
+// Keyset chunks: every row exactly once in order, ties on updated_at broken by
+// id, head refresh sees only newer rows, IDs re-check the filter.
+func TestIssuesKeysetChunks(t *testing.T) {
+	s, src, p := setup(t)
+	ctx := t.Context()
+	var items []provider.Item
+	for n := 1; n <= 23; n++ {
+		items = append(items, item("K"+strconv.Itoa(n), n, n%2 == 0, t0.Add(time.Duration(n/3)*time.Minute)))
+	}
+	if _, err := s.ApplyItems(ctx, src, p.ID, items, "me"); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		seen   []int64
+		cursor string
+		chunks int
+		head   string
+	)
+	for {
+		c, err := s.Issues(ctx, IssueFilter{Cursor: cursor, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunks++
+		if cursor == "" {
+			head = c.HeadCursor
+			if c.Total == nil || *c.Total != 23 {
+				t.Fatalf("total %v", c.Total)
+			}
+		}
+		for _, is := range c.Items {
+			seen = append(seen, is.ID)
+		}
+		if !c.More {
+			break
+		}
+		cursor = c.NextCursor
+	}
+	uniq := map[int64]bool{}
+	for _, id := range seen {
+		uniq[id] = true
+	}
+	if len(seen) != 23 || len(uniq) != 23 || chunks != 5 {
+		t.Fatalf("rows %d unique %d chunks %d", len(seen), len(uniq), chunks)
+	}
+	all, _ := s.Issues(ctx, IssueFilter{Limit: 200})
+	for i, is := range all.Items {
+		if is.ID != seen[i] {
+			t.Fatalf("chunk order differs at %d", i)
+		}
+	}
+	if c, _ := s.Issues(ctx, IssueFilter{After: head}); len(c.Items) != 0 {
+		t.Fatalf("after head: %d rows", len(c.Items))
+	}
+	newer := item("K99", 99, true, t0.Add(time.Hour))
+	if _, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{newer}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := s.Issues(ctx, IssueFilter{After: head})
+	if len(c.Items) != 1 || c.Items[0].Number != 99 || c.More {
+		t.Fatalf("after head: %+v", c)
+	}
+	ids := []int64{all.Items[0].ID, all.Items[1].ID}
+	c, _ = s.Issues(ctx, IssueFilter{IDs: ids, State: "open"})
+	if len(c.Items) != 1 {
+		t.Fatalf("ids+filter: %d rows", len(c.Items))
+	}
+	if _, err := s.Issues(ctx, IssueFilter{Cursor: "junk"}); !errors.Is(err, ErrBadCursor) {
+		t.Fatalf("bad cursor: %v", err)
+	}
+	ch, err := s.ReposChunk(ctx, RepoQuery{Sort: "open", Desc: true, Limit: 1})
+	if err != nil || len(ch.Items) != 1 || ch.More || ch.Total != 1 {
+		t.Fatalf("repos chunk %+v %v", ch, err)
 	}
 }

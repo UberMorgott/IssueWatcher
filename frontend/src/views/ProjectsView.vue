@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
@@ -17,6 +17,8 @@ import type { Repo, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, repoOwner, shortDay, shortRepo } from '../lib/format'
+import { useChunks } from '../lib/chunks'
+import type { DataTableSortEvent } from 'primevue/datatable'
 
 const app = useAppStore()
 const { t } = useI18n()
@@ -24,10 +26,41 @@ const filter = ref('')
 const expanded = ref<Record<string, boolean>>({})
 const repoStats = reactive<Record<number, Stats | 'loading' | 'error'>>({})
 
-const rows = computed(() => {
-  const f = filter.value.trim().toLowerCase()
-  return f ? app.repos.filter((r) => r.name.toLowerCase().includes(f)) : app.repos
+// Server-sorted keyset chunks (sort/filter changes start over); more rows load
+// when the sentinel below the table comes within ~2 screens.
+const sortField = ref('open')
+const sortOrder = ref<1 | -1>(-1)
+const list = useChunks<Repo>((cursor) => api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), cursor))
+const rows = list.items
+const listLoading = list.loading
+function reload() {
+  list.reset()
+  void list.loadMore()
+}
+function onSort(e: DataTableSortEvent) {
+  sortField.value = typeof e.sortField === 'string' ? e.sortField : 'open'
+  sortOrder.value = e.sortOrder === 1 ? 1 : -1
+  reload()
+}
+let filterTimer: number | undefined
+watch(filter, () => {
+  window.clearTimeout(filterTimer)
+  filterTimer = window.setTimeout(reload, 250)
 })
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | undefined
+onMounted(() => {
+  reload()
+  observer = new IntersectionObserver((e) => {
+    if (e.some((x) => x.isIntersecting)) void list.loadMore()
+  }, { rootMargin: '0px 0px 1600px 0px' })
+  if (sentinel.value) observer.observe(sentinel.value)
+})
+watch(sentinel, (el) => {
+  observer?.disconnect()
+  if (el) observer?.observe(el)
+})
+onBeforeUnmount(() => observer?.disconnect())
 const totals = computed(() => app.repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed }), { open: 0, closed: 0 }))
 
 async function onExpand(e: { data: Repo }) {
@@ -38,10 +71,15 @@ async function onExpand(e: { data: Repo }) {
   repoStats[id] = r.ok ? r.data : 'error'
 }
 
-// Live data: the list comes from the store (refreshed there); open charts refetch quietly.
+// Live data: re-read the loaded range in place (same sort, no scroll jump); open charts refetch quietly.
 watch(
   () => app.dataVersion,
-  () => {
+  async () => {
+    const n = rows.value.length
+    if (n) {
+      const r = await api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), '', Math.min(Math.max(n, 50), 1000))
+      if (r.ok) rows.value = r.data.items
+    }
     for (const k of Object.keys(expanded.value)) {
       const id = Number(k)
       void api.stats(id).then((r) => {
@@ -117,9 +155,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           class="iw-projects"
           :value="rows"
           data-key="id"
-          :loading="!app.reposLoaded"
-          sort-field="open"
-          :sort-order="-1"
+          lazy
+          :sort-field="sortField"
+          :sort-order="sortOrder"
+          @sort="onSort"
           @row-expand="onExpand"
         >
           <template #empty>
@@ -136,7 +175,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               :text="t('projects.noMatchText', { filter })"
             />
             <EmptyState
-              v-else-if="app.reposLoaded"
+              v-else-if="!listLoading"
               icon="pi pi-folder"
               :title="t('projects.empty')"
               :text="t('projects.emptyText')"
@@ -330,12 +369,33 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
             </div>
           </template>
         </DataTable>
+        <div
+          v-if="listLoading"
+          class="tail"
+        >
+          <Skeleton
+            v-for="i in 3"
+            :key="i"
+            height="40px"
+          />
+        </div>
+        <div
+          ref="sentinel"
+          aria-hidden="true"
+        />
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+.tail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 12px;
+}
+
 .summary b {
   color: var(--iw-text);
 }

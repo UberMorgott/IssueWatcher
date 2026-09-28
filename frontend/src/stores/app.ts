@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
-import type { LiveItemEvent, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
+import type { DataChange, LiveItemEvent, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
 import { t } from '../i18n'
 
 export type Theme = 'dark' | 'light'
@@ -150,16 +150,30 @@ export const useAppStore = defineStore('app', () => {
    * every view watches it and refetches quietly, keeping selection, filters and scroll.
    */
   const dataVersion = ref(0)
-  function bump() {
+  /**
+   * What changed since the previous bump (read when dataVersion changes); null =
+   * unknown (reconnect, auth, sync without details): views re-check everything.
+   */
+  let changes: DataChange[] | null = []
+  const lastChanges = ref<DataChange[] | null>(null)
+  function flush(what: DataChange[] | null) {
     window.clearTimeout(invalidateTimer)
+    lastChanges.value = what
+    changes = []
     dataVersion.value++
     void loadRepos()
   }
+  /** Immediate full refresh (reconnect, take-over). */
+  function bump() {
+    flush(null)
+  }
   let invalidateTimer: number | undefined
   /** Debounced bump: a burst of changes (sync of many projects) refetches once. */
-  function invalidate() {
+  function invalidate(change?: DataChange) {
+    if (change && changes) changes.push(change)
+    else changes = null
     window.clearTimeout(invalidateTimer)
-    invalidateTimer = window.setTimeout(bump, 300)
+    invalidateTimer = window.setTimeout(() => flush(changes), 300)
   }
 
   const activity = ref<ActivityEntry[]>([])
@@ -201,6 +215,7 @@ export const useAppStore = defineStore('app', () => {
     onboarding,
     offlineData,
     dataVersion,
+    lastChanges,
     bump,
     invalidate,
     activity,

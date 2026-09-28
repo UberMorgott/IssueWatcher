@@ -210,7 +210,7 @@ func TestFirstSyncPublishesProgressAndDataChanged(t *testing.T) {
 	}
 
 	// Local actions publish data.changed too.
-	var page store.IssuePage
+	var page store.IssueChunk
 	e.call(t, http.MethodGet, "/api/items", "", &page)
 	id := strconv.FormatInt(page.Items[0].ID, 10)
 	if code := e.call(t, http.MethodPost, "/api/items/"+id+"/read", "", nil); code != http.StatusNoContent {

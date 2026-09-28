@@ -61,11 +61,11 @@ func TestReposIssuesAndDetail(t *testing.T) {
 		"/api/issues?q=dark":                                     {2},
 		"/api/issues?unread=1":                                   {1},
 		"/api/issues?repo=" + strconv.Itoa(99):                   {},
-		"/api/issues?per_page=1&page=2&state=all":                {2},
+		"/api/issues?limit=1&state=all":                          {1},
 		"/api/issues?repo=" + strconv.FormatInt(repos[0].ID, 10): {1, 2},
 	}
 	for path, want := range cases {
-		var page store.IssuePage
+		var page store.IssueChunk
 		if code := e.call(t, http.MethodGet, path, "", &page); code != http.StatusOK || len(page.Items) != len(want) {
 			t.Errorf("%s: %d %+v, want %v", path, code, page.Items, want)
 			continue
@@ -76,19 +76,23 @@ func TestReposIssuesAndDetail(t *testing.T) {
 			}
 		}
 	}
-	for _, bad := range []string{"/api/issues?state=weird", "/api/issues?page=-1", "/api/issues?repo=x"} {
+	for _, bad := range []string{"/api/issues?state=weird", "/api/issues?limit=-1", "/api/issues?repo=x", "/api/issues?cursor=zz", "/api/issues?ids=1,x", "/api/projects?limit=5&sort=bogus"} {
 		if code := e.call(t, http.MethodGet, bad, "", nil); code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
 	}
 
-	var page store.IssuePage
+	var page store.IssueChunk
 	e.call(t, http.MethodGet, "/api/issues?q=%231", "", &page)
 	id := strconv.FormatInt(page.Items[0].ID, 10)
 	var d store.IssueDetail
-	if code := e.call(t, http.MethodGet, "/api/issues/"+id, "", &d); code != http.StatusOK ||
-		len(d.CommentsList) != 1 || d.CommentsList[0].Author != "carol" || !d.Unread {
+	if code := e.call(t, http.MethodGet, "/api/issues/"+id, "", &d); code != http.StatusOK || d.Comments != 1 || !d.Unread {
 		t.Fatalf("detail %d %+v", code, d)
+	}
+	var cc store.CommentChunk
+	if code := e.call(t, http.MethodGet, "/api/issues/"+id+"/comments?limit=10", "", &cc); code != http.StatusOK ||
+		len(cc.Items) != 1 || cc.Items[0].Author != "carol" || cc.More {
+		t.Fatalf("comments %d %+v", code, cc)
 	}
 	if code := e.call(t, http.MethodGet, "/api/issues/9999", "", nil); code != http.StatusNotFound {
 		t.Fatalf("missing issue: %d", code)
@@ -107,7 +111,7 @@ func TestReposIssuesAndDetail(t *testing.T) {
 
 func TestReplyPostsToGitHub(t *testing.T) {
 	e := syncedEnv(t)
-	var page store.IssuePage
+	var page store.IssueChunk
 	e.call(t, http.MethodGet, "/api/issues?q=%231", "", &page)
 	path := "/api/issues/" + strconv.FormatInt(page.Items[0].ID, 10) + "/comments"
 
@@ -145,20 +149,20 @@ func TestContractRoutes(t *testing.T) {
 	}
 	pid := strconv.FormatInt(projects[0].ID, 10)
 	for path, want := range map[string]int{
-		"/api/items?project=" + pid + "&per=1&page=2": 1,
-		"/api/items?source=github&state=open":         1,
-		"/api/items?source=steam":                     0,
+		"/api/items?project=" + pid + "&limit=1": 1,
+		"/api/items?source=github&state=open":    1,
+		"/api/items?source=steam":                0,
 	} {
-		var page store.IssuePage
+		var page store.IssueChunk
 		if code := e.call(t, http.MethodGet, path, "", &page); code != http.StatusOK || len(page.Items) != want {
 			t.Errorf("%s: %d %d items, want %d", path, code, len(page.Items), want)
 		}
 	}
-	var page store.IssuePage
+	var page store.IssueChunk
 	e.call(t, http.MethodGet, "/api/items?q=%231", "", &page)
 	id := strconv.FormatInt(page.Items[0].ID, 10)
 	var d store.IssueDetail
-	if code := e.call(t, http.MethodGet, "/api/items/"+id, "", &d); code != http.StatusOK || len(d.CommentsList) != 1 {
+	if code := e.call(t, http.MethodGet, "/api/items/"+id, "", &d); code != http.StatusOK || d.Comments != 1 {
 		t.Fatalf("item %d %+v", code, d)
 	}
 	var c store.Comment

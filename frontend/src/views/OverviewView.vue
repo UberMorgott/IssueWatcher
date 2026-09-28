@@ -44,7 +44,7 @@ async function loadRepoStats() {
 }
 
 async function loadLists() {
-  const [a, b] = await Promise.all([api.issues({ unread: true, state: 'all', perPage: 6 }), api.issues({ state: 'all', perPage: 8 })])
+  const [a, b] = await Promise.all([api.issues({ unread: true, state: 'all', limit: 6 }), api.issues({ state: 'all', limit: 8 })])
   attention.value = a.ok ? a.data.items : []
   recent.value = b.ok ? b.data.items : []
   listsLoading.value = false
