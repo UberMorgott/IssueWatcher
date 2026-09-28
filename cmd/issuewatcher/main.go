@@ -24,10 +24,13 @@ import (
 
 	issuewatcher "github.com/UberMorgott/issuewatcher"
 	"github.com/UberMorgott/issuewatcher/internal/api"
+	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 	"github.com/UberMorgott/issuewatcher/internal/notify"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
+	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/store"
+	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=...".
@@ -75,22 +78,60 @@ func run() error {
 	}
 	defer func() { _ = db.Close() }()
 
-	return serve(log, dataDir)
+	cfg, err := config.Load(dataDir)
+	if err != nil {
+		return err
+	}
+	return serve(log, dataDir, cfg, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")))
 }
 
-func serve(log *slog.Logger, dataDir string) error {
+func serve(log *slog.Logger, dataDir string, cfg config.Config, st *store.Store, auth *github.Auth) error {
 	open := func(u string) { go openBrowser(log, u) }
 	if os.Getenv(envNoBrowser) == "1" {
 		open = func(u string) { log.Info("browser open suppressed", "url", u) }
 	}
 	preferred, _ := strconv.Atoi(os.Getenv(envPort))
+	if app, err := auth.App(); preferred == 0 && err == nil {
+		// Reuse the port baked into the app's callback URL when it is free, so
+		// sign-in works even if GitHub matched loopback redirect ports exactly.
+		preferred = app.RegisteredPort
+	}
+
+	var (
+		tray     *notify.Tray // set once in the RunTray ready callback, before any handler runs
+		setBadge func(int64)
+		srv      *api.Server // set below, before the syncer runs
+	)
+	refreshBadge := func() {
+		n, err := st.UnreadCount(context.Background())
+		if err != nil {
+			log.Error("unread count", "err", err)
+			return
+		}
+		setBadge(int64(n))
+	}
+	sy := syncer.New(syncer.Options{
+		Store: st, Provider: github.NewProvider(auth), Interval: cfg.PollInterval(), Log: log,
+		OnUpdate: func(events []store.Event, unread int) {
+			for _, b := range notify.Balloons(events) {
+				err := tray.Notify(b.Title, b.Text, b.ItemID)
+				log.Info("notification shown", "item", b.ItemID, "err", err)
+			}
+			setBadge(int64(unread))
+			publishLive(srv, events, unread)
+		},
+	})
 
 	srv, err := api.New(context.Background(), api.Options{
-		Assets:        issuewatcher.Assets(),
-		PreferredPort: preferred,
-		Version:       Version,
-		Open:          open,
-		Log:           log,
+		Assets:         issuewatcher.Assets(),
+		PreferredPort:  preferred,
+		Version:        Version,
+		Open:           open,
+		Log:            log,
+		GitHub:         auth,
+		Store:          st,
+		Sync:           sy,
+		OnUnreadChange: refreshBadge,
 	})
 	if err != nil {
 		return err
@@ -109,11 +150,11 @@ func serve(log *slog.Logger, dataDir string) error {
 	}()
 	log.Info("http listening", "url", srv.BaseURL())
 
-	var tray *notify.Tray // set once in the RunTray ready callback, before any handler runs
-
 	unread := atomic.Int64{}
-	unread.Store(3) // mock count until sync exists
-	setBadge := func(n int64) {
+	if n, err := st.UnreadCount(context.Background()); err == nil {
+		unread.Store(int64(n))
+	}
+	setBadge = func(n int64) {
 		unread.Store(n)
 		icon, err := notify.TrayIcon(int(n))
 		if err == nil {
@@ -126,6 +167,9 @@ func serve(log *slog.Logger, dataDir string) error {
 		log.Info("notification shown", "item", id, "err", err)
 	}
 
+	syncCtx, stopSync := context.WithCancel(context.Background())
+	defer stopSync()
+
 	icon, err := notify.TrayIcon(int(unread.Load()))
 	if err != nil {
 		return err
@@ -134,7 +178,7 @@ func serve(log *slog.Logger, dataDir string) error {
 		Tooltip: "IssueWatcher",
 		Icon:    icon,
 		Menu: []notify.MenuItem{
-			{Title: "Open dashboard", OnClick: func() { srv.OpenBrowser("/") }},
+			{Title: "Open dashboard", OnClick: func() { srv.OpenBrowser("") }}, // "": an open tab keeps its page
 			{Title: "Test notification", OnClick: func() {
 				n := unread.Add(1)
 				setBadge(n)
@@ -146,10 +190,14 @@ func serve(log *slog.Logger, dataDir string) error {
 		},
 		OnClick: func() {
 			log.Info("tray click")
-			srv.OpenBrowser("/")
+			srv.OpenBrowser("")
 		},
 		OnBalloonClick: func(id string) {
 			log.Info("notification clicked", "item", id)
+			if id == "" { // summary balloon
+				srv.OpenBrowser("/")
+				return
+			}
 			srv.OpenBrowser("/item/" + url.PathEscape(id))
 		},
 	}, func(t *notify.Tray) {
@@ -161,6 +209,7 @@ func serve(log *slog.Logger, dataDir string) error {
 			}
 		}()
 		log.Info("tray ready", "badge", unread.Load())
+		go sy.Run(syncCtx)
 		srv.OpenBrowser("/")
 		if os.Getenv(envDemo) == "1" {
 			go runDemo(log, t, setBadge)

@@ -26,6 +26,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/store"
+	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 const (
@@ -40,6 +44,12 @@ type Options struct {
 	Version       string
 	Open          func(url string) // opens a URL in the user's browser
 	Log           *slog.Logger
+
+	// Phase 1 (all optional; nil disables the matching endpoints).
+	GitHub         *github.Auth   // sign-in endpoints
+	Store          *store.Store   // data endpoints (need Sync too)
+	Sync           *syncer.Syncer // poller status, sync now, replies
+	OnUnreadChange func()         // called after the user marks an item read
 }
 
 // Server serves the SPA and the loopback API.
@@ -54,6 +64,9 @@ type Server struct {
 
 	mu       sync.Mutex
 	launches map[string]launch
+
+	gh  *githubAuth // nil without Options.GitHub
+	hub *hub        // live events for open tabs (events.go)
 }
 
 type launch struct {
@@ -79,6 +92,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		token:    randomHex(32),
 		session:  randomHex(32),
 		launches: map[string]launch{},
+		hub:      newHub(),
 	}
 	s.index, _ = fs.ReadFile(opts.Assets, "index.html") // nil → 503 "frontend not built"
 
@@ -86,6 +100,13 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("GET /auth", s.handleAuth)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/open", s.handleOpen)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
+	if opts.GitHub != nil {
+		s.registerGitHub(mux)
+	}
+	if opts.Store != nil && opts.Sync != nil {
+		s.registerData(mux)
+	}
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", s.spa())
 
@@ -93,6 +114,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		Handler:           s.guard(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	s.srv.RegisterOnShutdown(s.hub.closeAll)
 	return s, nil
 }
 
@@ -150,8 +172,13 @@ func (s *Server) LaunchURL(next string) string {
 	return s.BaseURL() + "/auth?t=" + t
 }
 
-// OpenBrowser opens the dashboard at route next in the user's browser.
+// OpenBrowser shows the dashboard at route next ("" = keep the current page):
+// an open tab is steered there over SSE; only without one does a new browser
+// tab open (via a one-time launch URL).
 func (s *Server) OpenBrowser(next string) {
+	if s.navigate(next) {
+		return
+	}
 	s.opts.Open(s.LaunchURL(next))
 }
 
@@ -166,7 +193,8 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
-		if r.URL.Path != "/auth" && !s.authorized(r) {
+		public := r.URL.Path == "/auth" || (s.gh != nil && publicPaths[r.URL.Path])
+		if !public && !s.authorized(r) {
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 				return
