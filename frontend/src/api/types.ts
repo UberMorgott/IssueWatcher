@@ -257,6 +257,9 @@ export interface JobBadge {
   id: number
   flow: JobFlow
   state: JobState
+  startedAt?: string
+  /** Direct fix outcome (result.local.outcome); '' otherwise. */
+  outcome?: LocalOutcome | ''
 }
 
 export interface AgentResult {

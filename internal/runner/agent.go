@@ -34,6 +34,12 @@ var schemas = map[string]string{
 		`"status":{"type":"string","enum":["fixed","partial","cannot_fix","needs_info"]},` +
 		`"summary":{"type":"string","description":"What was wrong, what changed, how it was checked"},` +
 		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
+	flowFixDirect: `{"type":"object","additionalProperties":false,"required":["status","summary","commits","verify","notes"],"properties":{` +
+		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","failed"]},` +
+		`"summary":{"type":"string","description":"What was wrong, what changed, how it was verified"},` +
+		`"commits":{"type":"array","items":{"type":"string"},"description":"SHA of every commit you made; empty if none"},` +
+		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
+		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
 	flowReply: `{"type":"object","additionalProperties":false,"required":["reply","notes"],"properties":{` +
 		`"reply":{"type":"string","description":"The reply text in Markdown, ready to post"},` +
 		`"notes":{"type":"string","description":"Private notes for the maintainer; empty if nothing"}}}`,
@@ -44,21 +50,25 @@ var schemas = map[string]string{
 
 // AgentResult is what the agent reported (Result.Agent / Result.Review).
 type AgentResult struct {
-	Profile    string  `json:"profile"`
-	CLI        string  `json:"cli"`
-	Model      string  `json:"model,omitempty"`
-	Status     string  `json:"status,omitempty"`  // fix: fixed | partial | cannot_fix | needs_info
-	Verdict    string  `json:"verdict,omitempty"` // review: ok | concerns
-	Summary    string  `json:"summary,omitempty"`
-	Notes      string  `json:"notes,omitempty"`
-	Reply      string  `json:"reply,omitempty"` // reply flow draft
-	Final      string  `json:"final,omitempty"` // last message when no structured output came
-	CostUSD    float64 `json:"costUsd,omitempty"`
-	Turns      int     `json:"turns,omitempty"`
-	Tokens     int     `json:"tokens,omitempty"` // codex input+output tokens
-	ExitCode   int     `json:"exitCode"`
-	DurationMS int64   `json:"durationMs"`
-	Error      string  `json:"error,omitempty"`
+	Profile string `json:"profile"`
+	CLI     string `json:"cli"`
+	Model   string `json:"model,omitempty"`
+	Status  string `json:"status,omitempty"`  // fix: fixed | partial | cannot_fix | needs_info; direct: fixed | not_reproduced | needs_info | failed
+	Verdict string `json:"verdict,omitempty"` // review: ok | concerns
+	Summary string `json:"summary,omitempty"`
+	Notes   string `json:"notes,omitempty"`
+	Reply   string `json:"reply,omitempty"` // reply flow draft
+	// Direct fix: the commits the agent says it made and its own verify note
+	// (claims; Result.Local holds the facts).
+	Commits    []string `json:"commits,omitempty"`
+	VerifyNote string   `json:"verify,omitempty"`
+	Final      string   `json:"final,omitempty"` // last message when no structured output came
+	CostUSD    float64  `json:"costUsd,omitempty"`
+	Turns      int      `json:"turns,omitempty"`
+	Tokens     int      `json:"tokens,omitempty"` // codex input+output tokens
+	ExitCode   int      `json:"exitCode"`
+	DurationMS int64    `json:"durationMs"`
+	Error      string   `json:"error,omitempty"`
 }
 
 // agentEnv is the environment for child processes: the user's, minus
@@ -199,54 +209,34 @@ func (r *Runner) runAgent(ctx context.Context, s agentSpec, log *jobLog) (AgentR
 	cmd := exec.Command(exe, args...) //nolint:gosec,noctx // G204: the configured agent CLI; killed through its job object, not the context
 	cmd.Dir = s.dir
 	cmd.Env = agentEnv()
-	cmd.Stdin = strings.NewReader(stdin)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return res, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return res, err
-	}
-	prepare(cmd)
-	start := time.Now()
-	if err := cmd.Start(); err != nil {
-		return res, fmt.Errorf("start %s: %w", exe, err)
-	}
-	tree, err := attach(cmd)
-	if err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return res, err
-	}
-	defer tree.close()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
 	parse := parseClaude
 	if s.profile.CLI == config.CLICodex {
 		parse = parseCodex
 	}
-	go func() {
-		defer wg.Done()
-		readLines(stdout, func(line []byte) { parse(line, log, &res) })
-	}()
-	go func() {
-		defer wg.Done()
-		readLines(stderr, func(line []byte) { log.add(StepStderr, string(line)) })
-	}()
-	done := make(chan error, 1)
-	go func() {
-		wg.Wait() // pipes drained before Wait closes them
-		done <- cmd.Wait()
-	}()
+	var mu sync.Mutex // res is filled by the stdout reader, read here after finish
+	start := time.Now()
+	p, err := startProc(cmd, stdin,
+		func(line []byte) { mu.Lock(); parse(line, log, &res); mu.Unlock() },
+		func(line []byte) { log.add(StepStderr, string(line)) })
+	if err != nil {
+		return res, fmt.Errorf("start %s: %w", exe, err)
+	}
+	stopTrack := trackProcs(p.tree, filepath.Join(s.workDir, procsFile))
 	var waitErr error
 	select {
-	case waitErr = <-done:
+	case waitErr = <-p.done:
 	case <-ctx.Done():
-		tree.kill()
-		waitErr = <-done
+		p.tree.kill()
+		waitErr = <-p.done
 	}
+	// The CLI is gone: end whatever it left running (MCP servers, node children).
+	if err := p.finish(); err != nil {
+		log.add(StepError, err.Error())
+		r.opts.Log.Warn("runner: process tree", "err", err)
+	}
+	stopTrack()
+	mu.Lock()
+	defer mu.Unlock()
 	res.DurationMS = time.Since(start).Milliseconds()
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
@@ -300,17 +290,20 @@ func applyStructured(text string, res *AgentResult) {
 		return
 	}
 	var v struct {
-		Status  string `json:"status"`
-		Verdict string `json:"verdict"`
-		Summary string `json:"summary"`
-		Notes   string `json:"notes"`
-		Reply   string `json:"reply"`
+		Status  string   `json:"status"`
+		Verdict string   `json:"verdict"`
+		Summary string   `json:"summary"`
+		Notes   string   `json:"notes"`
+		Reply   string   `json:"reply"`
+		Commits []string `json:"commits"`
+		Verify  string   `json:"verify"`
 	}
 	if json.Unmarshal([]byte(text), &v) != nil || (v.Status == "" && v.Verdict == "" && v.Summary == "" && v.Reply == "") {
 		res.Final = text
 		return
 	}
 	res.Status, res.Verdict, res.Summary, res.Notes, res.Reply = v.Status, v.Verdict, v.Summary, v.Notes, v.Reply
+	res.Commits, res.VerifyNote = v.Commits, v.Verify
 }
 
 // toolSummary picks the most telling argument of a tool call.

@@ -54,11 +54,13 @@ type Job struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
 	ItemURL string `json:"itemUrl"`
+	// LocalPath is the project's mapped folder (direct fix jobs run there).
+	LocalPath string `json:"localPath"`
 }
 
 const jobColumns = `j.id, j.item_id, j.project_id, j.flow, j.state, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
-	p.name, i.number, i.title, i.url`
+	p.name, i.number, i.title, i.url, p.local_path`
 
 const jobFrom = ` FROM jobs j JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id`
 
@@ -69,7 +71,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	)
 	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
 		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
-		&j.Repo, &j.Number, &j.Title, &j.ItemURL)
+		&j.Repo, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath)
 	if err != nil {
 		return j, err
 	}
@@ -334,6 +336,27 @@ func (s *Store) RecoverJobs(ctx context.Context) ([]Job, error) {
 	return out, nil
 }
 
+// ClosedDirectFixes lists direct-mode fix jobs (needs_review, or done after a
+// push) whose issue is closed on the platform now but not marked so yet.
+func (s *Store) ClosedDirectFixes(ctx context.Context) ([]Job, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+` WHERE j.state IN ('needs_review', 'done') AND j.flow = 'fix'
+		AND i.status = 'closed' AND json_valid(j.result) AND json_extract(j.result, '$.mode') = 'direct'
+		AND coalesce(json_extract(j.result, '$.local.closed'), 0) = 0 ORDER BY j.id`)
+	if err != nil {
+		return nil, fmt.Errorf("store: closed direct fixes: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan job: %w", err)
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 // LatestJobs maps item id → its newest job (issue row badges).
 func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobBadge, error) {
 	out := map[int64]JobBadge{}
@@ -345,8 +368,9 @@ func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobB
 	for i, id := range ids {
 		args[i] = id
 	}
-	q := `SELECT j.item_id, j.id, j.flow, j.state FROM jobs j WHERE j.id IN (SELECT max(id) FROM jobs WHERE item_id IN (?` + //nolint:gosec // G202: placeholders only
-		strings.Repeat(",?", len(ids)-1) + `) GROUP BY item_id)`
+	const cols = `j.item_id, j.id, j.flow, j.state, j.started_at,
+		CASE WHEN json_valid(j.result) THEN coalesce(json_extract(j.result, '$.local.outcome'), '') ELSE '' END`
+	q := "SELECT " + cols + " FROM jobs j WHERE j.id IN (SELECT max(id) FROM jobs WHERE item_id IN (?" + strings.Repeat(",?", len(ids)-1) + ") GROUP BY item_id)" //nolint:gosec // G202: placeholders only
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: latest jobs: %w", err)
@@ -357,7 +381,7 @@ func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobB
 			item int64
 			b    JobBadge
 		)
-		if err := rows.Scan(&item, &b.ID, &b.Flow, &b.State); err != nil {
+		if err := rows.Scan(&item, &b.ID, &b.Flow, &b.State, &b.StartedAt, &b.Outcome); err != nil {
 			return nil, fmt.Errorf("store: latest jobs: %w", err)
 		}
 		out[item] = b
@@ -367,9 +391,11 @@ func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobB
 
 // JobBadge is the newest job of an item, shown on its row.
 type JobBadge struct {
-	ID    int64  `json:"id"`
-	Flow  string `json:"flow"`
-	State string `json:"state"`
+	ID        int64  `json:"id"`
+	Flow      string `json:"flow"`
+	State     string `json:"state"`
+	StartedAt string `json:"startedAt"`
+	Outcome   string `json:"outcome"` // direct fix: runner LocalResult.Outcome; "" otherwise
 }
 
 // JobInput is what a job needs to build its prompt and workspace.

@@ -86,6 +86,7 @@ func TestJobsAPI(t *testing.T) {
 	for path, want := range map[string]int{
 		"/api/jobs/" + jid + "/cancel": http.StatusConflict,   // not queued/running
 		"/api/jobs/" + jid + "/pr":     http.StatusConflict,   // no publisher configured
+		"/api/jobs/" + jid + "/push":   http.StatusConflict,   // not a direct fix with commits
 		"/api/jobs/" + jid + "/reply":  http.StatusBadRequest, // bad json
 		"/api/jobs/999/retry":          http.StatusNotFound,
 		"/api/jobs/x/retry":            http.StatusBadRequest,

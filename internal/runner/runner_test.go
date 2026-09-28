@@ -53,6 +53,8 @@ type env struct {
 	bare   string // "GitHub" remote
 	items  []int64
 	record string
+	src    int64
+	proj   []store.Project
 
 	mu    sync.Mutex
 	cfg   config.Settings
@@ -115,6 +117,7 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.src = src
 	projects, err := e.st.SyncProjects(t.Context(), src, []provider.Project{
 		{ExternalID: "octo/demo", Name: "octo/demo", URL: repoURL},
 		{ExternalID: "octo/other", Name: "octo/other", URL: "https://github.com/octo/other"},
@@ -137,6 +140,7 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 			t.Fatal(err)
 		}
 	}
+	e.proj = projects
 	chunk, err := e.st.Issues(t.Context(), store.IssueFilter{Limit: 200})
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +182,31 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 	return e
 }
 
+// waitCards returns the finish cards once there are n (the card follows the state change).
+func (e *env) waitCards(n int) []store.Job {
+	e.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		e.mu.Lock()
+		cards := append([]store.Job(nil), e.cards...)
+		e.mu.Unlock()
+		if len(cards) == n || time.Now().After(deadline) {
+			if len(cards) != n {
+				e.t.Fatalf("cards: %d, want %d", len(cards), n)
+			}
+			return cards
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func mode(t *testing.T, m string) { t.Setenv("FAKECLI_MODE", m) }
+
+// worktreeMode runs octo/demo's fix jobs in the Phase 2 worktree + PR mode.
+func worktreeMode(s *config.Settings) {
+	pa := s.Agents.Projects["octo/demo"]
+	pa.Mode = config.ModeWorktreePR
+	s.Agents.Projects["octo/demo"] = pa
+}
 
 func (e *env) enqueue(flow string, items ...int64) []store.Job {
 	e.t.Helper()
@@ -232,7 +260,7 @@ func exists(p string) bool {
 func TestFixFlowToDraftPR(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, func(s *config.Settings) {
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Verify: "echo verified", Prompt: "Use {branch}."}
+		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeWorktreePR, Verify: "echo verified", Prompt: "Use {branch}."}
 		s.Agents.Roles.Verifier = "codex"
 	})
 	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
@@ -267,8 +295,8 @@ func TestFixFlowToDraftPR(t *testing.T) {
 	if err != nil || !strings.Contains(string(sys), "untrusted-issue-content") || !strings.Contains(string(sys), "Use "+j.Branch) {
 		t.Fatalf("system prompt: %s %v", sys, err)
 	}
-	if len(e.cards) != 1 || e.cards[0].State != store.JobNeedsReview {
-		t.Fatalf("finish cards: %+v", e.cards)
+	if cards := e.waitCards(1); cards[0].State != store.JobNeedsReview {
+		t.Fatalf("finish cards: %+v", cards)
 	}
 	// The user's working copy is untouched.
 	if exists(filepath.Join(e.local, "fixed.txt")) {
@@ -308,7 +336,7 @@ func TestFixFlowToDraftPR(t *testing.T) {
 
 func TestPromptIsolationAndEnv(t *testing.T) {
 	mode(t, "noop")
-	e := setup(t, 1, nil)
+	e := setup(t, 1, worktreeMode)
 	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
 	var rec struct {
 		Args    []string `json:"args"`
@@ -369,7 +397,7 @@ func TestReplyFlowWithCodex(t *testing.T) {
 
 func TestFailureRetryAndDismiss(t *testing.T) {
 	mode(t, "fail")
-	e := setup(t, 1, nil)
+	e := setup(t, 1, worktreeMode)
 	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobFailed)
 	if r := result(t, j); r.ErrorCode != CodeAgent || !exists(j.Worktree) {
 		t.Fatalf("failed: %+v %+v", j, r)
@@ -442,7 +470,7 @@ func TestCancelKillsProcessTree(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(e.cards) != 0 {
+	if len(e.waitCards(0)) != 0 {
 		t.Fatal("a cancelled job must not pop a card")
 	}
 }

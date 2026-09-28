@@ -3,7 +3,6 @@ package runner
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
@@ -288,10 +288,7 @@ func (r *Runner) publish(ctx context.Context, j store.Job, res *Result, log *job
 	log.addf(StepInfo, "git push %s %s", url, j.Branch)
 	// The token reaches git through its environment (GIT_CONFIG_*), never the
 	// command line; credential helpers are off for this push.
-	auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	env := []string{"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + auth,
-		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1="}
+	env, auth := tokenEnv(token)
 	if _, err := r.git(ctx, wt, env, "push", "--no-verify", url, "+HEAD:refs/heads/"+j.Branch); err != nil {
 		return PRResult{}, errors.New(strings.ReplaceAll(err.Error(), auth, "***"))
 	}
@@ -375,43 +372,56 @@ func (r *Runner) verifyCommand(localPath, wt string, pa config.ProjectAgent) (ar
 	return nil, ""
 }
 
-func (r *Runner) verify(ctx context.Context, wt string, argv []string, label string, log *jobLog) VerifyResult {
+func (r *Runner) verify(ctx context.Context, dir, jobFiles string, argv []string, label string, log *jobLog) VerifyResult {
 	v := VerifyResult{Command: label, ExitCode: -1}
 	log.add(StepInfo, "verify: "+label)
 	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
 	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec,noctx // G204: the user's configured verify command; killed via its job object
-	cmd.Dir = wt
+	cmd.Dir = dir
 	cmd.Env = agentEnv()
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	prepare(cmd)
+	var (
+		mu  sync.Mutex
+		out bytes.Buffer
+	)
+	line := func(b []byte) {
+		mu.Lock()
+		out.Write(b)
+		out.WriteByte('\n')
+		if out.Len() > 4*maxVerifyOutput { // keep the tail only
+			tail := append([]byte(nil), out.Bytes()[out.Len()-maxVerifyOutput:]...)
+			out.Reset()
+			out.Write(tail)
+		}
+		mu.Unlock()
+	}
 	start := time.Now()
-	if err := cmd.Start(); err != nil {
+	p, err := startProc(cmd, "", line, line)
+	if err != nil {
 		v.Output = err.Error()
 		log.add(StepError, "verify: "+err.Error())
 		return v
 	}
-	tree, err := attach(cmd)
-	if err != nil {
-		_ = cmd.Process.Kill()
-	}
-	defer tree.close()
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	stopTrack := trackProcs(p.tree, filepath.Join(jobFiles, procsFile))
 	select {
-	case <-done:
+	case <-p.done:
 	case <-ctx.Done():
-		tree.kill()
-		<-done
+		p.tree.kill()
+		<-p.done
 		v.TimedOut = ctx.Err() == context.DeadlineExceeded
 	}
+	if err := p.finish(); err != nil {
+		log.add(StepError, "verify: "+err.Error())
+	}
+	stopTrack()
 	v.DurationMS = time.Since(start).Milliseconds()
 	if cmd.ProcessState != nil {
 		v.ExitCode = cmd.ProcessState.ExitCode()
 	}
 	v.OK = v.ExitCode == 0 && !v.TimedOut
+	mu.Lock()
 	o := out.String()
+	mu.Unlock()
 	if len(o) > maxVerifyOutput {
 		o = "…\n" + o[len(o)-maxVerifyOutput:]
 	}

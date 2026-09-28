@@ -18,7 +18,7 @@ import (
 //	GET  /api/jobs/{id}                  job
 //	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
 //	GET  /api/jobs/{id}/diff?attempt=    unified diff (text/plain)
-//	POST /api/jobs/{id}/cancel|retry|dismiss|pr   job
+//	POST /api/jobs/{id}/cancel|retry|dismiss|pr|push   job (push: direct fix commits → the platform)
 //	POST /api/jobs/{id}/reply {body}     post the (edited) reply draft
 //	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
 //
@@ -46,6 +46,7 @@ func (s *Server) registerJobs(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/jobs/{id}/reply", s.handleJobReply)
 	for action, f := range map[string]func(context.Context, int64) (store.Job, error){
 		"cancel": s.opts.Runner.Cancel, "retry": s.opts.Runner.Retry, "dismiss": s.opts.Runner.Dismiss, "pr": s.opts.Runner.CreatePR,
+		"push": s.opts.Runner.Push,
 	} {
 		mux.HandleFunc("POST /api/jobs/{id}/"+action, s.jobAction(f))
 	}

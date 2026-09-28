@@ -2,8 +2,12 @@
 // speaks the same event formats (stream-json / --json), reads the prompt from
 // stdin and acts by FAKECLI_MODE:
 //
-//	ok    edit fixed.txt (write flows), report a structured result, exit 0
-//	noop  report "cannot_fix" without touching files, exit 0
+//	ok    edit fixed.txt (write flows), report a structured result, exit 0;
+//	      the direct fix flow also commits it with "Fixes #N"
+//	nofixes  direct fix: commit without "Fixes #N"
+//	spawn like ok, but first start a child that sleeps holding stdout (its pid
+//	      goes to FAKECLI_RECORD.pid) and leave it running
+//	noop  report "cannot_fix" (direct: "not_reproduced") without touching files, exit 0
 //	fail  emit a step, exit 1
 //	hang  start a child that sleeps, write its pid to FAKECLI_RECORD.pid, sleep
 //	sleep sleep (the child of hang)
@@ -17,6 +21,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,6 +56,8 @@ func main() {
 		flow = "reply"
 	case strings.Contains(schema, `"verdict"`):
 		flow = "review"
+	case strings.Contains(schema, `not_reproduced`):
+		flow = "fix-direct"
 	}
 	emit := func(v any) {
 		b, _ := json.Marshal(v)
@@ -67,6 +74,14 @@ func main() {
 		}}})
 	}
 	switch mode {
+	case "spawn":
+		self, _ := os.Executable()
+		child := exec.Command(self) //nolint:gosec,noctx // test helper
+		child.Env = append(os.Environ(), "FAKECLI_MODE=sleep")
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr // an MCP-server-like straggler holding our pipes
+		if err := child.Start(); err == nil {
+			_ = os.WriteFile(os.Getenv("FAKECLI_RECORD")+".pid", []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+		}
 	case "fail":
 		fmt.Fprintln(os.Stderr, "fake failure")
 		os.Exit(1)
@@ -86,6 +101,8 @@ func main() {
 		result = map[string]any{"reply": "Thanks for the report! Fixed in the next release.", "notes": ""}
 	case "review":
 		result = map[string]any{"verdict": "ok", "summary": "looks right"}
+	case "fix-direct":
+		result = directFix(mode, args, string(stdin))
 	default:
 		if mode == "noop" {
 			result = map[string]any{"status": "cannot_fix", "summary": "not reproducible", "notes": ""}
@@ -107,4 +124,40 @@ func main() {
 	}
 	emit(map[string]any{"type": "result", "subtype": "success", "is_error": false, "num_turns": 2, "total_cost_usd": 0.01,
 		"result": "", "structured_output": result})
+}
+
+// directFix edits and commits fixed.txt in the current folder (the mapped clone).
+func directFix(mode string, args []string, stdin string) map[string]any {
+	if mode == "noop" {
+		return map[string]any{"status": "not_reproduced", "summary": "cannot reproduce", "commits": []string{}, "verify": "", "notes": ""}
+	}
+	prompt := stdin
+	if i := slices.Index(args, "--append-system-prompt-file"); i >= 0 && i+1 < len(args) {
+		b, _ := os.ReadFile(args[i+1])
+		prompt = string(b)
+	}
+	n := "0"
+	if m := regexp.MustCompile(`issue #(\d+)`).FindStringSubmatch(prompt); m != nil {
+		n = m[1]
+	}
+	if err := os.WriteFile("fixed.txt", []byte("fixed "+n+"\n"), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	msg := "fix: crash on start\n\nFixes #" + n
+	if mode == "nofixes" {
+		msg = "fix: crash on start"
+	}
+	git := func(a ...string) string {
+		out, err := exec.Command("git", a...).CombinedOutput() //nolint:gosec,noctx // test helper
+		if err != nil {
+			fmt.Fprintln(os.Stderr, string(out), err)
+			os.Exit(3)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("add", "fixed.txt")
+	git("commit", "-q", "-m", msg)
+	sha := git("rev-parse", "HEAD")
+	return map[string]any{"status": "fixed", "summary": "wrote fixed.txt", "commits": []string{sha}, "verify": "none", "notes": ""}
 }

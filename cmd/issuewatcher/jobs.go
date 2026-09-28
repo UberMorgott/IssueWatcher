@@ -39,10 +39,10 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 		},
 		OnFinished: func(j store.Job) {
 			ok := j.State == store.JobNeedsReview
+			var res runner.Result
+			_ = json.Unmarshal(j.Result, &res)
 			text := j.Error
 			if ok {
-				var res runner.Result
-				_ = json.Unmarshal(j.Result, &res)
 				switch {
 				case res.Agent != nil && res.Agent.Summary != "":
 					text = res.Agent.Summary
@@ -51,8 +51,26 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 				}
 			}
 			t := tray()
-			shown := t != nil && t.NotifyCard(notify.JobCard(j.ID, j.Repo, j.Number, ok, text, time.Now()))
+			shown := t != nil && t.NotifyCard(notify.JobCard(j.ItemID, j.Repo, j.Number, ok, outcomeLabel(j, res), text, time.Now()))
 			log.Info("agent job finished", "job", j.ID, "state", j.State, "card", shown)
 		},
 	})
+}
+
+// outcomeLabel is the short Russian outcome on the «Агент закончил» card.
+func outcomeLabel(j store.Job, res runner.Result) string {
+	if j.State != store.JobNeedsReview {
+		return "ошибка"
+	}
+	if res.Local != nil {
+		return map[string]string{
+			runner.OutcomeFixedLocal: "исправлено локально", runner.OutcomePushed: "отправлено",
+			runner.OutcomeNotReproduced: "не воспроизводится", runner.OutcomeNeedsInfo: "нужна информация",
+			runner.OutcomeNoCommit: "коммита нет", runner.OutcomeFailed: "ошибка",
+		}[res.Local.Outcome]
+	}
+	if j.Flow == "reply" {
+		return "черновик ответа"
+	}
+	return "готово к проверке"
 }

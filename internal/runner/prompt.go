@@ -116,6 +116,8 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 	switch flow {
 	case flowReply:
 		task = render(cfg.Prompts.Reply, p)
+	case flowFixDirect:
+		task = render(cfg.Prompts.FixDir, p)
 	case flowReview:
 		task = render(cfg.Prompts.Review, p)
 		if !strings.Contains(cfg.Prompts.Review, "{diff}") {

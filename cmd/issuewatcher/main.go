@@ -30,6 +30,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/notify"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
@@ -183,6 +184,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	var group atomic.Bool
 	group.Store(cfg.Notifications.Group)
 	gh := github.NewProvider(auth)
+	var jobs *runner.Runner // set below; the sync loop starts after it exists
 	sy := syncer.New(syncer.Options{
 		Store: st, Provider: gh, Plan: syncPlan(cfg.Sync), Log: log,
 		OnUpdate: func(events []store.Event, unread int) {
@@ -195,6 +197,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 			}
 			setBadge(int64(unread))
 			publishLive(srv, live.Load().Filter(events, time.Now()))
+			if jobs != nil {
+				jobs.Refresh() // a closed issue ends its direct fix job
+			}
 		},
 	})
 	// Settings apply live: popups, toasts, poll interval.
@@ -209,7 +214,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		}
 	})
 	var testN atomic.Int64
-	jobs := newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
+	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
 
 	focus := notify.FocusDashboard
 	if headless {

@@ -72,13 +72,16 @@ func Cards(events []store.Event, now time.Time) []Card {
 	return out
 }
 
-// JobCard is the «Агент закончил: repo#N» card of a finished agent job; a click
-// opens the job. ok = review ready (✓ icon), otherwise it failed.
-func JobCard(jobID int64, repo string, number int, ok bool, text string, now time.Time) Card {
+// JobCard is the «Агент закончил: repo#N — outcome» card of a finished agent
+// job; a click opens the issue. ok = finished (✓ icon), otherwise it failed.
+func JobCard(itemID int64, repo string, number int, ok bool, outcome, text string, now time.Time) Card {
 	c := Card{Kind: KindClosed, Title: "Агент закончил", Ref: repo + "#" + strconv.Itoa(number), Time: now,
-		Text: clip(oneLine(text), 200), Path: "/jobs/" + strconv.FormatInt(jobID, 10)}
+		Text: clip(oneLine(text), 200), ItemID: strconv.FormatInt(itemID, 10)}
+	if outcome != "" {
+		c.Ref += " — " + outcome
+	}
 	if !ok {
-		c.Kind, c.Title = KindIssue, "Агент: ошибка"
+		c.Kind = KindIssue
 	}
 	if c.Text == "" {
 		c.Text = "Результат готов к проверке"

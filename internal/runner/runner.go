@@ -88,6 +88,7 @@ type activeRun struct {
 	cancel  context.CancelCauseFunc
 	project int64
 	profile string
+	folder  string // folderKey of the mapped folder (one job per folder)
 }
 
 var (
@@ -132,6 +133,10 @@ func New(opts Options) *Runner {
 // Start marks jobs interrupted by a previous run and schedules the queue until
 // ctx ends; it returns once the loop runs. Wait blocks until runs finish.
 func (r *Runner) Start(ctx context.Context) error {
+	// A crash may have left agent process trees behind: end them first.
+	if n, err := killOrphans(r.opts.DataDir); err != nil || n > 0 {
+		r.opts.Log.Warn("runner: orphaned processes of a previous run", "killed", n, "err", err)
+	}
 	recovered, err := r.opts.Store.RecoverJobs(ctx)
 	if err != nil {
 		return err
@@ -147,6 +152,9 @@ func (r *Runner) Start(ctx context.Context) error {
 
 // Wait blocks until the loop and every run have ended (after ctx is done).
 func (r *Runner) Wait() { r.wg.Wait() }
+
+// Refresh re-checks the queue and finished direct fixes soon (after a sync).
+func (r *Runner) Refresh() { r.kick() }
 
 func (r *Runner) kick() {
 	select {
@@ -172,6 +180,7 @@ func (r *Runner) loop(ctx context.Context) {
 // schedule starts queued jobs within the limits: one per project, the
 // profile's maxParallel, agents.maxParallel overall. Oldest first.
 func (r *Runner) schedule(ctx context.Context) {
+	r.closeResolved(ctx)
 	queued, err := r.opts.Store.JobsInState(ctx, store.JobQueued)
 	if err != nil {
 		r.opts.Log.Error("runner: queue", "err", err)
@@ -181,8 +190,9 @@ func (r *Runner) schedule(ctx context.Context) {
 	for _, j := range queued {
 		r.mu.Lock()
 		busyProject, perProfile := false, 0
+		folder := folderKey(j.LocalPath)
 		for _, a := range r.running {
-			busyProject = busyProject || a.project == j.ProjectID
+			busyProject = busyProject || a.project == j.ProjectID || (folder != "" && a.folder == folder)
 			if a.profile == j.ProfileID {
 				perProfile++
 			}
@@ -212,7 +222,7 @@ func (r *Runner) launch(parent context.Context, j store.Job) {
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	r.mu.Lock()
-	r.running[j.ID] = &activeRun{cancel: cancel, project: j.ProjectID, profile: j.ProfileID}
+	r.running[j.ID] = &activeRun{cancel: cancel, project: j.ProjectID, profile: j.ProfileID, folder: folderKey(j.LocalPath)}
 	r.mu.Unlock()
 	r.opts.OnJob(nj)
 	r.wg.Go(func() {
@@ -240,6 +250,10 @@ type Result struct {
 	PublishError string         `json:"publishError,omitempty"`
 	CleanupError string         `json:"cleanupError,omitempty"`
 	BaseBranch   string         `json:"baseBranch,omitempty"`
+	// Mode is the fix run mode (config.ModeDirect | ModeWorktreePR; "" = a
+	// worktree job of an older build); Local holds the facts of a direct run.
+	Mode  string       `json:"mode,omitempty"`
+	Local *LocalResult `json:"local,omitempty"`
 }
 
 // PRResult is the published draft PR.
@@ -282,7 +296,8 @@ func coded(code string, err error) error { return &codedError{code: code, err: e
 
 // run executes one attempt of job j and records the outcome.
 func (r *Runner) run(ctx context.Context, j store.Job) {
-	batch := newStepBatcher(func(steps []Step) { r.opts.OnSteps(j.ID, j.Attempt, steps) })
+	id, attempt := j.ID, j.Attempt // j is updated by the flow while the batcher's timer reads these
+	batch := newStepBatcher(func(steps []Step) { r.opts.OnSteps(id, attempt, steps) })
 	log, err := openJobLog(r.opts.DataDir, j.ID, j.Attempt, batch.add)
 	if err != nil {
 		r.finish(ctx, j, Result{ErrorCode: CodeGit}, err, "")
@@ -405,6 +420,10 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	if err != nil {
 		return "", coded(CodeGit, err)
 	}
+	if cfg.ModeFor(in.ProjectName) == config.ModeDirect {
+		return r.runDirect(ctx, j, res, log, prof, cfg, in, files)
+	}
+	res.Mode = config.ModeWorktreePR
 
 	baseBranch, sha, err := r.baseRef(ctx, in.LocalPath, in.ProjectName, log)
 	if err != nil {
@@ -456,7 +475,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	pa := cfg.Projects[in.ProjectName]
 	if cmd, label := r.verifyCommand(in.LocalPath, wt, pa); len(cmd) > 0 {
 		r.phase(ctx, j, "verify")
-		v := r.verify(ctx, wt, cmd, label, log)
+		v := r.verify(ctx, wt, files, cmd, label, log)
 		res.Verify = &v
 		if ctx.Err() != nil {
 			return "", context.Cause(ctx)

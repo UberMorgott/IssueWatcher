@@ -21,7 +21,7 @@ const { t } = useI18n()
 const jobs = useJobsStore()
 const live = computed(() => (props.item.job ? jobs.byId.get(props.item.job.id) : undefined))
 const jobState = computed(() => live.value?.state ?? props.item.job?.state)
-const outcome = computed(() => (live.value ? jobOutcome(live.value) : ''))
+const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.item.job?.outcome ?? '')))
 </script>
 
 <template>

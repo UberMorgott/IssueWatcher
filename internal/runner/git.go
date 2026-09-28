@@ -185,10 +185,23 @@ func (r *Runner) collectDiff(ctx context.Context, wt, base string) (DiffSummary,
 	if _, err := r.git(ctx, wt, nil, "add", "-A"); err != nil {
 		return sum, "", err
 	}
+	commits := 0
 	if n, err := r.git(ctx, wt, nil, "rev-list", "--count", base+"..HEAD"); err == nil {
-		sum.Commits, _ = strconv.Atoi(n)
+		commits, _ = strconv.Atoi(n)
 	}
-	status, err := r.git(ctx, wt, nil, "diff", "--cached", "--name-status", "-M", base)
+	sum, diff, err := r.diffOf(ctx, wt, "--cached", base)
+	sum.Commits = commits
+	return sum, diff, err
+}
+
+// diffOf summarises and returns `git diff -M <spec…>` in wt; it never touches
+// the index or files (direct mode diffs two commits of the user's folder).
+func (r *Runner) diffOf(ctx context.Context, wt string, spec ...string) (DiffSummary, string, error) {
+	sum := DiffSummary{Files: []FileChange{}}
+	gitDiff := func(opts ...string) (string, error) {
+		return r.git(ctx, wt, nil, append(append([]string{"diff"}, opts...), spec...)...)
+	}
+	status, err := gitDiff("--name-status", "-M")
 	if err != nil {
 		return sum, "", err
 	}
@@ -199,7 +212,7 @@ func (r *Runner) collectDiff(ctx context.Context, wt, base string) (DiffSummary,
 			st[f[len(f)-1]] = f[0][:1]
 		}
 	}
-	num, err := r.git(ctx, wt, nil, "diff", "--cached", "--numstat", "-M", base)
+	num, err := gitDiff("--numstat", "-M")
 	if err != nil {
 		return sum, "", err
 	}
@@ -223,7 +236,7 @@ func (r *Runner) collectDiff(ctx context.Context, wt, base string) (DiffSummary,
 		}
 		sum.Files = append(sum.Files, fc)
 	}
-	diff, err := r.git(ctx, wt, nil, "diff", "--cached", "-M", base)
+	diff, err := gitDiff("-M")
 	if err != nil {
 		return sum, "", err
 	}
