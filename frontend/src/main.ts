@@ -5,7 +5,6 @@ import type { PrimeVueLocaleOptions } from 'primevue/config'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import Tooltip from 'primevue/tooltip'
-import { registerLicense } from '@primeui/license-manager'
 import { ru as primeRu } from 'primelocale/js/ru.js'
 import '@fontsource-variable/inter'
 import 'primeicons/primeicons.css'
@@ -15,14 +14,8 @@ import { i18n, lang } from './i18n'
 import { preset } from './theme'
 import './style.css'
 
-// PrimeUI Community license (same setup as E:\DEV\1сEPD\web). Without a key
-// PrimeVue 5 draws an "invalid license" banner over the page. The check is
-// offline; the key comes from frontend/.env (gitignored) at build time and is
-// bound to the organisation, not to a user.
-const licenseKey = import.meta.env.VITE_PRIMEUI_LICENSE
-if (licenseKey) {
-  registerLicense({ primeui: licenseKey })
-}
+// No PrimeUI license key: scripts/primevue-local.mjs (npm postinstall) strips
+// PrimeVue's license check, so no key ships inside the public exe.
 
 const app = createApp(App)
   .use(createPinia())

@@ -27,7 +27,6 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Issues: lazy DataTable on `/api/items`, URL-backed filters (source/project/label/state/unread/text), multi-select bulk bar ("Send to agent" disabled → Phase 2, mark read), J/K/Enter/X keys; `/item/:id` detail with thread + reply composer (Ctrl+Enter)
 - [x] Projects (counts, progress, `localPath` column, per-project chart), Connections (GitHub wired incl. device code + copy; CurseForge / Nexus Mods / Steam planned), Agents + Settings pages
 - [x] SSE hub `GET /api/events` (`internal/api/events.go`) + client with backoff, toasts; tray / notification / second launch reuse an open tab via `navigate{path}` (new tab only when no client is connected)
-- [x] PrimeUI license: `VITE_PRIMEUI_LICENSE` in gitignored `frontend/.env` → `registerLicense` (as in `E:\DEV\1сEPD\web`); `frontend/.env.example` documents it
 - [ ] Drop legacy `/api/repos`, `/api/issues`, `/api/auth/{start,logout,device}` aliases (SPA no longer uses them)
 - [ ] Manual check with a real GitHub account: onboarding → connect → live toasts; tray click focusing the existing tab in a real (non-headless) browser
 - [x] Russian UI (vue-i18n, ru default + en switch), Russian tray/balloons/auth pages
@@ -56,5 +55,8 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
    - "redirect_uri is not associated with this application" → rule not applied: normal runs still work via the remembered port; for busy-port cases enable **Device Flow** in the app settings (`github.com/settings/apps/<slug>` → Optional features/General) and use `POST /api/auth/github/device`; record the result.
 8. Token refresh: after >8 h (or edit `expiry` in `github-token.json` to the past) sync still works; log shows no sign-out.
 9. **Выйти** → header shows **Войти**; app registration kept (next **Войти** goes straight to Authorize).
+
+## Block 5 — settings, palettes, tiered sync, session
+- [x] No PrimeUI license key in the exe: `frontend/scripts/primevue-local.mjs` (npm `postinstall`, also before `dev`/`build`) strips PrimeVue 5.0.1's license check; exact-hash guarded, idempotent, fails on any other PrimeVue version (`npm test`)
 
 ## Phase 2+ — see ARCHITECTURE.md

@@ -22,4 +22,6 @@ export default ts.config(
       parserOptions: { parser: '@typescript-eslint/parser' },
     },
   },
+  // Build-time Node scripts (npm postinstall).
+  { files: ['scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
 )
