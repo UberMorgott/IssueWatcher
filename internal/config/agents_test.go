@@ -158,6 +158,7 @@ func TestAutomationValidation(t *testing.T) {
 		rule(`, "project": "noslash"`):                    {"agents.automation.rules.0.project", "project"},
 		rule(`, "event": "closed"`):                       {"agents.automation.rules.0.event", "enum"},
 		rule(`, "flow": "verify"`):                        {"agents.automation.rules.0.flow", "enum"},
+		rule(`, "kinds": ["pr"]`):                         {"agents.automation.rules.0.kinds", "enum"},
 		rule(`, "profileId": "ghost"`):                    {"agents.automation.rules.0.profileId", "profile"},
 		rule(`, "maxPerDay": -1`):                         {"agents.automation.rules.0.maxPerDay", "range"},
 		rule(`, "labelsAny": [""]`):                       {"agents.automation.rules.0.labelsAny", "required"},

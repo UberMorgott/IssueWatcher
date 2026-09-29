@@ -254,3 +254,29 @@ func TestAutomateFixGateAndProfile(t *testing.T) {
 	wantDecisions(t, e.r.Automate(ctx, []store.Event{ev(store.EventNewComment, "octo/demo", e.items[1])}),
 		decision{"ghost", "skipped", "no_profile"})
 }
+
+func TestAutomateKinds(t *testing.T) {
+	modReplies := rule("mod-replies", "octo/demo", config.EventNewComment, config.FlowLabel)
+	modReplies.Kinds = []string{"comment", "bug"}
+	modThreads := rule("mod-threads", "octo/demo", config.EventNewItem, config.FlowReply)
+	modThreads.Kinds = []string{"comment"}
+	e := autoSetup(t, 3, func(s *config.Settings) {
+		s.Agents.Automation.Rules = []config.Rule{
+			rule("issue-comments", "octo/demo", config.EventNewComment, config.FlowReply), // no kinds = issues only
+			modThreads, modReplies,
+		}
+	})
+	kinded := func(kind store.EventKind, item int64, itemKind string) store.Event {
+		x := ev(kind, "octo/demo", item)
+		x.ItemKind = itemKind
+		return x
+	}
+	got := e.r.Automate(t.Context(), []store.Event{
+		kinded(store.EventNewComment, e.items[0], store.KindComment), // skips the issue rule → mod-replies
+		kinded(store.EventNewItem, e.items[1], store.KindComment),    // mod-threads
+		kinded(store.EventNewItem, e.items[2], store.KindBug),        // no rule for new bug reports
+		kinded(store.EventNewComment, e.items[2], ""),                // legacy event = issue → issue-comments
+	})
+	wantDecisions(t, got, decision{"mod-replies", "queued", ""}, decision{"mod-threads", "queued", ""},
+		decision{"issue-comments", "queued", ""})
+}

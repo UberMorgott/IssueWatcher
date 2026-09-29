@@ -47,12 +47,23 @@ const (
 	EventNewIssue   EventKind = "new_issue"
 	EventNewComment EventKind = "new_comment"
 	EventClosed     EventKind = "issue_closed"
+	// EventNewItem is a new item of a kind other than issue (a mod page's
+	// comment thread or bug report); Event.ItemKind tells which.
+	EventNewItem EventKind = "new_item"
+)
+
+// Item kinds (items.kind): GitHub issues, mod-page comment threads, mod bug reports.
+const (
+	KindIssue   = "issue"
+	KindComment = "comment"
+	KindBug     = "bug"
 )
 
 // Event is one notification-worthy change.
 type Event struct {
-	Kind   EventKind
-	ItemID int64
+	Kind     EventKind
+	ItemKind string // issue | comment | bug
+	ItemID   int64
 	Repo   string
 	Number int
 	Title  string
@@ -217,7 +228,11 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 		return nil, false, fmt.Errorf("store: lookup item: %w", err)
 	}
 	changed = !existed || oldStatus != status || oldUpdated != ts(it.UpdatedAt)
-	args := []any{projectID, it.Kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
+	kind := it.Kind
+	if kind == "" {
+		kind = KindIssue
+	}
+	args := []any{projectID, kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
 		string(lj), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt)}
 	if existed {
 		_, err = tx.ExecContext(ctx, `UPDATE items SET project_id = ?, kind = ?, number = ?, title = ?, body = ?,
@@ -233,10 +248,13 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 		return nil, false, fmt.Errorf("store: save item %s: %w", it.ExternalID, err)
 	}
 
-	base := Event{ItemID: id, Repo: repo, Number: it.Number, Title: it.Title}
+	base := Event{ItemID: id, ItemKind: kind, Repo: repo, Number: it.Number, Title: it.Title}
 	if !baseline && !existed && it.Author != self {
 		e := base
 		e.Kind, e.Actor = EventNewIssue, it.Author
+		if kind != KindIssue {
+			e.Kind = EventNewItem
+		}
 		events = append(events, e)
 	}
 	if !baseline && existed && oldStatus == "open" && status == "closed" {

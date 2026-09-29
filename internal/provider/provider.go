@@ -30,6 +30,11 @@ type Capabilities struct {
 	SetStatus    bool     `json:"setStatus"`
 	CreatePR     bool     `json:"createPR"`
 	Auth         AuthKind `json:"auth"`
+	// Kinds are the item kinds SyncItems returns (issue | comment | bug).
+	Kinds []string `json:"kinds"`
+	// ReplyThreaded: a reply lands inside the item's thread (else a new
+	// top-level comment, e.g. Steam's «@author …»).
+	ReplyThreaded bool `json:"replyThreaded"`
 }
 
 // ErrNotSignedIn means the provider has no usable credentials.
@@ -67,7 +72,7 @@ type Comment struct {
 // Item is an issue (or platform equivalent) with all its comments.
 type Item struct {
 	ExternalID string // platform node id
-	Kind       string // issue
+	Kind       string // issue | comment | bug ("" = issue)
 	Number     int
 	Title      string
 	Body       string

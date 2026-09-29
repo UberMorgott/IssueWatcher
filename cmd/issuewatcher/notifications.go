@@ -17,6 +17,7 @@ func notifyPrefs(n config.Notifications) notify.Prefs {
 		Enabled: n.Enabled,
 		Kinds: map[store.EventKind]bool{
 			store.EventNewIssue: n.NewIssue, store.EventNewComment: n.NewComment, store.EventClosed: n.Closed,
+			store.EventNewItem: n.NewIssue, // new mod-page threads / bug reports follow the «new issue» switch
 		},
 		MutedRepos:        map[string]bool{},
 		AutoHide:          time.Duration(n.AutoHideSeconds) * time.Second,

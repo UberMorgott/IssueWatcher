@@ -10,11 +10,13 @@ var liveEventNames = map[store.EventKind]string{
 	store.EventNewIssue:   api.EventItemNew,
 	store.EventNewComment: api.EventCommentNew,
 	store.EventClosed:     api.EventItemClosed,
+	store.EventNewItem:    api.EventItemNew,
 }
 
 // liveEvent is the SSE payload for one sync event.
 type liveEvent struct {
 	ID     int64  `json:"id"`
+	Kind   string `json:"kind,omitempty"` // item kind: issue | comment | bug
 	Repo   string `json:"repo"`
 	Number int    `json:"number"`
 	Title  string `json:"title"`
@@ -41,6 +43,6 @@ func publishLive(srv *api.Server, events []store.Event) {
 		if len(body) > maxLiveBody {
 			body = append(body[:maxLiveBody-1], '…')
 		}
-		srv.Publish(name, liveEvent{ID: e.ItemID, Repo: e.Repo, Number: e.Number, Title: e.Title, Actor: e.Actor, Body: string(body)})
+		srv.Publish(name, liveEvent{ID: e.ItemID, Kind: e.ItemKind, Repo: e.Repo, Number: e.Number, Title: e.Title, Actor: e.Actor, Body: string(body)})
 	}
 }

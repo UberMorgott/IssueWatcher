@@ -60,6 +60,14 @@ func Cards(events []store.Event, now time.Time) []Card {
 			if e.Actor != "" {
 				c.Text = e.Actor + ": " + c.Text
 			}
+		case store.EventNewItem: // a mod page's new comment thread or bug report
+			c.Kind, c.Title, c.Text = KindComment, "Новый комментарий", clip(e.Title, 200)
+			if e.ItemKind == store.KindBug {
+				c.Kind, c.Title = KindIssue, "Новый баг-репорт"
+			}
+			if e.Actor != "" {
+				c.Text = e.Actor + ": " + c.Text
+			}
 		case store.EventNewComment:
 			c.Kind, c.Title, c.Text = KindComment, "Новый комментарий", e.Actor+": "+clip(oneLine(e.Body), 200)
 		case store.EventClosed:

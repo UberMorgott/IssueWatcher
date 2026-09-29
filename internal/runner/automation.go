@@ -38,12 +38,10 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 	queued := false
 	for _, ev := range events {
 		pol := cfg.AutomationFor(ev.Repo)
-		if !pol.Enabled || (ev.Kind != store.EventNewIssue && ev.Kind != store.EventNewComment) {
+		if !pol.Enabled || (ev.Kind != store.EventNewIssue && ev.Kind != store.EventNewComment && ev.Kind != store.EventNewItem) {
 			continue
 		}
-		hasRule := slices.ContainsFunc(cfg.Automation.Rules, func(ru config.Rule) bool {
-			return ru.Enabled && strings.EqualFold(ru.Project, ev.Repo) && ru.Event == string(ev.Kind)
-		})
+		hasRule := slices.ContainsFunc(cfg.Automation.Rules, func(ru config.Rule) bool { return ruleFor(ru, ev) })
 		if !hasRule {
 			continue
 		}
@@ -99,11 +97,17 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 	return out
 }
 
+// ruleFor reports whether enabled rule ru covers the event's project, event
+// kind and item kind (rules without kinds cover issues only).
+func ruleFor(ru config.Rule, ev store.Event) bool {
+	return ru.Enabled && strings.EqualFold(ru.Project, ev.Repo) && ru.Event == string(ev.Kind) && ru.MatchesKind(ev.ItemKind)
+}
+
 // matchRule returns the first enabled rule for the event's project and kind
 // whose labelsAny is empty or shares a label with the item (case-insensitive).
 func matchRule(rules []config.Rule, ev store.Event, labels []string) (config.Rule, bool) {
 	for _, ru := range rules {
-		if !ru.Enabled || !strings.EqualFold(ru.Project, ev.Repo) || ru.Event != string(ev.Kind) {
+		if !ruleFor(ru, ev) {
 			continue
 		}
 		if len(ru.LabelsAny) == 0 || slices.ContainsFunc(ru.LabelsAny, func(want string) bool {

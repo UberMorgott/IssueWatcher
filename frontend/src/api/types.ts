@@ -247,7 +247,9 @@ export interface ProjectAgent {
   automation?: ProjectAutomation
 }
 
-export type RuleEvent = 'new_issue' | 'new_comment'
+export type RuleEvent = 'new_issue' | 'new_comment' | 'new_item'
+/** Item kinds: GitHub issues, mod-page comment threads, mod bug reports. */
+export type ItemKind = 'issue' | 'comment' | 'bug'
 export type RuleFlow = 'fix' | 'reply' | 'label'
 
 /** One automation rule (internal/config Rule); the first matching enabled rule wins. */
@@ -259,6 +261,8 @@ export interface AutomationRule {
   event: RuleEvent
   /** Empty = any item. */
   labelsAny: string[]
+  /** Item kinds the rule fires on; absent = issue only. */
+  kinds?: ItemKind[]
   flow: RuleFlow
   /** "" = the flow's role. */
   profileId: string

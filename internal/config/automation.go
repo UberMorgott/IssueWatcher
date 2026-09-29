@@ -26,6 +26,7 @@ type Automation struct {
 const (
 	EventNewIssue   = "new_issue"
 	EventNewComment = "new_comment"
+	EventNewItem    = "new_item" // a new mod-page comment thread or bug report (see Rule.Kinds)
 	FlowFix         = "fix"
 	FlowReply       = "reply"
 	FlowLabel       = "label"
@@ -36,8 +37,11 @@ type Rule struct {
 	ID        string   `json:"id"` // [a-z0-9-], unique
 	Enabled   bool     `json:"enabled"`
 	Project   string   `json:"project"`   // owner/repo
-	Event     string   `json:"event"`     // new_issue | new_comment
+	Event     string   `json:"event"`     // new_issue | new_comment | new_item
 	LabelsAny []string `json:"labelsAny"` // empty = any item
+	// Kinds are the item kinds the rule fires on (issue | comment | bug);
+	// absent = issue only, so issue rules never fire on mod-page items.
+	Kinds     []string `json:"kinds,omitempty"`
 	Flow      string   `json:"flow"`      // fix | reply | label
 	ProfileID string   `json:"profileId"` // "" = the flow's role
 	// MaxPerDay caps this rule's jobs in 24 h, 0–500; 0 = only the total/project caps.
@@ -105,7 +109,21 @@ func (au *Automation) normalize() {
 	}
 }
 
-var projectName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+// itemKinds are the valid Rule.Kinds values (store item kinds).
+var itemKinds = []string{"issue", "comment", "bug"}
+
+// MatchesKind reports whether the rule fires on an item of kind (absent Kinds = issue only).
+func (r Rule) MatchesKind(kind string) bool {
+	if kind == "" {
+		kind = "issue"
+	}
+	if len(r.Kinds) == 0 {
+		return kind == "issue"
+	}
+	return slices.Contains(r.Kinds, kind)
+}
+
+var projectName =regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 const (
 	maxRules      = 100
@@ -135,8 +153,10 @@ func (au Automation) validate(profiles map[string]bool) error {
 			return invalid(f("id"), "duplicate", nil, "duplicate id %q", r.ID)
 		case !projectName.MatchString(r.Project):
 			return invalid(f("project"), "project", nil, "must be owner/repo")
-		case !slices.Contains([]string{EventNewIssue, EventNewComment}, r.Event):
-			return notOneOf(f("event"), EventNewIssue, EventNewComment)
+		case !slices.Contains([]string{EventNewIssue, EventNewComment, EventNewItem}, r.Event):
+			return notOneOf(f("event"), EventNewIssue, EventNewComment, EventNewItem)
+		case slices.ContainsFunc(r.Kinds, func(k string) bool { return !slices.Contains(itemKinds, k) }):
+			return notOneOf(f("kinds"), itemKinds...)
 		case !slices.Contains([]string{FlowFix, FlowReply, FlowLabel}, r.Flow):
 			return notOneOf(f("flow"), FlowFix, FlowReply, FlowLabel)
 		case r.ProfileID != "" && !profiles[r.ProfileID]:

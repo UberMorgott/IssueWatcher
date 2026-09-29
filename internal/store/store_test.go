@@ -146,6 +146,38 @@ func TestEmptyFirstSyncStillBaselines(t *testing.T) {
 	}
 }
 
+func TestApplyItemsKinds(t *testing.T) {
+	s, src, p := setup(t)
+	ctx := t.Context()
+	kinded := func(id, kind, author string, comments ...provider.Comment) provider.Item {
+		it := item(id, 0, true, t0, comments...)
+		it.Kind, it.Author = kind, author
+		return it
+	}
+	// Baseline: a comment thread stays silent; an empty kind is stored as issue.
+	legacy := item("I0", 1, true, t0)
+	legacy.Kind = ""
+	if evs, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{kinded("comment:1", KindComment, "bob"), legacy}, "me"); err != nil || len(evs) != 0 {
+		t.Fatalf("baseline %v %v", kinds(evs), err)
+	}
+	var k string
+	if err := s.db.QueryRowContext(ctx, "SELECT kind FROM items WHERE external_id = 'I0'").Scan(&k); err != nil || k != KindIssue {
+		t.Fatalf("legacy kind %q %v", k, err)
+	}
+	evs, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{
+		kinded("comment:1", KindComment, "bob", comment("r1", "carol"), comment("r2", "me")), // reply in the thread; own reply silent
+		kinded("comment:2", KindComment, "me"),                                            // own new thread: silent
+		kinded("bug:3", KindBug, "dave"),
+	}, "me")
+	if err != nil || len(evs) != 2 {
+		t.Fatalf("events %+v %v", evs, err)
+	}
+	if evs[0].Kind != EventNewComment || evs[0].ItemKind != KindComment || evs[0].Actor != "carol" ||
+		evs[1].Kind != EventNewItem || evs[1].ItemKind != KindBug || evs[1].Actor != "dave" {
+		t.Fatalf("events %+v", evs)
+	}
+}
+
 func TestSyncProjectsDeactivatesMissing(t *testing.T) {
 	s, src, p := setup(t)
 	if _, err := s.ApplyItems(t.Context(), src, p.ID, []provider.Item{item("I1", 1, true, t0)}, "me"); err != nil {
