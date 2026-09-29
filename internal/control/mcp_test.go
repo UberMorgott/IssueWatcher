@@ -48,7 +48,7 @@ func TestMCPTools(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" "+string(b))
 		switch r.URL.Path {
-		case "/api/items":
+		case "/api/items", "/api/items/4/comments":
 			_, _ = w.Write([]byte(`{"items":[],"nextCursor":"","more":false}`))
 		case "/api/jobs/5/reply":
 			_, _ = w.Write([]byte(`{"id":5,"state":"done"}`))
@@ -72,8 +72,8 @@ func TestMCPTools(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	slices.Sort(names)
-	want := []string{"apply_job_labels", "cancel_job", "create_pr", "get_item", "get_job", "get_job_log", "list_items", "list_jobs",
-		"list_projects", "push_job", "reply_item", "retry_job", "send_job_reply", "start_jobs", "sync_now"}
+	want := []string{"apply_job_labels", "cancel_job", "create_pr", "get_item", "get_job", "get_job_log", "list_item_comments", "list_items",
+		"list_jobs", "list_projects", "push_job", "reply_item", "retry_job", "send_job_reply", "start_jobs", "sync_now"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
 	}
@@ -91,6 +91,13 @@ func TestMCPTools(t *testing.T) {
 	}
 	if last := got[len(got)-1]; last != "GET /api/items?limit=50&state=open " {
 		t.Fatalf("list_items request %q", last)
+	}
+	// Later comments of a long thread: the next pages after get_item.
+	if r := call("list_item_comments", map[string]any{"id": 4, "cursor": "c1", "limit": 500}); r.IsError {
+		t.Fatalf("list_item_comments: %+v", r)
+	}
+	if last := got[len(got)-1]; last != "GET /api/items/4/comments?cursor=c1&limit=50 " {
+		t.Fatalf("list_item_comments request %q", last)
 	}
 	if r := call("send_job_reply", map[string]any{"id": 5, "body": "Thanks!"}); r.IsError || !strings.Contains(text(t, r), `"done"`) {
 		t.Fatalf("send_job_reply: %+v", r)

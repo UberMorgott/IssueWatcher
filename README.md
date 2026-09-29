@@ -57,7 +57,7 @@ Register the MCP server (stdio) in Claude Code:
 claude mcp add issuewatcher -- "C:\path\to\issuewatcher.exe" mcp
 ```
 
-Tools: `list_projects, list_items, get_item, list_jobs, get_job, get_job_log,
+Tools: `list_projects, list_items, get_item, list_item_comments, list_jobs, get_job, get_job_log,
 sync_now, reply_item, start_jobs, cancel_job, retry_job, send_job_reply,
 apply_job_labels, push_job, create_pr` (local ids, pages ≤ 50; logs in
 `data\logs\mcp.log`). Publishing tools (comment, push, PR) have no extra gate:

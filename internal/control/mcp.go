@@ -62,9 +62,20 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		ID       int64 `json:"id" jsonschema:"item id"`
 		Comments int   `json:"comments,omitempty" jsonschema:"comments to include, oldest first, default 20, max 50"`
 	}
-	add(s, &mcp.Tool{Name: "get_item", Description: "Get one issue with its body and the first comments.", Annotations: ro},
+	add(s, &mcp.Tool{Name: "get_item", Description: "Get one issue with its body and the first comments (oldest first); " +
+		"when comments.more is true, read the rest with list_item_comments from comments.nextCursor.", Annotations: ro},
 		func(ctx context.Context, in getItem) (json.RawMessage, error) {
 			return c.Item(ctx, in.ID, pageLimit(in.Comments))
+		})
+
+	type listComments struct {
+		ID     int64  `json:"id" jsonschema:"item id"`
+		Limit  int    `json:"limit,omitempty" jsonschema:"page size, default 20, max 50"`
+		Cursor string `json:"cursor,omitempty" jsonschema:"nextCursor of get_item's comments or of the previous page"`
+	}
+	add(s, &mcp.Tool{Name: "list_item_comments", Description: "List an issue's comments, oldest first, one page; follow nextCursor while more is true to reach the latest.", Annotations: ro},
+		func(ctx context.Context, in listComments) (json.RawMessage, error) {
+			return c.Comments(ctx, in.ID, pageLimit(in.Limit), in.Cursor)
 		})
 
 	type listJobs struct {

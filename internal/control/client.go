@@ -207,13 +207,20 @@ func (c *Client) Item(ctx context.Context, id int64, commentLimit int) (json.Raw
 	if err != nil {
 		return nil, err
 	}
-	q := url.Values{}
-	setInt(q, "limit", int64(commentLimit))
-	comments, err := c.get(ctx, idPath("/api/items/%d/comments", id), q)
+	comments, err := c.Comments(ctx, id, commentLimit, "")
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(map[string]json.RawMessage{"item": item, "comments": comments})
+}
+
+// Comments returns one chunk {items, nextCursor, more} of the item's comments,
+// oldest first, after cursor ("" = from the first; limit 0 = the API default).
+func (c *Client) Comments(ctx context.Context, id int64, limit int, cursor string) (json.RawMessage, error) {
+	q := url.Values{}
+	setInt(q, "limit", int64(limit))
+	set(q, "cursor", cursor)
+	return c.get(ctx, idPath("/api/items/%d/comments", id), q)
 }
 
 // JobQuery are the GET /api/jobs filters (zero = unset).
