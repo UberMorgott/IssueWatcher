@@ -67,8 +67,8 @@ type Provider struct {
 	gap  sync.Mutex // serialises requests: one at a time, MinGap apart
 	last time.Time
 
-	qmu      sync.Mutex // the QR sign-in
-	qr       *qrLogin
+	qmu      sync.Mutex // the QR sign-in; taken after save when both are held
+	qr       *qrLogin   // the live attempt: StartQR replaces it, CancelQR (and Logout) clears it
 	onSignIn func()
 }
 

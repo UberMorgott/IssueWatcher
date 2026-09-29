@@ -66,7 +66,7 @@ type qrLogin struct {
 func (p *Provider) StartQR(ctx context.Context) (QRStatus, error) {
 	var r struct {
 		Response struct {
-			ClientID     string  `json:"client_id"`
+			ClientID     u64     `json:"client_id"`
 			ChallengeURL string  `json:"challenge_url"`
 			RequestID    string  `json:"request_id"`
 			Interval     float64 `json:"interval"`
@@ -99,7 +99,7 @@ func (p *Provider) StartQR(ctx context.Context) (QRStatus, error) {
 	p.qr = l
 	st := l.status
 	p.qmu.Unlock()
-	go p.pollQR(bg, l, r.Response.ClientID, r.Response.RequestID, interval)
+	go p.pollQR(bg, l, string(r.Response.ClientID), r.Response.RequestID, interval)
 	return st, nil
 }
 
@@ -154,6 +154,7 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 		var r struct {
 			Response struct {
 				RefreshToken    string `json:"refresh_token"`
+				NewClientID     u64    `json:"new_client_id"`
 				NewChallengeURL string `json:"new_challenge_url"`
 				Interaction     bool   `json:"had_remote_interaction"`
 			} `json:"response"`
@@ -171,6 +172,11 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 			continue
 		}
 		if r.Response.RefreshToken == "" {
+			// The code rotated: the next polls ask about the new client id
+			// (steam-session LoginSession does the same).
+			if r.Response.NewClientID != "" {
+				clientID = string(r.Response.NewClientID)
+			}
 			p.setQR(l, func(s *QRStatus) {
 				if r.Response.NewChallengeURL != "" {
 					s.ChallengeURL = r.Response.NewChallengeURL
@@ -181,7 +187,11 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 			})
 			continue
 		}
-		id, err := p.signIn(ctx, r.Response.RefreshToken)
+		id, err := p.signIn(ctx, l, r.Response.RefreshToken)
+		if errors.Is(err, errQRCancelled) {
+			p.opts.Log.Info("steam: QR sign-in cancelled before the session was stored")
+			return
+		}
 		p.setQR(l, func(s *QRStatus) {
 			s.ChallengeURL = ""
 			if err != nil {
@@ -197,6 +207,9 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 		p.opts.Log.Info("steam: signed in by QR", "steamId", id)
 		p.qmu.Lock()
 		f := p.onSignIn
+		if p.qr != l { // cancelled (or logged out) right after the save
+			f = nil
+		}
 		p.qmu.Unlock()
 		if f != nil {
 			f()
@@ -205,9 +218,15 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 	}
 }
 
+// errQRCancelled: the QR attempt was cancelled (CancelQR, Logout, a newer
+// StartQR) before its session was stored.
+var errQRCancelled = errors.New("steam: QR sign-in cancelled")
+
 // signIn turns a refresh token into the web session, checks it, and stores
-// SteamID, cookies and the refresh token.
-func (p *Provider) signIn(ctx context.Context, refresh string) (string, error) {
+// SteamID, cookies and the refresh token — only while l is still the live
+// attempt: the check and the store run under qmu, so a CancelQR/Logout that
+// returned first always wins.
+func (p *Provider) signIn(ctx context.Context, l *qrLogin, refresh string) (string, error) {
 	sess, err := p.finalize(ctx, refresh)
 	if err != nil {
 		return "", err
@@ -220,6 +239,11 @@ func (p *Provider) signIn(ctx context.Context, refresh string) (string, error) {
 	cur, err := p.current()
 	if err != nil {
 		return "", err
+	}
+	p.qmu.Lock() // lock order: save → qmu → mu
+	defer p.qmu.Unlock()
+	if p.qr != l || ctx.Err() != nil {
+		return "", errQRCancelled
 	}
 	next := cur
 	next.SteamID, next.LoginSecure, next.SessionID, next.RefreshToken = sess.steamID, sess.loginSecure, sess.sessionID, refresh
@@ -345,13 +369,19 @@ func (p *Provider) CheckSession(ctx context.Context) error {
 	err = p.checkCookies(ctx, s.SteamID, s.LoginSecure, s.SessionID)
 	switch {
 	case errors.Is(err, ErrSessionExpired):
-		if s.RefreshToken != "" {
-			if s2, rerr := p.refresh(ctx, s); rerr == nil {
-				p.sessionOK(s2)
-				return nil
-			}
+		if s.RefreshToken == "" {
+			return p.expire(s)
 		}
-		return p.expire(s)
+		s2, rerr := p.refresh(ctx, s)
+		if rerr != nil {
+			// refresh flags the session itself when Steam refuses the token
+			// (ErrRefreshExpired); a transient failure (5xx, network, ctx)
+			// leaves it alone so the next check retries instead of asking
+			// for a new sign-in.
+			return rerr
+		}
+		p.sessionOK(s2)
+		return nil
 	case err != nil:
 		return err
 	}
@@ -428,6 +458,24 @@ func accessExpiry(loginSecure string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(c.Exp, 0), true
+}
+
+// u64 is a uint64 field of an IAuthenticationService answer (client_id,
+// new_client_id): the WebAPI sends 64-bit ids as JSON strings; a plain number
+// is accepted too. Kept as its decimal text.
+type u64 string
+
+func (v *u64) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		*v = ""
+		return nil
+	}
+	if _, err := strconv.ParseUint(s, 10, 64); err != nil {
+		return fmt.Errorf("steam: bad id %s", b)
+	}
+	*v = u64(s)
+	return nil
 }
 
 // eresultError: an IAuthenticationService call answered an EResult other than OK.

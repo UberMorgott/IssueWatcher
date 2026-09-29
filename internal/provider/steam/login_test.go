@@ -30,12 +30,15 @@ type fakeAuth struct {
 	issued    int      // cookies issued by settoken
 	valid     []string // accepted steamLoginSecure values
 	finalized int
+	failFinal int      // finalizelogin answers this HTTP status (0 = normal)
+	clientID  string   // client_id the polls must carry (rotates on the first poll)
+	profiles  int      // hits on the member's profile (the last step of a session check)
 	posts     []string // Cookie headers of comment posts
 }
 
 func newFakeAuth(t *testing.T) *fakeAuth {
 	t.Helper()
-	f := &fakeAuth{t: t, refresh: "refresh-token-1", exp: time.Now().Add(24 * time.Hour)}
+	f := &fakeAuth{t: t, refresh: "refresh-token-1", exp: time.Now().Add(24 * time.Hour), clientID: "123"}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	f.base = f.srv.URL
 	t.Cleanup(f.srv.Close)
@@ -65,7 +68,7 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		}})
 	case "/IAuthenticationService/PollAuthSessionStatus/v1/":
 		_ = r.ParseForm()
-		if r.PostForm.Get("client_id") != "123" || r.PostForm.Get("request_id") != "cmVxdWVzdA==" {
+		if r.PostForm.Get("client_id") != f.clientID || r.PostForm.Get("request_id") != "cmVxdWVzdA==" {
 			w.Header().Set("X-eresult", "8")
 			return
 		}
@@ -78,7 +81,8 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-eresult", "1")
 		switch f.polls {
 		case 1:
-			writeJSON(w, map[string]any{"response": map[string]any{"new_challenge_url": "https://s.team/q/1/456", "had_remote_interaction": false}})
+			f.clientID = "456" // the code rotated: later polls must use the new client id
+			writeJSON(w, map[string]any{"response": map[string]any{"new_client_id": "456", "new_challenge_url": "https://s.team/q/1/456", "had_remote_interaction": false}})
 		case 2:
 			writeJSON(w, map[string]any{"response": map[string]any{"had_remote_interaction": true}})
 		default:
@@ -90,6 +94,10 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.finalized++
+		if f.failFinal != 0 {
+			http.Error(w, "unavailable", f.failFinal)
+			return
+		}
 		if r.FormValue("nonce") != f.refresh || len(r.FormValue("sessionid")) != 24 || r.Header.Get("Origin") != f.base {
 			writeJSON(w, map[string]any{"error": 8})
 			return
@@ -115,6 +123,9 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(w, r, "/login/home/?goto=%2Fmy%2F", http.StatusFound)
 	case "/profiles/" + ownerID + "/", "/login/home/":
+		if r.URL.Path != "/login/home/" {
+			f.profiles++
+		}
 		_, _ = w.Write([]byte("<html></html>"))
 	default:
 		if strings.HasPrefix(r.URL.Path, "/comment/PublishedFile_Public/post/") {
@@ -335,5 +346,86 @@ func TestReplyRenewsRefusedSessionAndPostsOnce(t *testing.T) {
 	}
 	if s, _ := p.Status(); s.Session != SessionVerified {
 		t.Fatalf("session %q", s.Session)
+	}
+}
+
+// A QR attempt cancelled after its session check but before the store must not
+// sign in (the cancel returned first, so it wins).
+func TestQRCancelledBeforeSaveStoresNothing(t *testing.T) {
+	f := newFakeAuth(t)
+	var signedIn atomic.Int32
+	p := f.provider(t, t.TempDir(), func() { signedIn.Add(1) })
+	p.save.Lock() // hold the attempt right before its store
+	if _, err := p.StartQR(context.Background()); err != nil {
+		p.save.Unlock()
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.mu.Lock()
+		n := f.profiles
+		f.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			p.save.Unlock()
+			t.Fatal("session check never reached")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // let signIn return from the check and block on save
+	p.CancelQR()
+	p.save.Unlock()
+	time.Sleep(100 * time.Millisecond)
+	if s, _ := p.Status(); s.HasCookies || s.SignedIn {
+		t.Fatalf("cancelled sign-in stored a session: %+v", s)
+	}
+	if cur, _ := p.current(); cur.RefreshToken != "" {
+		t.Fatal("cancelled sign-in stored the refresh token")
+	}
+	if signedIn.Load() != 0 || p.QRLoginStatus().State != QRNone {
+		t.Fatalf("onSignIn %d state %q", signedIn.Load(), p.QRLoginStatus().State)
+	}
+}
+
+// The first poll rotates the code (new_client_id); the fake refuses polls
+// with the old client id, so the sign-in completes only if it is followed.
+func TestQRRotationFollowsNewClientID(t *testing.T) {
+	f := newFakeAuth(t)
+	p := f.provider(t, t.TempDir(), nil)
+	signInQR(t, p)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.clientID != "456" || f.polls < 3 {
+		t.Fatalf("client %q polls %d", f.clientID, f.polls)
+	}
+}
+
+// Cookies refused and the renewal failing transiently (503) is not a lost
+// sign-in: the error comes back and the session is not flagged expired.
+func TestTransientRefreshErrorKeepsSession(t *testing.T) {
+	f := newFakeAuth(t)
+	p := f.provider(t, t.TempDir(), nil)
+	signInQR(t, p)
+	f.mu.Lock()
+	f.valid = append(f.valid, "revoked")
+	f.failFinal = http.StatusServiceUnavailable
+	f.mu.Unlock()
+	err := p.CheckSession(context.Background())
+	if err == nil || errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("err %v, want a transient error", err)
+	}
+	if s, _ := p.Status(); s.Session == SessionExpired || !s.SignedIn {
+		t.Fatalf("status %+v", s)
+	}
+	f.mu.Lock()
+	f.failFinal = 0
+	f.mu.Unlock()
+	if err := p.CheckSession(context.Background()); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if s, _ := p.Status(); s.Session != SessionVerified {
+		t.Fatalf("after retry %q", s.Session)
 	}
 }
