@@ -430,6 +430,47 @@ func TestFailureRetryAndDismiss(t *testing.T) {
 	}
 }
 
+func TestAttemptHistory(t *testing.T) {
+	mode(t, "fail")
+	e := setup(t, 1, worktreeMode)
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobFailed)
+	// A job retried before snapshots existed (or never retried) has only its current attempt.
+	if as, err := e.r.Attempts(t.Context(), j.ID); err != nil || len(as) != 1 || as[0].Attempt != 1 || as[0].State != store.JobFailed {
+		t.Fatalf("attempts before retry: %+v %v", as, err)
+	}
+	for attempt := 2; attempt <= 3; attempt++ {
+		if attempt == 3 {
+			mode(t, "ok")
+		}
+		var err error
+		if j, err = e.r.Retry(t.Context(), j.ID); err != nil || j.Attempt != attempt {
+			t.Fatalf("retry %d: %+v %v", attempt, j, err)
+		}
+		j = e.wait(j.ID, store.JobFailed, store.JobNeedsReview)
+	}
+	as, err := e.r.Attempts(t.Context(), j.ID)
+	if err != nil || len(as) != 3 {
+		t.Fatalf("attempts: %+v %v", as, err)
+	}
+	for i, a := range as[:2] {
+		var res Result
+		if a.Attempt != i+1 || a.State != store.JobFailed || a.ErrorCode != CodeAgent || a.FinishedAt == "" ||
+			json.Unmarshal(a.Result, &res) != nil || res.ErrorCode != CodeAgent {
+			t.Fatalf("attempt %d: %+v", i+1, a)
+		}
+	}
+	if cur := as[2]; cur.Attempt != 3 || cur.State != store.JobNeedsReview || cur.ErrorCode != "" {
+		t.Fatalf("current: %+v", cur)
+	}
+	// A lost snapshot is skipped, the rest stay.
+	if err := os.Remove(attemptPath(e.data, j.ID, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if as, err := e.r.Attempts(t.Context(), j.ID); err != nil || len(as) != 2 || as[0].Attempt != 2 || as[1].Attempt != 3 {
+		t.Fatalf("without snapshot 1: %+v %v", as, err)
+	}
+}
+
 func TestNoFolderMapping(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, nil)

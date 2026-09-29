@@ -18,6 +18,7 @@ import (
 //	GET  /api/jobs/{id}                  job
 //	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
 //	GET  /api/jobs/{id}/diff?attempt=    unified diff (text/plain)
+//	GET  /api/jobs/{id}/attempts         {attempts:[{attempt, state, error, errorCode, result, startedAt, finishedAt}]} earlier snapshots + current
 //	POST /api/jobs/{id}/cancel|retry|dismiss|pr|push   job (push: direct fix commits → the platform)
 //	POST /api/jobs/{id}/reply {body}     post the (edited) reply draft
 //	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
@@ -43,6 +44,7 @@ func (s *Server) registerJobs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/log", s.handleJobLog)
 	mux.HandleFunc("GET /api/jobs/{id}/diff", s.handleJobDiff)
+	mux.HandleFunc("GET /api/jobs/{id}/attempts", s.handleJobAttempts)
 	mux.HandleFunc("POST /api/jobs/{id}/reply", s.handleJobReply)
 	for action, f := range map[string]func(context.Context, int64) (store.Job, error){
 		"cancel": s.opts.Runner.Cancel, "retry": s.opts.Runner.Retry, "dismiss": s.opts.Runner.Dismiss, "pr": s.opts.Runner.CreatePR,
@@ -156,6 +158,18 @@ func (s *Server) handleJobDiff(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(diff))
+}
+
+func (s *Server) handleJobAttempts(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	attempts, err := s.opts.Runner.Attempts(r.Context(), id)
+	if s.jobError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"attempts": attempts})
 }
 
 func (s *Server) jobAction(f func(context.Context, int64) (store.Job, error)) http.HandlerFunc {

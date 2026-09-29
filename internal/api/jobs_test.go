@@ -86,6 +86,16 @@ func TestJobsAPI(t *testing.T) {
 	if code := e.call(t, http.MethodGet, "/api/jobs/"+jid+"/diff", "", nil); code != http.StatusOK {
 		t.Fatalf("diff %d", code)
 	}
+	var attempts struct {
+		Attempts []runner.Attempt `json:"attempts"`
+	}
+	if code := e.call(t, http.MethodGet, "/api/jobs/"+jid+"/attempts", "", &attempts); code != http.StatusOK ||
+		len(attempts.Attempts) != 1 || attempts.Attempts[0].Attempt != 1 || attempts.Attempts[0].ErrorCode != "no_folder" {
+		t.Fatalf("attempts %d %+v", code, attempts)
+	}
+	if code := e.call(t, http.MethodGet, "/api/jobs/999999/attempts", "", nil); code != http.StatusNotFound {
+		t.Fatalf("attempts of a missing job: %d", code)
+	}
 	var d store.IssueDetail
 	if e.call(t, http.MethodGet, "/api/items/"+id, "", &d); d.Job == nil || d.Job.State != store.JobFailed {
 		t.Fatalf("badge %+v", d.Job)

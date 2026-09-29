@@ -139,6 +139,9 @@ func (r *Runner) Retry(ctx context.Context, id int64) (store.Job, error) {
 	if err := r.cleanup(ctx, j); err != nil {
 		return j, fmt.Errorf("remove the previous worktree: %w", err)
 	}
+	if err := writeAttempt(r.opts.DataDir, j); err != nil {
+		return j, err
+	}
 	nj, err := r.opts.Store.UpdateJob(ctx, id, from, store.JobChange{
 		State: new(store.JobQueued), NextAttempt: true, Phase: new(""), Error: new(""),
 		Branch: new(""), Worktree: new(""), BaseSHA: new(""), Result: encode(Result{}),
