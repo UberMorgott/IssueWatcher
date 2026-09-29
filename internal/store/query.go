@@ -27,6 +27,9 @@ type Repo struct {
 	// LinkedTo is a mod page's code project id (0 = none); Links a code project's mod page ids.
 	LinkedTo int64   `json:"linkedTo,omitempty"`
 	Links    []int64 `json:"links,omitempty"`
+	// Suggest are code projects an unlinked mod page may belong to (name match,
+	// not certain enough to link automatically): one click links it.
+	Suggest []int64 `json:"suggest,omitempty"`
 }
 
 // Repos lists active projects with counts, by name.
@@ -57,6 +60,9 @@ func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: repos: %w", err)
+	}
+	if err := s.fillSuggestions(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

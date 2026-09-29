@@ -226,6 +226,15 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		}
 		setBadge(int64(unread))
 		publishLive(srv, live.Load().Filter(events, time.Now()))
+		// Mod pages named like exactly one GitHub repo link themselves (once).
+		if n, err := st.AutoLink(context.Background()); err != nil {
+			log.Error("auto-link mod pages", "err", err)
+		} else if n > 0 {
+			log.Info("mod pages linked to their code projects", "links", n)
+			if srv != nil {
+				srv.Publish(api.EventDataChanged, api.DataChange{Reason: "links"})
+			}
+		}
 		if jobs != nil {
 			jobs.Automate(context.Background(), events) // rules → rule jobs (off by default)
 			jobs.Refresh()                              // a closed issue ends its direct fix job

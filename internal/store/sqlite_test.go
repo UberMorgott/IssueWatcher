@@ -22,8 +22,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Fatalf("user_version = %d, want 9", version)
+	if version != 10 {
+		t.Fatalf("user_version = %d, want 10", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int

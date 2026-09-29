@@ -69,6 +69,11 @@ func (s *Store) SetProjectLinks(ctx context.Context, codeID int64, modIDs []int6
 	} else if p != CodePlatform {
 		return ErrBadLink
 	}
+	// Mod pages dropped here and those linked below were decided by hand.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO project_link_decisions (mod_project_id)
+		SELECT mod_project_id FROM project_links WHERE code_project_id = ? ON CONFLICT DO NOTHING`, codeID); err != nil {
+		return fmt.Errorf("store: link decisions: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM project_links WHERE code_project_id = ?`, codeID); err != nil {
 		return fmt.Errorf("store: clear links: %w", err)
 	}
@@ -82,6 +87,9 @@ func (s *Store) SetProjectLinks(ctx context.Context, codeID int64, modIDs []int6
 			ON CONFLICT (mod_project_id) DO UPDATE SET code_project_id = excluded.code_project_id`, m, codeID); err != nil {
 			return fmt.Errorf("store: link %d: %w", m, err)
 		}
+		if err := s.decideLink(ctx, tx, m); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: commit links: %w", err)
@@ -91,8 +99,17 @@ func (s *Store) SetProjectLinks(ctx context.Context, codeID int64, modIDs []int6
 
 // UnlinkProject removes every link of project id (as mod page or code project).
 func (s *Store) UnlinkProject(ctx context.Context, id int64) error {
-	if _, err := s.projectPlatform(ctx, s.db, id); err != nil {
+	platform, err := s.projectPlatform(ctx, s.db, id)
+	if err != nil {
 		return err
+	}
+	// Unlinked by hand: the auto-linker must not link it again.
+	decide := `INSERT INTO project_link_decisions (mod_project_id) SELECT mod_project_id FROM project_links WHERE code_project_id = ?1 ON CONFLICT DO NOTHING`
+	if platform != CodePlatform {
+		decide = `INSERT INTO project_link_decisions (mod_project_id) VALUES (?1) ON CONFLICT DO NOTHING`
+	}
+	if _, err := s.db.ExecContext(ctx, decide, id); err != nil {
+		return fmt.Errorf("store: link decision: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM project_links WHERE mod_project_id = ?1 OR code_project_id = ?1`, id); err != nil {
 		return fmt.Errorf("store: unlink: %w", err)
