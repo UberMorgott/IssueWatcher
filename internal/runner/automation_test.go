@@ -280,3 +280,23 @@ func TestAutomateKinds(t *testing.T) {
 	wantDecisions(t, got, decision{"mod-replies", "queued", ""}, decision{"mod-threads", "queued", ""},
 		decision{"issue-comments", "queued", ""})
 }
+
+// A code project's rules and automation policy cover its linked mod pages'
+// items (the mod page's own override no longer decides).
+func TestAutomateLinkedModPage(t *testing.T) {
+	threads := rule("mod-threads", "octo/demo", config.EventNewItem, config.FlowReply)
+	threads.Kinds = []string{"comment"}
+	on, off := true, false
+	e := autoSetup(t, 1, func(s *config.Settings) {
+		s.Agents.Automation.Enabled = false
+		s.Agents.Automation.Rules = []config.Rule{threads}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{Enabled: &on}}
+		s.Agents.Projects["nexus:skyrim/7"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{Enabled: &off}}
+	})
+	x := store.Event{Kind: store.EventNewItem, ItemKind: store.KindComment, Project: "nexus:skyrim/7", Repo: "Demo Mod", ItemID: e.items[0]}
+	if got := e.r.Automate(t.Context(), []store.Event{x}); len(got) != 0 {
+		t.Fatalf("unlinked mod page: %+v", decisions(got))
+	}
+	x.CodeProject = "github:octo/demo"
+	wantDecisions(t, e.r.Automate(t.Context(), []store.Event{x}), decision{"mod-threads", "queued", ""})
+}

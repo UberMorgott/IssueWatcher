@@ -171,8 +171,9 @@ func automateTx(ctx context.Context, tx *sql.Tx, req AutomationRequest, at, sinc
 			[]any{req.ItemID, req.Flow}},
 		{ReasonTotalCap, req.TotalCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND created_at > ?`,
 			[]any{since}},
-		{ReasonDayCap, req.DayCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND project_id = ? AND created_at > ?`,
-			[]any{projectID, since}},
+		// The project's cap spans its linked mod pages (one project = all channels).
+		{ReasonDayCap, req.DayCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND ` + scopeJobProj + ` AND created_at > ?2`,
+			[]any{groupHead(ctx, tx, projectID), since}},
 		{ReasonRuleCap, req.RuleCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND rule_id = ? AND created_at > ?`,
 			[]any{req.RuleID, since}},
 	}

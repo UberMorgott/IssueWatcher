@@ -65,11 +65,14 @@ type Event struct {
 	ItemKind string // issue | comment | bug
 	ItemID   int64
 	Project  string // settings key platform:external_id (agents.projects, rules)
-	Repo     string
-	Number   int
-	Title    string
-	Actor    string // issue/comment author; "" for closes
-	Body     string // comment text for new_comment
+	// CodeProject is the settings key of the code project a mod page is linked
+	// to ("" = none): that project's rules and automation policy cover the item.
+	CodeProject string
+	Repo        string
+	Number      int
+	Title       string
+	Actor       string // issue/comment author; "" for closes
+	Body        string // comment text for new_comment
 }
 
 // UpsertSource returns the id of (platform, account), creating it if needed.
@@ -201,7 +204,22 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 		return nil, fmt.Errorf("store: commit items: %w", err)
 	}
 	s.changes.Add(changes)
+	if len(events) > 0 {
+		code := s.linkedCodeKey(ctx, projectID)
+		for i := range events {
+			events[i].CodeProject = code
+		}
+	}
 	return events, nil
+}
+
+// linkedCodeKey is the settings key of the code project mod page id is linked
+// to; "" when none (or on a schema before project links).
+func (s *Store) linkedCodeKey(ctx context.Context, id int64) string {
+	var key string
+	_ = s.db.QueryRowContext(ctx, `SELECT s.platform || ':' || p.external_id FROM project_links pl
+		JOIN projects p ON p.id = pl.code_project_id JOIN sources s ON s.id = p.source_id WHERE pl.mod_project_id = ?`, id).Scan(&key)
+	return key
 }
 
 // projectKeySQL is a project's settings key platform:external_id (config.ProjectKey)

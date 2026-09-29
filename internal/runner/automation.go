@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -37,7 +38,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 	seen := map[itemFlow]bool{} // one decision per item + flow and batch
 	queued := false
 	for _, ev := range events {
-		pol := cfg.AutomationFor(ev.Project)
+		pol := cfg.AutomationFor(cmp.Or(ev.CodeProject, ev.Project)) // a linked mod page follows its code project
 		if !pol.Enabled || (ev.Kind != store.EventNewIssue && ev.Kind != store.EventNewComment && ev.Kind != store.EventNewItem) {
 			continue
 		}
@@ -98,9 +99,11 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 }
 
 // ruleFor reports whether enabled rule ru covers the event's project, event
-// kind and item kind (rules without kinds cover issues only).
+// kind and item kind (rules without kinds cover issues only). A code project's
+// rules also cover its linked mod pages' items.
 func ruleFor(ru config.Rule, ev store.Event) bool {
-	return ru.Enabled && strings.EqualFold(ru.Project, ev.Project) && ru.Event == string(ev.Kind) && ru.MatchesKind(ev.ItemKind)
+	project := strings.EqualFold(ru.Project, ev.Project) || ev.CodeProject != "" && strings.EqualFold(ru.Project, ev.CodeProject)
+	return ru.Enabled && project && ru.Event == string(ev.Kind) && ru.MatchesKind(ev.ItemKind)
 }
 
 // matchRule returns the first enabled rule for the event's project and kind

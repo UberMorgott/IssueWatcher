@@ -197,3 +197,77 @@ func TestReplyOffPlatformRefused(t *testing.T) {
 		t.Fatalf("posted %v", p.replies)
 	}
 }
+
+// A project's row sync re-reads the project and its linked mod pages, each
+// through its own source; a failing source reports its own error (relogin).
+func TestGroupSyncProjects(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	gh := &fakeProvider{platform: "github", account: "me", item: "code"}
+	nx := &fakeProvider{platform: "nexus", account: "me", item: "mod"}
+	sg := New(Options{Store: st, Provider: gh})
+	sn := New(Options{Store: st, Provider: nx})
+	g := NewGroup(sg, sn)
+	for _, s := range []*Syncer{sg, sn} {
+		if err := s.SyncOnce(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repos, err := st.Repos(t.Context())
+	if err != nil || len(repos) != 2 {
+		t.Fatalf("repos: %+v %v", repos, err)
+	}
+	ids := map[string]int64{}
+	for _, r := range repos {
+		ids[r.Platform] = r.ID
+	}
+	if err := st.SetProjectLinks(t.Context(), ids["github"], []int64{ids["nexus"]}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan Progress, 8)
+	g.OnProgress(func(p Progress) {
+		if p.State == ProgressDone || p.State == ProgressError {
+			done <- p
+		}
+	})
+	targets, err := st.GroupTargets(t.Context(), ids["github"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait := func() map[string]Progress {
+		t.Helper()
+		got := map[string]Progress{}
+		for range 2 {
+			select {
+			case p := <-done:
+				got[p.Source] = p
+			case <-time.After(5 * time.Second):
+				t.Fatalf("project sync: only %+v", got)
+			}
+		}
+		return got
+	}
+	if started, missing := g.SyncProjects(t.Context(), targets); len(started) != 2 || len(missing) != 0 {
+		t.Fatalf("started %v missing %v", started, missing)
+	}
+	got := wait()
+	if p := got["github:me"]; p.State != ProgressDone || p.Repo != "github/me" || got["nexus:me"].State != ProgressDone {
+		t.Fatalf("progress: %+v", got)
+	}
+
+	nx.mu.Lock()
+	nx.err = provider.ErrRelogin
+	nx.mu.Unlock()
+	g.SyncProjects(t.Context(), targets)
+	got = wait()
+	if got["nexus:me"].State != ProgressError || !sn.Status().Relogin || got["github:me"].State != ProgressDone || sg.Status().Relogin {
+		t.Fatalf("relogin: %+v", got)
+	}
+	if _, missing := g.SyncProjects(t.Context(), []store.SyncTarget{{Platform: "steam"}}); len(missing) != 1 {
+		t.Fatalf("no steam account: %v", missing)
+	}
+}

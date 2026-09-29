@@ -17,7 +17,7 @@ import FolderDialog from '../components/FolderDialog.vue'
 import LinkDialog from '../components/LinkDialog.vue'
 import { isModPlatform, platformName } from '../lib/platforms'
 import { api } from '../api/client'
-import type { Repo, Stats } from '../api/types'
+import type { Integration, Repo, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, repoOwner, shortDay, shortRepo } from '../lib/format'
@@ -45,7 +45,8 @@ const repoStats = reactive<Record<number, Stats | 'loading' | 'error'>>({})
 // when the sentinel below the table comes within ~2 screens.
 const sortField = ref('open')
 const sortOrder = ref<1 | -1>(-1)
-const list = useChunks<Repo>((cursor) => api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), cursor))
+// One row per project: the server folds linked mod pages into Repo.integrations.
+const list = useChunks<Repo>((cursor) => api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), cursor, 50, true))
 const rows = list.items
 const listLoading = list.loading
 function reload() {
@@ -76,6 +77,8 @@ watch(sentinel, (el) => {
   if (el) observer?.observe(el)
 })
 onBeforeUnmount(() => observer?.disconnect())
+/** Projects = grouped rows (linked mod pages are part of their project), unfiltered. */
+const projectCount = computed(() => (!filter.value.trim() && list.total.value != null ? list.total.value : app.repos.filter((r) => !r.linkedTo).length))
 const totals = computed(() => app.repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed }), { open: 0, closed: 0 }))
 
 async function onExpand(e: { data: Repo }) {
@@ -92,7 +95,7 @@ watch(
   async () => {
     const n = rows.value.length
     if (n) {
-      const r = await api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), '', Math.min(Math.max(n, 50), 1000))
+      const r = await api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), '', Math.min(Math.max(n, 50), 1000), true)
       if (r.ok) rows.value = r.data.items
     }
     for (const k of Object.keys(expanded.value)) {
@@ -134,8 +137,54 @@ function openLinks(r: Repo) {
   linkOpen.value = true
 }
 const repoById = computed(() => new Map(app.repos.map((r) => [r.id, r])))
-/** A project's current links (the live repo list is fresher than the loaded chunk). */
-const linksOf = (r: Repo) => (repoById.value.get(r.id)?.links ?? r.links ?? []).map((id) => repoById.value.get(id)).filter((x): x is Repo => !!x)
+/** A row's channels: its own project, then its linked mod pages, each with its own counts. */
+const channels = (r: Repo): Integration[] =>
+  r.integrations?.length
+    ? r.integrations
+    : [{ id: r.id, name: r.name, url: r.url, platform: r.platform || 'github', open: r.open, closed: r.closed, unread: r.unread, lastSync: r.lastSync ?? '' }]
+/** Issues of the whole project on one platform (the project filter spans its linked mod pages). */
+const issuesTo = (r: Repo, platform: string, unread = false) => ({
+  name: 'issues',
+  query: unread ? { repo: String(r.id), source: platform, unread: '1', state: 'all' } : { repo: String(r.id), source: platform },
+})
+/** Sync trouble of a platform's source: relogin first, else its last error ("" = fine). */
+function channelTrouble(platform: string): string {
+  const srcs = (app.sync?.sources ?? []).filter((s) => s.platform === platform)
+  const s = srcs.find((x) => x.relogin) ?? srcs.find((x) => x.lastError)
+  if (!s) return ''
+  const name = platformName(platform)
+  return s.relogin ? t('projects.channelRelogin', { platform: name }) : t('projects.channelError', { platform: name, error: s.lastError })
+}
+
+// Row sync: the project and every linked mod page, each through its source.
+const rowSyncing = reactive<Record<number, boolean>>({})
+async function syncProject(r: Repo) {
+  rowSyncing[r.id] = true
+  const res = await api.syncProject(r.id)
+  window.setTimeout(() => (rowSyncing[r.id] = false), 1500) // the result arrives as a live data change
+  if (!res.ok) {
+    toast.add({ severity: 'error', summary: res.error, life: 4000 })
+    return
+  }
+  const names = (l: string[]) => [...new Set(l)].map(platformName).join(', ')
+  if (res.data.started.length) toast.add({ severity: 'info', summary: t('projects.syncStarted', { list: names(res.data.started) }), life: 2500 })
+  if (res.data.missing.length) toast.add({ severity: 'warn', summary: t('projects.syncMissing', { list: names(res.data.missing) }), life: 4000 })
+}
+
+/** Patches a loaded row's folder (the dialog or the inline unmap). */
+function setRowFolder(id: number, localPath: string) {
+  rows.value = rows.value.map((x) => (x.id === id ? { ...x, localPath } : x))
+}
+async function unmapFolder(r: Repo) {
+  const res = await api.setFolder(r.id, '')
+  if (!res.ok) {
+    toast.add({ severity: 'error', summary: res.error, life: 4000 })
+    return
+  }
+  setRowFolder(r.id, '')
+  toast.add({ severity: 'success', summary: t('folder.unmapped'), detail: r.name, life: 3000 })
+  void app.loadRepos()
+}
 const codeOf = (r: Repo) => {
   const id = repoById.value.get(r.id)?.linkedTo ?? r.linkedTo
   return id ? repoById.value.get(id) : undefined
@@ -152,6 +201,7 @@ async function acceptSuggestion(mod: Repo, code: Repo) {
   }
   toast.add({ severity: 'success', summary: t('platforms.linkedTo', { name: code.name }), life: 2500 })
   await app.loadRepos()
+  reload() // the mod page folds into its project's row
 }
 
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
@@ -164,7 +214,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
       class="page-head"
     >
       <div class="summary muted">
-        <b class="mono">{{ app.repos.length }}</b> {{ t('words.projects', app.repos.length) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }} · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
+        <b class="mono">{{ projectCount }}</b> {{ t('words.projects', projectCount) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }} · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
       </div>
     </div>
 
@@ -194,6 +244,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
       <FolderDialog
         v-model:visible="folderOpen"
         :project="folderProject"
+        @saved="(p: string) => folderProject && setRowFolder(folderProject.id, p)"
       />
       <LinkDialog
         v-model:visible="linkOpen"
@@ -269,32 +320,64 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     {{ isModPlatform(data.platform) ? data.name : shortRepo(data.name) }}
                   </RouterLink>
                   <span class="owner">{{ isModPlatform(data.platform) ? platformName(data.platform) : repoOwner(data.name) }}</span>
-                  <!-- «Площадки»: a code project's mod pages, a mod page's code project -->
-                  <span
-                    v-if="!isModPlatform(data.platform) && (linksOf(data).length || hasMods)"
-                    class="chips"
-                  >
-                    <RouterLink
-                      v-for="m in linksOf(data)"
-                      :key="m.id"
-                      v-tooltip.top="platformName(m.platform) + ' · ' + m.name"
-                      :to="{ name: 'issues', query: { repo: String(m.id), state: 'all' } }"
-                      class="chip"
-                    ><PlatformIcon
-                      :platform="m.platform"
-                      :size="12"
-                    /><span class="chip-name">{{ m.name }}</span></RouterLink>
+                  <!-- Channels: the project itself + its linked mod pages, each with its counters -->
+                  <span class="chips">
+                    <span
+                      v-for="c in channels(data)"
+                      :key="c.id"
+                      class="chip channel"
+                      :class="{ trouble: !!channelTrouble(c.platform) }"
+                    >
+                      <a
+                        v-if="c.id !== data.id"
+                        v-tooltip.top="t('projects.openModPage') + ' · ' + c.name"
+                        :href="safeUrl(c.url)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="chip-link"
+                      ><PlatformIcon
+                        :platform="c.platform"
+                        :size="12"
+                      /><span class="chip-name">{{ c.name }}</span></a>
+                      <PlatformIcon
+                        v-else
+                        :platform="c.platform"
+                        :size="12"
+                      />
+                      <RouterLink
+                        v-tooltip.top="t('projects.channelIssues', { platform: platformName(c.platform) }) + ' · ' + c.open + ' ' + t('words.open', c.open)"
+                        :to="issuesTo(data, c.platform)"
+                        class="count mono"
+                      >{{ c.open }}</RouterLink>
+                      <RouterLink
+                        v-if="c.unread"
+                        v-tooltip.top="t('projects.channelUnread', { platform: platformName(c.platform) }) + ' · ' + c.unread + ' ' + t('words.unread', c.unread)"
+                        :to="issuesTo(data, c.platform, true)"
+                        class="count unread mono"
+                      >{{ c.unread }}</RouterLink>
+                      <i
+                        v-if="channelTrouble(c.platform)"
+                        v-tooltip.top="channelTrouble(c.platform)"
+                        class="pi pi-exclamation-triangle warn"
+                      />
+                    </span>
                     <button
+                      v-if="!isModPlatform(data.platform) && (channels(data).length > 1 || hasMods)"
                       type="button"
                       class="chip add"
                       :aria-label="t('platforms.linkMods')"
                       @click.stop="openLinks(data)"
-                    ><i class="pi pi-link" />{{ linksOf(data).length ? '' : t('platforms.mods') }}</button>
+                    ><i class="pi pi-link" />{{ channels(data).length > 1 ? '' : t('platforms.mods') }}</button>
                   </span>
+                  <!-- A mod page without a code project: «не привязан», link / one-click suggestion -->
                   <span
-                    v-else-if="isModPlatform(data.platform)"
+                    v-if="isModPlatform(data.platform)"
                     class="chips"
                   >
+                    <span
+                      v-if="!codeOf(data)"
+                      class="chip tag"
+                    >{{ t('platforms.notLinked') }}</span>
                     <RouterLink
                       v-if="codeOf(data)"
                       :to="{ name: 'issues', query: { repo: String(codeOf(data)?.id), state: 'all' } }"
@@ -327,6 +410,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column class="actions-col">
             <template #body="{ data }: { data: Repo }">
+              <Button
+                v-tooltip.top="t('projects.syncTip')"
+                icon="pi pi-sync"
+                size="small"
+                severity="secondary"
+                text
+                rounded
+                :aria-label="t('projects.sync')"
+                :loading="!!rowSyncing[data.id]"
+                @click.stop="syncProject(data)"
+              />
               <span
                 v-if="!isModPlatform(data.platform)"
                 v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
@@ -433,6 +527,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   severity="secondary"
                   text
                   @click.stop="mapFolder(data)"
+                />
+                <Button
+                  v-if="data.localPath"
+                  v-tooltip.top="t('folder.unmap')"
+                  icon="pi pi-times"
+                  size="small"
+                  severity="secondary"
+                  text
+                  rounded
+                  :aria-label="t('folder.unmap')"
+                  @click.stop="unmapFolder(data)"
                 />
               </div>
             </template>
@@ -629,6 +734,60 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
   color: var(--iw-primary);
   border-style: dashed;
   border-color: var(--iw-primary);
+}
+
+.chip.channel {
+  max-width: 300px;
+  cursor: default;
+}
+
+.chip.channel.trouble {
+  border-color: var(--iw-warn);
+}
+
+.chip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: inherit;
+}
+
+.chip-link:hover {
+  color: var(--iw-primary);
+}
+
+.count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--iw-text);
+  background: var(--iw-surface);
+}
+
+.count:hover {
+  color: var(--iw-primary);
+}
+
+.count.unread {
+  color: var(--iw-on-primary);
+  background: var(--iw-primary);
+}
+
+.warn {
+  font-size: calc(11px * var(--iw-fs, 1));
+  color: var(--iw-warn);
+}
+
+.chip.tag {
+  color: var(--iw-dimmed);
+  cursor: default;
+}
+
+:deep(.actions-col) {
+  white-space: nowrap;
 }
 
 .strong {

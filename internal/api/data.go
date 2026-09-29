@@ -17,7 +17,9 @@ import (
 
 // Data API (all JSON, session or bearer required; docs/ARCHITECTURE.md → HTTP API):
 //
-//	GET  /api/projects[?sort=&dir=&q=&cursor=&limit=]  all projects with counts; with limit a keyset chunk
+//	GET  /api/projects[?sort=&dir=&q=&cursor=&limit=&group=1]  all projects with counts; with limit a keyset chunk
+//	     (group=1: one row per project, linked mod pages folded into integrations)
+//	POST /api/projects/{id}/sync         sync the project + its linked mod pages now
 //	GET  /api/items?source=&kind=&project=&state=&label=&q=&unread=1&cursor=|after=|ids=&limit=
 //	GET  /api/items/{id}                 item + body
 //	GET  /api/items/{id}/comments?cursor=&limit=  comments, oldest first, in chunks
@@ -37,6 +39,27 @@ func (s *Server) registerData(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/sync", s.handleSyncStatus)
 	mux.HandleFunc("POST /api/sync", s.handleSyncNow)
+	mux.HandleFunc("POST /api/projects/{id}/sync", s.handleProjectSync)
+}
+
+// handleProjectSync syncs a project and its linked mod pages now, each through
+// its source → 202 {started, missing} (platforms; missing = no connected account).
+func (s *Server) handleProjectSync(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	targets, err := s.opts.Store.GroupTargets(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		errJSON(w, http.StatusNotFound, "no such project")
+		return
+	}
+	if err != nil {
+		s.internalError(w, "project sync", err)
+		return
+	}
+	started, missing := s.opts.Sync.SyncProjects(r.Context(), targets)
+	writeJSON(w, http.StatusAccepted, map[string][]string{"started": started, "missing": missing})
 }
 
 func errJSON(w http.ResponseWriter, status int, msg string) {
@@ -95,7 +118,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rq := store.RepoQuery{Sort: q.Get("sort"), Desc: q.Get("dir") == "desc", Text: q.Get("q"), Cursor: q.Get("cursor"), Limit: int(min(limit, 1000))}
+	rq := store.RepoQuery{Sort: q.Get("sort"), Desc: q.Get("dir") == "desc", Text: q.Get("q"), Cursor: q.Get("cursor"), Limit: int(min(limit, 1000)), Group: q.Get("group") == "1"}
 	if _, ok := store.RepoSorts[rq.Sort]; !ok && rq.Sort != "" {
 		errJSON(w, http.StatusBadRequest, "bad sort")
 		return

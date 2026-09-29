@@ -177,10 +177,19 @@ func (s *Store) CreateProjectJob(ctx context.Context, projectID int64, flow, pro
 	return s.Job(ctx, id)
 }
 
-// TriageIssue is one open issue as the triage agent sees it.
+// ModItemRef numbers a linked mod page's item in a code project's triage:
+// ModItemRef + item id, so it never collides with the repository's issue numbers.
+const ModItemRef = 10_000_000
+
+// triageNumber is an item's triage number in project ?2's triage (?4 = ModItemRef).
+const triageNumber = `CASE WHEN i.project_id = ?2 THEN i.number ELSE ?4 + i.id END`
+
+// TriageIssue is one open issue as the triage agent sees it: the project's own
+// issues and the open reports of its linked mod pages.
 type TriageIssue struct {
 	ItemID    int64
-	Number    int
+	Number    int    // issue number; ModItemRef + item id for a mod page's report
+	Source    string // platform of a linked mod page's report, "" = the project's own issue
 	Title     string
 	Body      string // clipped
 	Author    string
@@ -200,15 +209,16 @@ type TriageInput struct {
 	More        bool // more open issues than the limit
 }
 
-// OpenIssues returns the project's issues that are open now among numbers, by
-// number (ItemID, Number and Title set).
+// OpenIssues returns the project's issues (and linked mod page reports, by
+// triage number) that are open now among numbers, by number (ItemID, Number and Title set).
 func (s *Store) OpenIssues(ctx context.Context, projectID int64, numbers []int) (map[int]TriageIssue, error) {
 	nums, err := json.Marshal(numbers)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, number, title FROM items
-		WHERE project_id = ? AND status = 'open' AND number IN (SELECT value FROM json_each(?))`, projectID, string(nums))
+	rows, err := s.db.QueryContext(ctx, `SELECT id, n, title FROM (SELECT i.id, `+triageNumber+` AS n, i.title, i.status
+		FROM items i WHERE `+scopeItem2+`)
+		WHERE status = 'open' AND n IN (SELECT value FROM json_each(?1))`, string(nums), projectID, nil, ModItemRef)
 	if err != nil {
 		return nil, fmt.Errorf("store: open issues: %w", err)
 	}
@@ -237,9 +247,12 @@ func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRun
 	if err != nil {
 		return in, fmt.Errorf("store: triage input: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.number, i.title, substr(i.body, 1, ?), i.author, i.labels,
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id, `+triageNumber+`, CASE WHEN i.project_id = ?2 THEN '' ELSE s.platform END,
+		i.title, substr(i.body, 1, ?1), i.author, i.labels,
 		(SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.created_at, i.updated_at
-		FROM items i WHERE i.project_id = ? AND i.status = 'open' ORDER BY i.updated_at DESC, i.id DESC LIMIT ?`, bodyRunes, projectID, limit+1)
+		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = p.source_id
+		WHERE `+scopeItem2+` AND (i.project_id = ?2 OR p.active = 1) AND i.status = 'open'
+		ORDER BY i.updated_at DESC, i.id DESC LIMIT ?3`, bodyRunes, projectID, limit+1, ModItemRef)
 	if err != nil {
 		return in, fmt.Errorf("store: triage issues: %w", err)
 	}
@@ -249,7 +262,7 @@ func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRun
 			t      TriageIssue
 			labels string
 		)
-		if err := rows.Scan(&t.ItemID, &t.Number, &t.Title, &t.Body, &t.Author, &labels, &t.Comments, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ItemID, &t.Number, &t.Source, &t.Title, &t.Body, &t.Author, &labels, &t.Comments, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return in, fmt.Errorf("store: scan triage issue: %w", err)
 		}
 		if err := json.Unmarshal([]byte(labels), &t.Labels); err != nil || t.Labels == nil {

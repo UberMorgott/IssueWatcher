@@ -191,18 +191,59 @@ func (g *Group) Reply(ctx context.Context, itemID int64, body string) (store.Com
 	if err != nil {
 		return store.Comment{}, err
 	}
+	if s := syncerFor(syncers, ref.Platform, ref.SourceID); s != nil {
+		return s.reply(ctx, ref, body)
+	}
+	return store.Comment{}, ErrNoSource
+}
+
+// syncerFor is the syncer of source sourceID, else the only syncer of platform, else nil.
+func syncerFor(syncers []*Syncer, platform string, sourceID int64) *Syncer {
 	var same []*Syncer
 	for _, s := range syncers {
-		if s.opts.Provider.Platform() != ref.Platform {
+		if s.opts.Provider.Platform() != platform {
 			continue
 		}
-		if s.sourceID() == ref.SourceID {
-			return s.reply(ctx, ref, body)
+		if s.sourceID() == sourceID {
+			return s
 		}
 		same = append(same, s)
 	}
 	if len(same) == 1 {
-		return same[0].reply(ctx, ref, body)
+		return same[0]
 	}
-	return store.Comment{}, ErrNoSource
+	return nil
+}
+
+// SyncProjects syncs targets now (a project and its linked mod pages), each
+// through the syncer of its source, in the background: ctx's values without
+// its cancel (the syncs outlive the request), stopped when the group stops. It
+// returns the platforms started and those no connected account serves.
+func (g *Group) SyncProjects(ctx context.Context, targets []store.SyncTarget) (started, missing []string) {
+	run, stop := context.WithCancel(context.WithoutCancel(ctx))
+	unhook := func() bool { return false }
+	g.mu.Lock()
+	if g.ctx != nil {
+		unhook = context.AfterFunc(g.ctx, stop) //nolint:contextcheck // only a stop signal: the group's run context ends the syncs; run inherits ctx
+
+	}
+	g.mu.Unlock()
+	syncers := g.Syncers()
+	started, missing = []string{}, []string{}
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		s := syncerFor(syncers, t.Platform, t.SourceID)
+		if s == nil {
+			missing = append(missing, t.Platform)
+			continue
+		}
+		started = append(started, t.Platform)
+		wg.Go(func() {
+			if err := s.SyncProject(run, t.Project); err != nil {
+				s.opts.Log.Warn("sync project", "project", t.Name, "err", err)
+			}
+		})
+	}
+	go func() { wg.Wait(); unhook(); stop() }()
+	return started, missing
 }

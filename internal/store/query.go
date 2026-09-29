@@ -30,6 +30,9 @@ type Repo struct {
 	// Suggest are code projects an unlinked mod page may belong to (name match,
 	// not certain enough to link automatically): one click links it.
 	Suggest []int64 `json:"suggest,omitempty"`
+	// Integrations (grouped list only): the row's own project first, then its
+	// linked mod pages, each with its own counts.
+	Integrations []Integration `json:"integrations,omitempty"`
 }
 
 // Repos lists active projects with counts, by name.
@@ -83,6 +86,9 @@ type RepoQuery struct {
 	Text   string // name substring
 	Cursor string
 	Limit  int
+	// Group: one row per project (a code project with its linked mod pages
+	// folded in: summed counts, Integrations); linked mod pages get no own row.
+	Group bool
 }
 
 // RepoChunk is one slice of the project list.
@@ -104,19 +110,23 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	if q.Desc {
 		cmp, dir = "<", "DESC"
 	}
-	inner := `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id AS key, p.local_path, p.synced_at, ` + linkColsAs + `,
+	with, inner := "", `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id AS key, p.local_path, p.synced_at, `+linkColsAs+`,
 		count(i.id) FILTER (WHERE i.status = 'open') AS open,
 		count(i.id) FILTER (WHERE i.status = 'closed') AS closed,
 		count(i.id) FILTER (WHERE i.unread = 1) AS unread
 		FROM projects p JOIN sources s ON s.id = p.source_id
 		LEFT JOIN items i ON i.project_id = p.id
 		WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\') GROUP BY p.id`
+	count := `SELECT count(*) FROM projects p WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\')`
+	if q.Group {
+		with, inner, count = groupMembersWith, groupedRepos, groupedCount
+	}
 	chunk := RepoChunk{Items: []Repo{}}
 	like := ""
 	if t := strings.TrimSpace(q.Text); t != "" {
 		like = "%" + likeEscape(t) + "%"
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM projects p WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\')`, like).Scan(&chunk.Total); err != nil {
+	if err := s.db.QueryRowContext(ctx, with+count, like).Scan(&chunk.Total); err != nil {
 		return chunk, fmt.Errorf("store: count repos: %w", err)
 	}
 	where, args := "", []any{like}
@@ -128,7 +138,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		where = " WHERE (" + key + " " + cmp + " ?2 OR (" + key + " = ?2 AND r.id " + cmp + " ?3))"
 		args = append(args, k.Value, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
+	rows, err := s.db.QueryContext(ctx, with+"SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
 		" FROM ("+inner+") r"+where+" ORDER BY "+key+" "+dir+", r.id "+dir+" LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: repos: %w", err)
@@ -155,6 +165,12 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	if err := rows.Err(); err != nil {
 		return chunk, fmt.Errorf("store: repos: %w", err)
 	}
+	_ = rows.Close() // before the next query (the loop may stop early)
+	if q.Group {
+		if err := s.fillIntegrations(ctx, chunk.Items); err != nil {
+			return chunk, err
+		}
+	}
 	return chunk, nil
 }
 
@@ -163,7 +179,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 type IssueFilter struct {
 	Platform string // source platform (github, ...), "" = all
 	Kind     string // item kind (issue | comment | bug), "" = all
-	RepoID   int64  // 0 = all
+	RepoID   int64  // 0 = all; a code project includes its linked mod pages' items
 	State    string // open | closed | "" (all)
 	Label    string // exact label name
 	Text     string // substring of title/body, or #number
@@ -233,7 +249,7 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	where := []string{"p.active = 1"}
 	var args []any
 	if f.RepoID != 0 {
-		where, args = append(where, "i.project_id = ?"), append(args, f.RepoID)
+		where, args = append(where, scopeItemQ), append(args, f.RepoID, f.RepoID)
 	}
 	if f.Platform != "" {
 		where, args = append(where, "i.source_id IN (SELECT id FROM sources WHERE platform = ?)"), append(args, f.Platform)
@@ -452,7 +468,7 @@ func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Tim
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE i.status = 'open'),
 		count(*) FILTER (WHERE i.status = 'closed')
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR i.project_id = ?1)`, repoID).Scan(&st.Open, &st.Closed)
+		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`)`, repoID).Scan(&st.Open, &st.Closed)
 	if err != nil {
 		return st, fmt.Errorf("store: stats totals: %w", err)
 	}
@@ -472,11 +488,11 @@ func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Tim
 	rows, err := s.db.QueryContext(ctx, `SELECT wk, sum(opened), sum(closed) FROM (
 		SELECT date(i.created_at, '-6 days', 'weekday 1') AS wk, 1 AS opened, 0 AS closed
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR i.project_id = ?1) AND i.created_at >= ?2
+		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`) AND i.created_at >= ?2
 		UNION ALL
 		SELECT date(i.closed_at, '-6 days', 'weekday 1'), 0, 1
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR i.project_id = ?1) AND i.closed_at >= ?2
+		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`) AND i.closed_at >= ?2
 	) GROUP BY wk`, repoID, first.Format(timeFormat))
 	if err != nil {
 		return st, fmt.Errorf("store: stats weekly: %w", err)

@@ -100,7 +100,11 @@ func issuesText(t *store.TriageInput, now time.Time) string {
 		if len([]rune(body)) >= triageBodyRunes {
 			body = clipRunes(body, triageBodyRunes-1) // ends with …
 		}
-		block := "#" + strconv.Itoa(is.Number) + " " + oneLineTitle(is.Title) + "\n  labels: " + labels + "; age: " + age +
+		src := ""
+		if is.Source != "" {
+			src = "source: " + is.Source + " mod page report (not a repository issue); "
+		}
+		block := "#" + strconv.Itoa(is.Number) + " " + oneLineTitle(is.Title) + "\n  " + src + "labels: " + labels + "; age: " + age +
 			"; comments: " + strconv.Itoa(is.Comments) + "; author: " + is.Author + "\n  " + body + "\n"
 		if b.Len()+len(block) > maxTriageIssuesBytes {
 			b.WriteString("… (more issues omitted: list them with the MCP tools if available)\n")

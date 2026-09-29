@@ -352,6 +352,54 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 	return events, errors.Join(errs...)
 }
 
+// SyncProject re-reads one project of this syncer's source now (the project
+// list's row sync): items since its cursor, stored and reported like a
+// reconcile's (listeners, OnUpdate), one cycle at a time.
+func (s *Syncer) SyncProject(ctx context.Context, pr store.Project) error {
+	s.cycle.Lock()
+	defer s.cycle.Unlock()
+	s.update(func(st *Status) { st.Running = true })
+	c0 := s.opts.Store.Changes()
+	events, err := s.syncProject(ctx, pr)
+	s.update(func(st *Status) {
+		st.Running = false
+		st.Relogin = errors.Is(err, provider.ErrRelogin)
+		if err != nil {
+			st.LastError = err.Error()
+		}
+	})
+	unread, uerr := s.opts.Store.UnreadCount(ctx)
+	if uerr == nil {
+		s.opts.OnUpdate(events, unread)
+	}
+	p := Progress{State: ProgressDone, Repo: pr.Name, Unread: unread, Changed: int(s.opts.Store.Changes() - c0)}
+	if err := errors.Join(err, uerr); err != nil {
+		p.State, p.Error = ProgressError, err.Error()
+	}
+	s.progress(p)
+	return errors.Join(err, uerr)
+}
+
+func (s *Syncer) syncProject(ctx context.Context, pr store.Project) ([]store.Event, error) {
+	s.mu.Lock()
+	src, login := s.source, s.login
+	s.mu.Unlock()
+	if src == 0 { // no reconcile yet: learn the account first
+		var err error
+		if login, err = s.opts.Provider.Account(ctx); err != nil {
+			return nil, err
+		}
+		if src, err = s.opts.Store.UpsertSource(ctx, s.opts.Provider.Platform(), login); err != nil {
+			return nil, err
+		}
+	}
+	items, err := s.opts.Provider.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", pr.ExternalID, err)
+	}
+	return s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
+}
+
 // refreshTargets reloads the change-check targets after a reconcile: active
 // projects with their cursor, activity and persisted poll state. A project's
 // next check keeps its slot when it already had one.
