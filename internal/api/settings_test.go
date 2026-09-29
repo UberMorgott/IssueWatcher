@@ -153,12 +153,43 @@ func TestFoldersMapAndDiscover(t *testing.T) {
 		row.Status != folders.StatusOK || row.LocalPath != clone {
 		t.Fatalf("map: %d %+v", code, row)
 	}
+	// A folder that is not a clone of this project is refused; the mapping stays.
+	notClone, _ := json.Marshal(map[string]string{"path": root})
+	var refused struct{ Error, Code string }
+	if code := e.callAny(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", string(notClone), &refused); code != http.StatusUnprocessableEntity ||
+		refused.Code != string(folders.StatusNotGit) {
+		t.Fatalf("not a clone: %d %+v", code, refused)
+	}
+	if e.call(t, http.MethodGet, "/api/folders", "", &rows); rows[0].LocalPath != clone {
+		t.Fatalf("refused path saved: %+v", rows)
+	}
+	if code := e.call(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", `{"path":""}`, &row); code != http.StatusOK || row.Status != folders.StatusNone || row.LocalPath != "" {
+		t.Fatalf("unmap: %d %+v", code, row)
+	}
 	if code := e.call(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", `{"path":"relative\\dir"}`, nil); code != http.StatusBadRequest {
 		t.Fatalf("relative path: %d", code)
 	}
 	if code := e.call(t, http.MethodPut, "/api/projects/99999/path", `{"path":""}`, nil); code != http.StatusNotFound {
 		t.Fatalf("unknown project: %d", code)
 	}
+}
+
+// callAny is call that decodes the body whatever the status (error answers too).
+func (e *env) callAny(t *testing.T, method, path, body string, out any) int {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, e.s.BaseURL()+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := e.browser.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		t.Fatalf("%s %s: decode: %v", method, path, err)
+	}
+	return resp.StatusCode
 }
 
 func jsonInt(n int64) string {

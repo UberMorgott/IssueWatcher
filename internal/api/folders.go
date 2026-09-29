@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +17,8 @@ import (
 // Projects & folders (Settings):
 //
 //	GET  /api/folders                   every project with its mapped folder and its status
-//	PUT  /api/projects/{id}/path {path} map a folder ("" = unmap)
+//	PUT  /api/projects/{id}/path {path} map a folder ("" = unmap); a folder that is not a clone of
+//	                                    the project → 422 {error, code: missing|notGit|mismatch}, nothing saved
 //	POST /api/folders/discover          scan settings.projects.roots for matching clones (suggestions only)
 
 // FolderRow is one project in GET /api/folders.
@@ -71,7 +73,23 @@ func (s *Server) handleSetPath(w http.ResponseWriter, r *http.Request) {
 		}
 		p = filepath.Clean(p)
 	}
-	err := s.opts.Store.SetLocalPath(r.Context(), id, p)
+	repos, err := s.opts.Store.Repos(r.Context())
+	if err != nil {
+		s.internalError(w, "list folders", err)
+		return
+	}
+	i := slices.IndexFunc(repos, func(rp store.Repo) bool { return rp.ID == id })
+	if i < 0 {
+		errJSON(w, http.StatusNotFound, "not found")
+		return
+	}
+	rp := repos[i]
+	// Only a git clone of this very project is mapped (a fix job runs there).
+	if st := folders.Check(p, rp.URL); p != "" && st != folders.StatusOK {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "folder not usable for " + rp.Name + ": " + string(st), "code": string(st)})
+		return
+	}
+	err = s.opts.Store.SetLocalPath(r.Context(), id, p)
 	if errors.Is(err, store.ErrNotFound) {
 		errJSON(w, http.StatusNotFound, "not found")
 		return
@@ -81,21 +99,10 @@ func (s *Server) handleSetPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Publish(EventDataChanged, DataChange{Reason: "folder"})
-	repos, err := s.opts.Store.Repos(r.Context())
-	if err != nil {
-		s.internalError(w, "list folders", err)
-		return
-	}
-	for _, rp := range repos {
-		if rp.ID == id {
-			writeJSON(w, http.StatusOK, FolderRow{
-				ProjectID: rp.ID, Name: rp.Name, URL: rp.URL, Platform: rp.Platform, LocalPath: rp.LocalPath,
-				Status: folders.Check(rp.LocalPath, rp.URL),
-			})
-			return
-		}
-	}
-	errJSON(w, http.StatusNotFound, "not found")
+	writeJSON(w, http.StatusOK, FolderRow{
+		ProjectID: rp.ID, Name: rp.Name, URL: rp.URL, Platform: rp.Platform, LocalPath: p,
+		Status: folders.Check(p, rp.URL),
+	})
 }
 
 // handleDiscover suggests clones for the projects without a working mapping.
