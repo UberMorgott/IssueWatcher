@@ -85,7 +85,7 @@ func TestUpdateE2E(t *testing.T) {
 	e.base = srv.URL
 	t.Cleanup(e.killAll)
 
-	run :=func(name string, f func(*testing.T)) {
+	run := func(name string, f func(*testing.T)) {
 		t.Run(name, func(t *testing.T) { e.t = t; f(t) })
 	}
 	run("success", e.success)

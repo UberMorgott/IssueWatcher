@@ -164,7 +164,7 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 	t.Setenv("GH_TOKEN", "must-not-reach-the-agent")
 	e.clock = now
 	e.r = New(Options{
-		Now: func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.clock },
+		Now:   func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.clock },
 		Store: e.st, DataDir: e.data, Publisher: github.NewProvider(a), Labels: github.NewProvider(a), Log: slog.New(slog.DiscardHandler),
 		Settings: func() config.Settings { e.mu.Lock(); defer e.mu.Unlock(); return e.cfg },
 		GitURL:   func(string) string { return e.bare },
