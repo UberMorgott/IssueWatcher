@@ -534,7 +534,7 @@ func itemNumber(commentID string) int {
 	if err != nil {
 		return 0
 	}
-	return max(int(n&0x7fffffff), 1) //nolint:gosec // G115: masked to 31 bits
+	return max(int(n&0x7fffffff), 1)
 }
 
 // ItemExternalID is a comment item's key: comment:<publishedfileid>/<commentid>

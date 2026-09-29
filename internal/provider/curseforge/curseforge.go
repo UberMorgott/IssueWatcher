@@ -434,10 +434,8 @@ func (p *Provider) eachReply(ctx context.Context, mod int, root string, fn func(
 				continue
 			}
 			found = true
-			for _, c := range t.Replies {
-				if fn(c) {
-					return nil
-				}
+			if slices.ContainsFunc(t.Replies, fn) {
+				return nil
 			}
 		}
 		if found || len(r.Comments) == 0 || (r.Pages != nil && n >= *r.Pages) {
