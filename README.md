@@ -75,6 +75,17 @@ Nothing is written to the CLIs' config. Settings › Агенты › «MCP Issu
 задачах» (`agents.jobMcp`, default on), per project in «По проектам»
 (`agents.projects["owner/repo"].jobMcp`, unset = inherit).
 
+Two ways to start agents: per issue (issue page, or select issues → «Отправить
+агенту»), or per project — «Запустить проект» on the Projects page
+(`POST /api/projects/{id}/triage`): a read-only triage agent (the responder)
+ranks the project's open issues by criticality (it gets their titles, labels,
+age, comment counts and body starts, plus `mcp --project <id>`: read-only
+`list_items` / `get_item` / `list_item_comments` of that project only), and the
+app queues a fix job for each of the first N picks that have no unfinished fix
+job (`agents.triageTopN`, default 3, per project override; triage prompt and
+per-project criteria in Settings › Агенты). The triage job lists the ranking
+and the fix jobs it queued.
+
 In a shell use `issuewatcher-cli.exe`: the app writes it next to itself on
 every start (a console build of the same exe, refreshed by updates). Shells
 wait for it and `$LASTEXITCODE` / `%ERRORLEVEL%` are set:
