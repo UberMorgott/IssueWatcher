@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
@@ -72,6 +73,45 @@ type promptInput struct {
 	branch string
 	diff   string
 	labels []provider.Label // label flow: the repository's labels
+	triage *store.TriageInput // triage flow: the project's open issues
+	topN   int                // triage flow: picks that get a fix job
+}
+
+// maxTriageIssuesBytes bounds {issues}.
+const maxTriageIssuesBytes = 120 << 10
+
+// issuesText lists the open issues for {issues}, one block per issue, in one
+// untrusted block (titles and bodies come from the tracker).
+func issuesText(t *store.TriageInput, now time.Time) string {
+	if t == nil || len(t.Issues) == 0 {
+		return untrusted("open issues", "(no open issues)")
+	}
+	var b strings.Builder
+	for _, is := range t.Issues {
+		age := "?"
+		if c, err := time.Parse(time.RFC3339, is.CreatedAt); err == nil {
+			age = strconv.Itoa(max(0, int(now.Sub(c).Hours()/24))) + "d"
+		}
+		labels := "-"
+		if len(is.Labels) > 0 {
+			labels = strings.Join(is.Labels, ", ")
+		}
+		body := strings.Join(strings.Fields(is.Body), " ")
+		if len([]rune(body)) >= triageBodyRunes {
+			body = clipRunes(body, triageBodyRunes-1) // ends with …
+		}
+		block := "#" + strconv.Itoa(is.Number) + " " + oneLineTitle(is.Title) + "\n  labels: " + labels + "; age: " + age +
+			"; comments: " + strconv.Itoa(is.Comments) + "; author: " + is.Author + "\n  " + body + "\n"
+		if b.Len()+len(block) > maxTriageIssuesBytes {
+			b.WriteString("… (more issues omitted: list them with the MCP tools if available)\n")
+			break
+		}
+		b.WriteString(block)
+	}
+	if t.More {
+		b.WriteString("… (only the " + strconv.Itoa(len(t.Issues)) + " most recently updated open issues are listed)\n")
+	}
+	return untrusted("open issues", b.String())
 }
 
 // labelsText lists the repository's labels, one per line, for {labels}.
@@ -123,6 +163,8 @@ func render(tmpl string, p promptInput) string {
 		"{branch}", p.branch,
 		"{diff}", untrusted("diff", clipHead(p.diff, maxDiffBytes, "(diff truncated)")),
 		"{labels}", labelsText(p.labels),
+		"{issues}", issuesText(p.triage, time.Now()),
+		"{topN}", strconv.Itoa(p.topN),
 	).Replace(tmpl)
 }
 
@@ -141,6 +183,14 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 		task = render(cfg.Prompts.Label, p)
 		if !strings.Contains(cfg.Prompts.Label, "{labels}") {
 			task += "\n\nLabels that exist in the repository (pick only from this list):\n" + labelsText(p.labels)
+		}
+	case flowTriage:
+		task = render(cfg.Prompts.Triage, p)
+		if !strings.Contains(cfg.Prompts.Triage, "{issues}") {
+			task += "\n\nOpen issues:\n" + render("{issues}", p)
+		}
+		if pa, ok := cfg.Projects[p.in.ProjectName]; ok && strings.TrimSpace(pa.TriagePrompt) != "" {
+			task += "\n\nTriage criteria of this project from the maintainer:\n" + render(pa.TriagePrompt, p)
 		}
 	case flowReview:
 		task = render(cfg.Prompts.Review, p)

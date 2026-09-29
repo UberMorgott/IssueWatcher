@@ -22,7 +22,16 @@ type Agents struct {
 	// every agent run of a job (claude --mcp-config / codex -c mcp_servers); it
 	// is never registered in the CLIs' own config. Per-project override in Projects.
 	JobMCP bool `json:"jobMcp"`
+	// TriageTopN is how many of a project triage's ranked picks get a fix job
+	// (1–20); per-project override in Projects.
+	TriageTopN int `json:"triageTopN"`
 }
+
+// DefaultTriageTopN is the built-in TriageTopN; MaxTriageTopN its upper bound.
+const (
+	DefaultTriageTopN = 3
+	MaxTriageTopN     = 20
+)
 
 // CLI kinds.
 const (
@@ -62,6 +71,7 @@ type AgentPrompts struct {
 	Reply  string `json:"reply"`
 	Review string `json:"review"`
 	Label  string `json:"label"` // label flow: pick labels from the repo's list
+	Triage string `json:"triage"` // project triage: rank the open issues
 }
 
 // Fix job run modes (ProjectAgent.Mode).
@@ -85,6 +95,11 @@ type ProjectAgent struct {
 	NoAegis bool `json:"noAegis"`
 	// JobMCP overrides Agents.JobMCP for this project; nil = inherit.
 	JobMCP *bool `json:"jobMcp,omitempty"`
+	// TriageTopN overrides Agents.TriageTopN for this project; nil = inherit.
+	TriageTopN *int `json:"triageTopN,omitempty"`
+	// TriagePrompt is appended to the triage task for this project (its own
+	// criticality criteria); "" = none.
+	TriagePrompt string `json:"triagePrompt,omitempty"`
 	// Automation overrides the global automation defaults for this project.
 	Automation ProjectAutomation `json:"automation,omitzero"`
 }
@@ -159,6 +174,16 @@ Labels that exist in the repository (pick only from this list, exact names):
 
 The project's source is in the current directory (read-only); check it when the issue's area is unclear.
 Pick the few labels that clearly apply (type, area, priority if obvious); none is a valid answer. Do not invent labels. Return the chosen names and one short sentence why.`
+	// DefaultTriagePrompt: {issues} lists the project's open issues, {topN} is
+	// how many picks get a fix job.
+	DefaultTriagePrompt = `Triage the open issues of {repo}: rank the ones that most need a fix now.
+
+Open issues (number, title, labels, age, comment count, start of the body):
+{issues}
+
+The project's source is in the current directory (read-only); check it when the impact of an issue is unclear.
+Criticality: crashes, data loss, security problems and regressions that block many users come first; then broken core features; then smaller bugs. Feature requests, questions and duplicates rank low or not at all.
+Return up to 10 picks, most critical first (the first {topN} that are free get a fix job): the issue number, a severity (critical | high | medium | low) and one short sentence why, in the language of the issue. Pick only numbers from the list; an empty list is a valid answer.`
 )
 
 func defaultAgents() Agents {
@@ -171,12 +196,21 @@ func defaultAgents() Agents {
 		Roles: AgentRoles{Coder: "claude", Responder: "codex"},
 		Prompts: AgentPrompts{
 			System: DefaultSystemPrompt, Fix: DefaultFixPrompt, FixDir: DefaultFixDirectPrompt, Reply: DefaultReplyPrompt, Review: DefaultReviewPrompt,
-			Label: DefaultLabelPrompt,
+			Label: DefaultLabelPrompt, Triage: DefaultTriagePrompt,
 		},
 		Projects:   map[string]ProjectAgent{},
 		Automation: defaultAutomation(),
 		JobMCP:     true,
+		TriageTopN: DefaultTriageTopN,
 	}
+}
+
+// TriageTopNFor is how many triage picks of project (owner/repo) get a fix job.
+func (a Agents) TriageTopNFor(project string) int {
+	if o := a.Projects[project].TriageTopN; o != nil {
+		return *o
+	}
+	return a.TriageTopN
 }
 
 // JobMCPFor reports whether project's (owner/repo) agent runs get the scoped MCP server.
@@ -196,7 +230,7 @@ func blankDefaultPrompts(known map[string]any) {
 		return
 	}
 	d := defaultAgents().Prompts
-	for k, def := range map[string]string{"system": d.System, "fix": d.Fix, "fixDirect": d.FixDir, "reply": d.Reply, "review": d.Review, "label": d.Label} {
+	for k, def := range map[string]string{"system": d.System, "fix": d.Fix, "fixDirect": d.FixDir, "reply": d.Reply, "review": d.Review, "label": d.Label, "triage": d.Triage} {
 		if pr[k] == def {
 			pr[k] = ""
 		}
@@ -248,11 +282,14 @@ func (a *Agents) normalize() {
 	d := defaultAgents().Prompts
 	for _, f := range []struct{ v, def *string }{
 		{&a.Prompts.System, &d.System}, {&a.Prompts.Fix, &d.Fix}, {&a.Prompts.FixDir, &d.FixDir}, {&a.Prompts.Reply, &d.Reply}, {&a.Prompts.Review, &d.Review},
-		{&a.Prompts.Label, &d.Label},
+		{&a.Prompts.Label, &d.Label}, {&a.Prompts.Triage, &d.Triage},
 	} {
 		if *f.v == "" { // an emptied template falls back to the default
 			*f.v = *f.def
 		}
+	}
+	if a.TriageTopN == 0 {
+		a.TriageTopN = DefaultTriageTopN
 	}
 	a.Automation.normalize()
 }
@@ -264,6 +301,9 @@ const maxPromptBytes = 32 << 10
 func (a Agents) validate() error {
 	if a.MaxParallel < 1 || a.MaxParallel > 8 {
 		return outOfRange("agents.maxParallel", 1, 8)
+	}
+	if a.TriageTopN < 1 || a.TriageTopN > MaxTriageTopN {
+		return outOfRange("agents.triageTopN", 1, MaxTriageTopN)
 	}
 	if len(a.Profiles) > 32 {
 		return invalid("agents.profiles", "tooMany", map[string]any{"max": 32}, "at most 32 profiles")
@@ -296,7 +336,7 @@ func (a Agents) validate() error {
 			return invalid("agents.roles."+name, "profile", map[string]any{"id": id}, "no profile %q", id)
 		}
 	}
-	for name, v := range map[string]string{"system": a.Prompts.System, "fix": a.Prompts.Fix, "fixDirect": a.Prompts.FixDir, "reply": a.Prompts.Reply, "review": a.Prompts.Review, "label": a.Prompts.Label} {
+	for name, v := range map[string]string{"system": a.Prompts.System, "fix": a.Prompts.Fix, "fixDirect": a.Prompts.FixDir, "reply": a.Prompts.Reply, "review": a.Prompts.Review, "label": a.Prompts.Label, "triage": a.Prompts.Triage} {
 		if len(v) > maxPromptBytes {
 			return invalid("agents.prompts."+name, "tooLong", map[string]any{"max": maxPromptBytes}, "at most %d bytes", maxPromptBytes)
 		}
@@ -305,8 +345,11 @@ func (a Agents) validate() error {
 		if p.Mode != ModeDirect && p.Mode != ModeWorktreePR {
 			return notOneOf("agents.projects."+name+".mode", ModeDirect, ModeWorktreePR)
 		}
-		if len(p.Prompt) > maxPromptBytes || len(p.Verify) > 4096 {
+		if len(p.Prompt) > maxPromptBytes || len(p.TriagePrompt) > maxPromptBytes || len(p.Verify) > 4096 {
 			return invalid("agents.projects."+name, "tooLong", map[string]any{"max": maxPromptBytes}, "too long")
+		}
+		if n := p.TriageTopN; n != nil && (*n < 1 || *n > MaxTriageTopN) {
+			return outOfRange("agents.projects."+name+".triageTopN", 1, MaxTriageTopN)
 		}
 		if err := p.Automation.validate(name); err != nil {
 			return err

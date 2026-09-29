@@ -272,6 +272,8 @@ type Result struct {
 	Labels        []string `json:"labels,omitempty"`
 	DroppedLabels []string `json:"droppedLabels,omitempty"`
 	AppliedLabels []string `json:"appliedLabels,omitempty"`
+	// Triage: the checked ranking and the fix jobs it queued.
+	Triage *TriageResult `json:"triage,omitempty"`
 }
 
 // PRResult is the published draft PR.
@@ -331,15 +333,20 @@ func (r *Runner) run(ctx context.Context, j store.Job) {
 		state, err = r.runReply(ctx, &j, &res, log)
 	case flowLabel:
 		state, err = r.runLabel(ctx, &j, &res, log)
+	case flowTriage:
+		state, err = r.runTriage(ctx, &j, &res, log)
 	default:
 		err = fmt.Errorf("unknown flow %q", j.Flow)
 	}
 	if cause := context.Cause(ctx); err != nil && cause != nil {
 		err = cause // a killed git/agent step reports its own error; the reason is the cancel
 	}
-	if err != nil {
+	switch {
+	case err != nil:
 		log.add(StepError, err.Error())
-	} else {
+	case state == store.JobDone:
+		log.addf(StepInfo, "done")
+	default:
 		log.addf(StepInfo, "ready for review")
 	}
 	log.close()

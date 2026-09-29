@@ -12,7 +12,9 @@
 //	hang  start a child that sleeps, write its pid to FAKECLI_RECORD.pid, sleep
 //	sleep sleep (the child of hang)
 //
-// The label flow answers the comma-separated FAKECLI_LABELS as its picks.
+// The label flow answers the comma-separated FAKECLI_LABELS as its picks. The
+// triage flow answers FAKECLI_PICKS ("number:severity,..."), or else every
+// "#N " line of its prompt in order, severity high.
 // FAKECLI_RECORD (a file) receives {args, stdin, ghToken, mcpConfig} for assertions.
 package main
 
@@ -58,6 +60,8 @@ func main() {
 		schema = string(b)
 	}
 	switch {
+	case strings.Contains(schema, `"picks"`):
+		flow = "triage"
 	case strings.Contains(schema, `"labels"`):
 		flow = "label"
 	case strings.Contains(schema, `"reply"`):
@@ -115,6 +119,8 @@ func main() {
 			picks = strings.Split(v, ",")
 		}
 		result = map[string]any{"labels": picks, "summary": "picked from the list"}
+	case "triage":
+		result = map[string]any{"picks": triagePicks(string(stdin)), "summary": "ranked the open issues"}
 	case "fix-direct":
 		result = directFix(mode, args, string(stdin))
 	default:
@@ -174,4 +180,22 @@ func directFix(mode string, args []string, stdin string) map[string]any {
 	git("commit", "-q", "-m", msg)
 	sha := git("rev-parse", "HEAD")
 	return map[string]any{"status": "fixed", "summary": "wrote fixed.txt", "commits": []string{sha}, "verify": "none", "notes": ""}
+}
+
+// triagePicks answers FAKECLI_PICKS, or every "#N " line of the prompt.
+func triagePicks(prompt string) []map[string]any {
+	picks := []map[string]any{}
+	if v := os.Getenv("FAKECLI_PICKS"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			num, sev, _ := strings.Cut(p, ":")
+			n, _ := strconv.Atoi(num)
+			picks = append(picks, map[string]any{"number": n, "severity": sev, "reason": "fake reason " + num})
+		}
+		return picks
+	}
+	for _, m := range regexp.MustCompile(`(?m)^#(\d+) `).FindAllStringSubmatch(prompt, -1) {
+		n, _ := strconv.Atoi(m[1])
+		picks = append(picks, map[string]any{"number": n, "severity": "high", "reason": "listed as #" + m[1]})
+	}
+	return picks
 }

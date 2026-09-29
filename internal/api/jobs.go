@@ -23,6 +23,7 @@ import (
 //	POST /api/jobs/{id}/reply {body}     post the (edited) reply draft
 //	POST /api/jobs/{id}/labels {labels[]} add labels to the label job's issue (checked, add only) → done
 //	GET  /api/projects/{id}/labels       [{name, color, description}] the project's labels
+//	POST /api/projects/{id}/triage {profileId?}  queue the project triage → 201 job (409 {error, job} when one is unfinished)
 //	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
 //	GET  /api/automation/log?cursor=&limit=  rule decisions, newest first {items, nextCursor, more}
 //
@@ -51,6 +52,7 @@ func (s *Server) registerJobs(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/jobs/{id}/reply", s.handleJobReply)
 	mux.HandleFunc("POST /api/jobs/{id}/labels", s.handleJobLabels)
 	mux.HandleFunc("GET /api/projects/{id}/labels", s.handleProjectLabels)
+	mux.HandleFunc("POST /api/projects/{id}/triage", s.handleProjectTriage)
 	for action, f := range map[string]func(context.Context, int64) (store.Job, error){
 		"cancel": s.opts.Runner.Cancel, "retry": s.opts.Runner.Retry, "dismiss": s.opts.Runner.Dismiss, "pr": s.opts.Runner.CreatePR,
 		"push": s.opts.Runner.Push,
@@ -252,6 +254,33 @@ func (s *Server) handleJobLabels(w http.ResponseWriter, r *http.Request) {
 	}
 	s.dataChanged("labels", j.ItemID)
 	writeJSON(w, http.StatusOK, j)
+}
+
+// handleProjectTriage queues the project's triage job; an unfinished one →
+// 409 {error, job}.
+func (s *Server) handleProjectTriage(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		ProfileID string `json:"profileId"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+			errJSON(w, http.StatusBadRequest, "bad json")
+			return
+		}
+	}
+	j, err := s.opts.Runner.Triage(r.Context(), id, req.ProfileID)
+	if errors.Is(err, store.ErrJobExists) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "job": j})
+		return
+	}
+	if s.jobError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, j)
 }
 
 func (s *Server) handleProjectLabels(w http.ResponseWriter, r *http.Request) {

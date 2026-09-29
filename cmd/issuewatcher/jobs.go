@@ -34,7 +34,7 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 				return
 			}
 			s.Publish(api.EventJobChanged, j)
-			if j.Phase == "" || j.Phase == "prepare" { // state changes only: issue rows show the job badge
+			if j.ItemID != 0 && (j.Phase == "" || j.Phase == "prepare") { // state changes only: issue rows show the job badge (a triage has no issue)
 				s.Publish(api.EventDataChanged, api.DataChange{Reason: "job", ItemID: j.ItemID})
 			}
 		},
@@ -44,7 +44,11 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 			}
 		},
 		OnFinished: func(j store.Job) {
-			ok := j.State == store.JobNeedsReview || j.State == store.JobDone // done: a rule label job applied its labels
+			if j.ItemID == 0 { // a project triage: its fix jobs notify when they finish; the dashboard shows the ranking
+				log.Info("agent job finished", "job", j.ID, "flow", j.Flow, "state", j.State)
+				return
+			}
+			ok :=j.State == store.JobNeedsReview || j.State == store.JobDone // done: a rule label job applied its labels
 			var res runner.Result
 			_ = json.Unmarshal(j.Result, &res)
 			text := j.Error

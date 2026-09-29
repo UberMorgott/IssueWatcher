@@ -66,11 +66,12 @@ type Job struct {
 	LocalPath string `json:"localPath"`
 }
 
-const jobColumns = `j.id, j.item_id, j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
+const jobColumns = `j.id, coalesce(j.item_id, 0), j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
-	p.name, i.number, i.title, i.url, p.local_path`
+	p.name, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''), p.local_path`
 
-const jobFrom = ` FROM jobs j JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id`
+// A project job (triage) has no item (item_id NULL): its item fields read as zero.
+const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id`
 
 func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	var (
@@ -119,6 +120,97 @@ func (s *Store) CreateJob(ctx context.Context, itemID int64, flow, profileID, or
 		return Job{}, fmt.Errorf("store: create job: %w", err)
 	}
 	return s.Job(ctx, id)
+}
+
+// FlowTriage is the project job that ranks a project's open issues (no item).
+const FlowTriage = "triage"
+
+// CreateProjectJob queues a project job (flow triage, no item) for project
+// projectID. An unfinished triage of that project → ErrJobExists (with it).
+func (s *Store) CreateProjectJob(ctx context.Context, projectID int64, flow, profileID, origin, ruleID string) (Job, error) {
+	if origin == "" {
+		origin = OriginManual
+	}
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, profile_id, origin, rule_id)
+		SELECT NULL, id, ?, ?, ?, ? FROM projects WHERE id = ?
+		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, projectID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
+			` WHERE j.project_id = ? AND j.flow = ? AND j.item_id IS NULL AND j.state IN ('queued', 'running', 'needs_review')`, projectID, flow))
+		if errors.Is(err, sql.ErrNoRows) {
+			return Job{}, ErrNotFound // no such project
+		}
+		if err != nil {
+			return Job{}, fmt.Errorf("store: active project job: %w", err)
+		}
+		return existing, ErrJobExists
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("store: create project job: %w", err)
+	}
+	return s.Job(ctx, id)
+}
+
+// TriageIssue is one open issue as the triage agent sees it.
+type TriageIssue struct {
+	ItemID    int64
+	Number    int
+	Title     string
+	Body      string // clipped
+	Author    string
+	Labels    []string
+	Comments  int
+	CreatedAt string
+	UpdatedAt string
+}
+
+// TriageInput is a project and its open issues (most recently updated first).
+type TriageInput struct {
+	ProjectName string
+	ProjectURL  string
+	LocalPath   string
+	Issues      []TriageIssue
+	More        bool // more open issues than the limit
+}
+
+// TriageInput loads project projectID with up to limit open issues, bodies
+// clipped to bodyRunes characters.
+func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRunes int) (TriageInput, error) {
+	var in TriageInput
+	err := s.db.QueryRowContext(ctx, `SELECT name, url, local_path FROM projects WHERE id = ?`, projectID).
+		Scan(&in.ProjectName, &in.ProjectURL, &in.LocalPath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return in, ErrNotFound
+	}
+	if err != nil {
+		return in, fmt.Errorf("store: triage input: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.number, i.title, substr(i.body, 1, ?), i.author, i.labels,
+		(SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.created_at, i.updated_at
+		FROM items i WHERE i.project_id = ? AND i.status = 'open' ORDER BY i.updated_at DESC, i.id DESC LIMIT ?`, bodyRunes, projectID, limit+1)
+	if err != nil {
+		return in, fmt.Errorf("store: triage issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			t      TriageIssue
+			labels string
+		)
+		if err := rows.Scan(&t.ItemID, &t.Number, &t.Title, &t.Body, &t.Author, &labels, &t.Comments, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return in, fmt.Errorf("store: scan triage issue: %w", err)
+		}
+		if err := json.Unmarshal([]byte(labels), &t.Labels); err != nil || t.Labels == nil {
+			t.Labels = []string{}
+		}
+		if len(in.Issues) == limit {
+			in.More = true
+			break
+		}
+		in.Issues = append(in.Issues, t)
+	}
+	return in, rows.Err()
 }
 
 func (s *Store) activeJob(ctx context.Context, itemID int64, flow string) (Job, error) {

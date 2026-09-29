@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,6 +64,32 @@ func TestJobsAPI(t *testing.T) {
 	if string(j.Result) != `{"errorCode":"no_folder"}` || j.Repo != "octo/app" || j.Number != 1 {
 		t.Fatalf("job %+v %s", j, j.Result)
 	}
+	// Project triage: queued for the project (no item); no CLI on this machine → failed no_cli.
+	pid := strconv.FormatInt(items.Items[0].RepoID, 10)
+	for path, want := range map[string]int{"/api/projects/9999/triage": http.StatusNotFound, "/api/projects/x/triage": http.StatusBadRequest} {
+		if code := e.call(t, http.MethodPost, path, "", nil); code != want {
+			t.Errorf("POST %s: %d, want %d", path, code, want)
+		}
+	}
+	if code := e.call(t, http.MethodPost, "/api/projects/"+pid+"/triage", `{"profileId":"nobody"}`, nil); code != http.StatusBadRequest {
+		t.Errorf("triage with an unknown profile: %d", code)
+	}
+	var tj store.Job
+	if code := e.call(t, http.MethodPost, "/api/projects/"+pid+"/triage", "", &tj); code != http.StatusCreated || tj.Flow != "triage" || tj.ItemID != 0 ||
+		tj.Repo != "octo/app" || tj.ProfileID != "codex" {
+		t.Fatalf("triage %d %+v", code, tj)
+	}
+	for deadline := time.Now().Add(10 * time.Second); tj.State != store.JobFailed; {
+		if time.Now().After(deadline) {
+			t.Fatalf("triage never failed: %+v", tj)
+		}
+		time.Sleep(20 * time.Millisecond)
+		e.call(t, http.MethodGet, "/api/jobs/"+strconv.FormatInt(tj.ID, 10), "", &tj)
+	}
+	if string(tj.Result) == "" || !strings.Contains(string(tj.Result), `"errorCode":"no_cli"`) {
+		t.Fatalf("triage result %s", tj.Result)
+	}
+
 	var chunk store.JobChunk
 	if code := e.call(t, http.MethodGet, "/api/jobs?state=failed&flow=fix", "", &chunk); code != http.StatusOK || len(chunk.Items) != 1 || *chunk.Total != 1 {
 		t.Fatalf("list %d %+v", code, chunk)
@@ -70,7 +97,7 @@ func TestJobsAPI(t *testing.T) {
 	if code := e.call(t, http.MethodGet, "/api/jobs?state=active", "", &chunk); code != http.StatusOK || len(chunk.Items) != 0 {
 		t.Fatalf("active %d %+v", code, chunk)
 	}
-	if code := e.call(t, http.MethodGet, "/api/jobs?origin=manual", "", &chunk); code != http.StatusOK || len(chunk.Items) != 1 ||
+	if code := e.call(t, http.MethodGet, "/api/jobs?origin=manual&flow=fix", "", &chunk); code != http.StatusOK || len(chunk.Items) != 1 ||
 		chunk.Items[0].Origin != store.OriginManual || chunk.Items[0].RuleID != "" {
 		t.Fatalf("origin manual %d %+v", code, chunk)
 	}

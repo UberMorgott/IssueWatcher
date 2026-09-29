@@ -22,8 +22,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 7 {
-		t.Fatalf("user_version = %d, want 7", version)
+	if version != 8 {
+		t.Fatalf("user_version = %d, want 8", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
@@ -110,6 +110,91 @@ func TestMigration006FreshJobs(t *testing.T) {
 	chunk, err := s.Jobs(ctx, JobFilter{Origin: OriginRule})
 	if err != nil || len(chunk.Items) != 1 || chunk.Items[0].ID != j.ID {
 		t.Fatalf("origin filter: %+v %v", chunk, err)
+	}
+}
+
+// Migration 008 (triage) starts jobs fresh again; ids continue after the old
+// sequence even when no job row is left. A triage job has no item, one per
+// project may be unfinished, and only triage may lack an item.
+func TestMigration008TriageJobs(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateTo(ctx, db, 7); err != nil {
+		t.Fatal(err)
+	}
+	s := New(db)
+	src, err := s.UpsertSource(ctx, "github", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := s.SyncProjects(ctx, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}, {ExternalID: "o/b", Name: "o/b", URL: "u2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := projects[0].ID
+	if _, err := s.ApplyItems(ctx, src, pid, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (id, item_id, project_id, flow) SELECT 20, id, project_id, 'fix' FROM items WHERE external_id = 'a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM jobs`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	s = New(db)
+	tj, err := s.CreateProjectJob(ctx, pid, FlowTriage, "codex", "", "")
+	if err != nil || tj.ID != 21 || tj.ItemID != 0 || tj.ProjectID != pid || tj.Repo != "o/app" || tj.Number != 0 || tj.Origin != OriginManual {
+		t.Fatalf("triage job: %+v %v", tj, err)
+	}
+	if dup, err := s.CreateProjectJob(ctx, pid, FlowTriage, "codex", "", ""); !errors.Is(err, ErrJobExists) || dup.ID != tj.ID {
+		t.Fatalf("second triage: %+v %v", dup, err)
+	}
+	if other, err := s.CreateProjectJob(ctx, projects[1].ID, FlowTriage, "codex", "", ""); err != nil || other.ID == tj.ID {
+		t.Fatalf("triage of another project: %+v %v", other, err)
+	}
+	if _, err := s.CreateProjectJob(ctx, 9999, FlowTriage, "codex", "", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("triage of no project: %v", err)
+	}
+	if _, err := s.CreateProjectJob(ctx, pid, "fix", "claude", "", ""); err == nil {
+		t.Fatal("a fix job without an item was accepted")
+	}
+	var a int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM items WHERE external_id = 'a'`).Scan(&a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (item_id, project_id, flow) VALUES (?, ?, 'triage')`, a, pid); err == nil {
+		t.Fatal("a triage job with an item was accepted")
+	}
+	if fj, err := s.CreateJob(ctx, a, "fix", "claude", "", ""); err != nil || fj.Number != 1 {
+		t.Fatalf("fix job: %+v %v", fj, err)
+	}
+	chunk, err := s.Jobs(ctx, JobFilter{ProjectID: pid})
+	if err != nil || len(chunk.Items) != 2 || chunk.Items[1].ID != tj.ID {
+		t.Fatalf("project jobs: %+v %v", chunk, err)
+	}
+	if q, err := s.JobsInState(ctx, JobQueued); err != nil || len(q) != 3 {
+		t.Fatalf("queue: %d %v", len(q), err)
+	}
+
+	in, err := s.TriageInput(ctx, pid, 10, 5)
+	if err != nil || in.ProjectName != "o/app" || len(in.Issues) != 1 || in.Issues[0].Number != 1 || len([]rune(in.Issues[0].Body)) > 5 || in.More {
+		t.Fatalf("triage input: %+v %v", in, err)
+	}
+	if _, err := s.TriageInput(ctx, 9999, 10, 5); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("triage input of no project: %v", err)
 	}
 }
 
