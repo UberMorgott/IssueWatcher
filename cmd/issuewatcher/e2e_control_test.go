@@ -234,7 +234,7 @@ func TestMCPE2E(t *testing.T) {
 		} `json:"tools"`
 	}
 	m.call("tools/list", map[string]any{}, &tools)
-	if len(tools.Tools) != 15 {
+	if len(tools.Tools) != 16 {
 		t.Fatalf("tools/list: %d tools", len(tools.Tools))
 	}
 	r := m.tool("list_items", map[string]any{"limit": 5})
