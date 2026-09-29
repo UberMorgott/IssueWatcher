@@ -164,8 +164,9 @@ func TestDirectPushIgnoresRepointedOrigin(t *testing.T) {
 	}
 }
 
-// Facts win over the claim: a commit without "Fixes #N" is flagged; an issue
-// closed while the job waits for a push ends it (the owner pushed by hand).
+// Facts win over the claim: a commit without "Fixes #N" is flagged. An issue
+// closed while the commit is only local keeps the job under review (Push
+// stays possible); pushing then ends it.
 func TestDirectNoFixesRefAndClose(t *testing.T) {
 	mode(t, "nofixes")
 	e := setup(t, 1, nil)
@@ -174,8 +175,25 @@ func TestDirectNoFixesRefAndClose(t *testing.T) {
 		t.Fatalf("facts: %+v", loc)
 	}
 	e.closeIssue(1)
+	j = e.waitResult(j.ID, func(j store.Job, r Result) bool { return r.Local.Closed })
+	if r := result(t, j); j.State != store.JobNeedsReview || r.Local.Pushed || r.Local.Outcome != OutcomeFixedLocal {
+		t.Fatalf("closed with a local-only commit: %s %+v", j.State, r.Local)
+	}
+	j, err := e.r.Push(t.Context(), j.ID)
+	if err != nil || j.State != store.JobDone || !result(t, j).Local.Pushed {
+		t.Fatalf("push after close: %+v %v", j, err)
+	}
+}
+
+// An issue closed after the owner pushed the commit by hand ends the job.
+func TestDirectPushedByHandThenClosed(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, nil)
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	run(t, e.local, "push", "-q", "origin", "main")
+	e.closeIssue(1)
 	j = e.waitResult(j.ID, func(j store.Job, r Result) bool { return j.State == store.JobDone })
-	if r := result(t, j); r.Local.Outcome != OutcomeClosed || j.FinishedAt == "" {
+	if r := result(t, j); r.Local.Outcome != OutcomeClosed || !r.Local.Pushed || !r.Local.Closed || j.FinishedAt == "" {
 		t.Fatalf("closed: %+v", r.Local)
 	}
 }

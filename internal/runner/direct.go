@@ -350,7 +350,9 @@ func tokenEnv(token string) (env []string, secret string) {
 }
 
 // closeResolved marks direct fixes whose issue is closed now (the pushed
-// "Fixes #N" commit closed it): outcome closed, needs_review → done.
+// "Fixes #N" commit closed it): outcome closed, needs_review → done. A commit
+// that is still only local (the issue was closed another way) keeps the job
+// under review, so it can still be pushed or dismissed.
 func (r *Runner) closeResolved(ctx context.Context) {
 	jobs, err := r.opts.Store.ClosedDirectFixes(ctx)
 	if err != nil {
@@ -362,16 +364,30 @@ func (r *Runner) closeResolved(ctx context.Context) {
 		if res.Local == nil {
 			res.Local = &LocalResult{Commits: []LocalCommit{}}
 		}
-		res.Local.Closed, res.Local.Outcome = true, OutcomeClosed
-		c := store.JobChange{Result: encode(res)}
-		if j.State == store.JobNeedsReview {
-			c.State, c.Finished = new(store.JobDone), true
+		res.Local.Closed = true
+		c := store.JobChange{}
+		localOnly := false
+		if j.State == store.JobNeedsReview && len(res.Local.Commits) > 0 && !res.Local.Pushed {
+			// Pushed by hand? Local remote-tracking refs only: no fetch in the scheduler.
+			out, err := r.git(ctx, res.Local.Dir, nil, "branch", "-r", "--contains", res.Local.HeadSHA)
+			if err == nil && strings.TrimSpace(out) != "" {
+				res.Local.Pushed = true
+			} else {
+				localOnly = true
+			}
 		}
+		if !localOnly {
+			res.Local.Outcome = OutcomeClosed
+			if j.State == store.JobNeedsReview {
+				c.State, c.Finished = new(store.JobDone), true
+			}
+		}
+		c.Result = encode(res)
 		nj, err := r.opts.Store.UpdateJob(ctx, j.ID, []string{j.State}, c)
 		if err != nil {
 			continue // changed meanwhile (pushing, dismissed)
 		}
-		r.opts.Log.Info("runner: issue closed, direct fix done", "job", j.ID)
+		r.opts.Log.Info("runner: issue closed", "job", j.ID, "localOnly", localOnly)
 		r.opts.OnJob(nj)
 	}
 }
