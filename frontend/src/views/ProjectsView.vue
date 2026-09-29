@@ -19,8 +19,17 @@ import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, repoOwner, shortDay, shortRepo } from '../lib/format'
 import { useChunks } from '../lib/chunks'
 import type { DataTableSortEvent } from 'primevue/datatable'
+import { useTriage } from '../lib/jobs'
+import { useSettingsStore } from '../stores/settings'
 
 const app = useAppStore()
+const settings = useSettingsStore()
+const triage = useTriage()
+/** Fix jobs a triage of project queues (per-project override over the global value). */
+function triageTopN(name: string): number {
+  const ag = settings.doc?.settings.agents
+  return ag?.projects[name]?.triageTopN ?? ag?.triageTopN ?? 3
+}
 const { t } = useI18n()
 const filter = ref('')
 const expanded = ref<Record<string, boolean>>({})
@@ -212,6 +221,22 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   <span class="owner">{{ repoOwner(data.name) }}</span>
                 </div>
               </div>
+            </template>
+          </Column>
+          <Column class="actions-col">
+            <template #body="{ data }: { data: Repo }">
+              <Button
+                v-tooltip.top="t('jobs.triage.runTip', { n: triageTopN(data.name) })"
+                :label="t('jobs.triage.run')"
+                icon="pi pi-sort-amount-down"
+                size="small"
+                severity="secondary"
+                text
+                class="nowrap"
+                :loading="triage.busy.value"
+                :disabled="!data.open"
+                @click.stop="triage.run(data.id, data.name)"
+              />
             </template>
           </Column>
           <Column

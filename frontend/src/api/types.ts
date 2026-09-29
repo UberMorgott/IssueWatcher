@@ -235,6 +235,10 @@ export interface ProjectAgent {
   jobMcp?: boolean
   /** Missing or "" = 'direct'. */
   mode?: RunMode | ''
+  /** Overrides Agents.triageTopN; missing = inherit. */
+  triageTopN?: number
+  /** Appended to the triage task for this project (its criticality criteria). */
+  triagePrompt?: string
   /** Overrides of the global automation defaults; a missing field = inherit. */
   automation?: ProjectAutomation
 }
@@ -306,18 +310,21 @@ export interface Agents {
   profiles: AgentProfile[]
   roles: { coder: string; responder: string; verifier: string }
   /** fixDirect: the direct fix flow; "" = built-in default (like fix). */
-  prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string; label: string }
+  prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string; label: string; triage: string }
   /** Keyed by project name (owner/repo). */
   projects: Record<string, ProjectAgent>
   automation: Automation
   /** Each job's agent run gets IssueWatcher's MCP server for its issue (per run only). */
   jobMcp: boolean
+  /** Project triage: how many ranked picks get a fix job (1–20). */
+  triageTopN: number
 }
 
 // --- agent jobs (internal/store Job, internal/runner Result) -----------------
 
 export type JobState = 'queued' | 'running' | 'needs_review' | 'done' | 'failed' | 'cancelled'
-export type JobFlow = 'fix' | 'reply' | 'label'
+/** triage: a project job (itemId 0) that ranks the open issues and queues fix jobs. */
+export type JobFlow = 'fix' | 'reply' | 'label' | 'triage'
 export type JobOrigin = 'manual' | 'rule'
 export type JobPhase = '' | 'prepare' | 'agent' | 'check' | 'verify' | 'review' | 'publish'
 
@@ -430,6 +437,31 @@ export interface JobResult {
   droppedLabels?: string[]
   /** Label flow: names actually added to the issue. */
   appliedLabels?: string[]
+  /** Triage flow: the checked ranking and the fix jobs it queued. */
+  triage?: TriageResult
+}
+
+export type TriageSeverity = 'critical' | 'high' | 'medium' | 'low' | ''
+
+/** One ranked issue of a triage (runner TriagePick). */
+export interface TriagePick {
+  number: number
+  severity: TriageSeverity
+  reason: string
+  itemId?: number
+  title?: string
+  /** queued (jobId = the new fix job) | exists (jobId = the unfinished one) | '' (below top N) | an error. */
+  queue?: string
+  jobId?: number
+}
+
+export interface TriageResult {
+  open: number
+  more?: boolean
+  topN: number
+  picks: TriagePick[]
+  dropped?: TriagePick[]
+  summary?: string
 }
 
 /** GET /api/projects/{id}/labels row (provider.Label). */

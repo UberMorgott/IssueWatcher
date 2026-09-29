@@ -16,7 +16,7 @@ import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
-import { jobOutcome } from './lib/jobs'
+import { jobOutcome, jobRef } from './lib/jobs'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
@@ -104,10 +104,10 @@ function onLive(name: LiveEventName, data: unknown) {
         toast.add({
           group: 'live',
           severity: done.state === 'failed' || outcome === 'failed' ? 'error' : 'info',
-          summary: t('app.agentFinished', { ref: `${done.repo}#${done.number}`, outcome: label }),
+          summary: t('app.agentFinished', { ref: jobRef(done), outcome: label }),
           detail: done.title,
           life: 10000,
-          data: { id: done.itemId, icon: done.state === 'failed' ? 'pi pi-times-circle' : 'pi pi-sparkles' },
+          data: { id: done.itemId, job: done.itemId ? undefined : done.id, icon: done.state === 'failed' ? 'pi pi-times-circle' : 'pi pi-sparkles' },
         } as never)
       }
       return
@@ -131,8 +131,9 @@ function onLive(name: LiveEventName, data: unknown) {
 }
 
 function openFromToast(msg: unknown, close: () => void) {
-  const id = (msg as { data?: { id?: number } }).data?.id
-  if (id) void router.push(`/item/${id}`)
+  const d = (msg as { data?: { id?: number; job?: number } }).data
+  if (d?.job) void router.push(`/jobs/${d.job}`)
+  else if (d?.id) void router.push(`/item/${d.id}`)
   close()
 }
 

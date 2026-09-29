@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 import type { Job, JobFlow, JobState, LocalOutcome, QueuedJob } from '../api/types'
 import { summarise } from '../stores/jobs'
@@ -23,9 +24,15 @@ export const FLOW_ICON: Record<JobFlow, string> = {
   fix: 'pi pi-wrench',
   reply: 'pi pi-comment',
   label: 'pi pi-tags',
+  triage: 'pi pi-sort-amount-down',
 }
 
-export const JOB_FLOWS: JobFlow[] = ['fix', 'reply', 'label']
+export const JOB_FLOWS: JobFlow[] = ['fix', 'reply', 'label', 'triage']
+
+/** owner/repo#N of an issue job; owner/repo of a project job (triage, no item). */
+export function jobRef(j: Pick<Job, 'repo' | 'number' | 'itemId'>): string {
+  return j.itemId ? `${j.repo}#${j.number}` : j.repo
+}
 
 export function isActive(s: JobState): boolean {
   return ACTIVE_STATES.includes(s)
@@ -163,4 +170,32 @@ export function useDispatchToast() {
       data: { links },
     } as never)
   }
+}
+
+/**
+ * «Разобрать проект»: POST /api/projects/{id}/triage, then open the triage job
+ * (the unfinished one when the project already has it).
+ */
+export function useTriage() {
+  const toast = useToast()
+  const router = useRouter()
+  const { t } = useI18n()
+  const busy = ref(false)
+  async function run(projectId: number, repo: string) {
+    busy.value = true
+    const r = await api.triage(projectId)
+    busy.value = false
+    if (r.ok) {
+      toast.add({ severity: 'success', summary: t('jobs.triage.queued'), detail: repo, life: 5000 })
+      void router.push(`/jobs/${r.data.id}`)
+      return
+    }
+    if (r.job) {
+      toast.add({ severity: 'info', summary: t('jobs.triage.exists'), detail: repo, life: 5000 })
+      void router.push(`/jobs/${r.job.id}`)
+      return
+    }
+    toast.add({ severity: 'error', summary: t('jobs.triage.failed'), detail: r.error, life: 8000 })
+  }
+  return { run, busy }
 }

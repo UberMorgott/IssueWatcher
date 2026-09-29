@@ -19,7 +19,7 @@ import LabelTag from '../components/LabelTag.vue'
 import { api } from '../api/client'
 import type { AgentResult, Job, JobAttempt, RepoLabel } from '../api/types'
 import { absTime, elapsed, num, relTime, usd } from '../lib/format'
-import { canPush, FLOW_ICON, isActive, isDirect, jobCost, jobDuration, jobOutcome, usePush } from '../lib/jobs'
+import { canPush, FLOW_ICON, isActive, isDirect, jobCost, jobDuration, jobOutcome, jobRef, usePush } from '../lib/jobs'
 import { useCrumbs } from '../lib/crumbs'
 import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
@@ -109,7 +109,7 @@ onBeforeUnmount(() => window.clearInterval(tick))
 
 useCrumbs(() => [
   { label: t('nav.jobs'), to: '/jobs' },
-  job.value ? { label: `${job.value.repo}#${job.value.number}`, mono: true } : { label: '#' + props.id },
+  job.value ? { label: jobRef(job.value), mono: true } : { label: '#' + props.id },
 ])
 
 const res = computed(() => job.value?.result ?? {})
@@ -324,10 +324,18 @@ function agentStats(a: AgentResult): string[] {
               class="progress"
             />
             <RouterLink
+              v-if="job.itemId"
               :to="'/item/' + job.itemId"
               class="title"
             >
               <span class="mono ref">{{ job.repo }}#{{ job.number }}</span> {{ job.title }}
+            </RouterLink>
+            <RouterLink
+              v-else
+              :to="'/issues?repo=' + job.projectId"
+              class="title"
+            >
+              <span class="mono ref">{{ job.repo }}</span> {{ t('job.triage.project') }}
             </RouterLink>
           </div>
           <div class="actions">
@@ -553,6 +561,76 @@ function agentStats(a: AgentResult): string[] {
             :disabled="!draft.trim() || !!busy || !app.githubConnected"
             @click="ask('reply')"
           />
+        </div>
+      </section>
+
+      <!-- triage: the checked ranking and the fix jobs it queued -->
+      <section
+        v-if="job.flow === 'triage' && res.triage"
+        class="panel card"
+      >
+        <div class="card-head">
+          <span class="panel-title"><i :class="FLOW_ICON.triage" /> {{ t('job.triage.title') }}</span>
+          <span class="muted small">{{ t('job.triage.text', { open: res.triage.open, n: res.triage.topN }) }}</span>
+        </div>
+        <p
+          v-if="res.triage.summary"
+          class="triage-summary"
+        >
+          {{ res.triage.summary }}
+        </p>
+        <span
+          v-if="!res.triage.picks.length"
+          class="muted"
+        >{{ t('job.triage.none') }}</span>
+        <ol
+          v-else
+          class="triage-picks"
+        >
+          <li
+            v-for="p in res.triage.picks"
+            :key="p.number"
+          >
+            <span
+              class="sev"
+              :class="p.severity || 'unknown'"
+            >{{ t('job.triage.severity.' + (p.severity || 'unknown')) }}</span>
+            <RouterLink
+              :to="'/item/' + p.itemId"
+              class="pick-title"
+            >
+              <span class="mono">#{{ p.number }}</span> {{ p.title }}
+            </RouterLink>
+            <RouterLink
+              v-if="p.jobId"
+              :to="'/jobs/' + p.jobId"
+              class="small pick-queue"
+              :class="p.queue"
+            >
+              {{ t('job.triage.' + (p.queue === 'queued' ? 'queued' : 'exists')) }} · #{{ p.jobId }}
+            </RouterLink>
+            <span
+              v-else-if="p.queue"
+              class="small pick-queue err"
+            >{{ p.queue }}</span>
+            <span
+              v-else
+              class="muted small pick-queue"
+            >{{ t('job.triage.below', { n: res.triage.topN }) }}</span>
+            <span class="muted small pick-reason">{{ p.reason }}</span>
+          </li>
+        </ol>
+        <div
+          v-if="res.triage.more"
+          class="muted small"
+        >
+          {{ t('job.triage.more') }}
+        </div>
+        <div
+          v-if="res.triage.dropped?.length"
+          class="muted small"
+        >
+          {{ t('job.triage.dropped', { list: res.triage.dropped.map((d) => '#' + d.number).join(', ') }) }}
         </div>
       </section>
 
@@ -1053,6 +1131,73 @@ details summary {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.triage-summary {
+  margin: 0;
+}
+
+.triage-picks {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.triage-picks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.pick-title {
+  color: var(--iw-text);
+  text-decoration: none;
+  min-width: 0;
+}
+
+.pick-title:hover {
+  color: var(--iw-primary);
+}
+
+.pick-reason {
+  flex-basis: 100%;
+}
+
+.pick-queue {
+  text-decoration: none;
+}
+
+.pick-queue.queued {
+  color: var(--iw-success);
+}
+
+.pick-queue.exists {
+  color: var(--iw-warn);
+}
+
+.sev {
+  font-size: calc(11.5px * var(--iw-fs, 1));
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--iw-muted);
+  background: var(--iw-elevated);
+}
+
+.sev.critical {
+  color: var(--iw-danger);
+  background: var(--iw-danger-soft);
+}
+
+.sev.high {
+  color: var(--iw-warn);
+  background: var(--iw-warn-soft);
+}
+
+.sev.medium {
+  color: var(--iw-primary);
 }
 
 .progress {

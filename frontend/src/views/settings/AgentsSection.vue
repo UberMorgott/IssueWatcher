@@ -190,17 +190,23 @@ const profileOptions = computed(() => (ag.value?.profiles ?? []).map((p) => ({ l
 const verifierOptions = computed(() => [{ label: t('settings.agents.noVerifier'), value: '' }, ...profileOptions.value])
 
 // --- prompts -----------------------------------------------------------------
-type PromptKey = 'system' | 'fixDirect' | 'fix' | 'reply' | 'review' | 'label'
+type PromptKey = 'system' | 'fixDirect' | 'fix' | 'reply' | 'review' | 'label' | 'triage'
 const promptTab = ref<PromptKey>('system')
-const promptTabs = computed(() => (['system', 'fixDirect', 'fix', 'reply', 'review', 'label'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
+const promptTabs = computed(() => (['system', 'fixDirect', 'fix', 'reply', 'review', 'label', 'triage'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
 const prompt = useDraft(() => ag.value?.prompts[promptTab.value])
 watch(promptTab, () => prompt.sync())
 const promptBox = ref<{ $el: HTMLTextAreaElement } | null>(null)
 
-// Prompt variables (fixed names, not translated; {diff} only in the review prompt, {labels} only in the label prompt).
-const VARS = ['repo', 'issue.number', 'issue.title', 'issue.url', 'issue.body', 'comments', 'localPath', 'branch', 'diff', 'labels'] as const
+// Prompt variables (fixed names, not translated; {diff} only in the review prompt, {labels} only in the label prompt;
+// the triage prompt is about the project, not one issue: {issues} and {topN} instead of the issue's).
+const VARS = ['repo', 'issue.number', 'issue.title', 'issue.url', 'issue.body', 'comments', 'localPath', 'branch', 'diff', 'labels', 'issues', 'topN'] as const
+const TRIAGE_VARS: readonly string[] = ['repo', 'localPath', 'issues', 'topN']
 const vars = computed(() =>
-  VARS.filter((v) => (v !== 'diff' || promptTab.value === 'review') && (v !== 'labels' || promptTab.value === 'label')).map((v) => ({
+  VARS.filter((v) =>
+    promptTab.value === 'triage'
+      ? TRIAGE_VARS.includes(v)
+      : (v !== 'diff' || promptTab.value === 'review') && (v !== 'labels' || promptTab.value === 'label') && v !== 'issues' && v !== 'topN',
+  ).map((v) => ({
     name: '{' + v + '}',
     hint: t('settings.agents.vars.' + v.replace('.', '_')),
   })),
@@ -244,11 +250,13 @@ const projectOptions = computed(() => {
 const proj = computed(() => (projectName.value ? ag.value?.projects[projectName.value] : undefined))
 const projPrompt = useDraft(() => proj.value?.prompt ?? '')
 const projVerify = useDraft(() => proj.value?.verify ?? '')
+const projTriagePrompt = useDraft(() => proj.value?.triagePrompt ?? '')
 watch(projectName, () => {
   projPrompt.sync()
   projVerify.sync()
+  projTriagePrompt.sync()
 })
-function patchProject(field: 'prompt' | 'verify') {
+function patchProject(field: 'prompt' | 'verify' | 'triagePrompt') {
   const name = projectName.value
   return (v: string): SettingsPatch => ({ agents: { projects: { [name]: { [field]: v } } } })
 }
@@ -268,6 +276,11 @@ const projJobMcp = computed(() => {
 function setProjJobMcp(v: string) {
   const value = v === 'inherit' ? null : v === 'on'
   void save({ agents: { projects: { [projectName.value]: { jobMcp: value } } } } as unknown as SettingsPatch)
+}
+// triageTopN: empty = inherit (null removes the override).
+function setProjTopN(v: number | null) {
+  const name = projectName.value
+  save.later('projTopN:' + name, { agents: { projects: { [name]: { triageTopN: v ?? null } } } } as unknown as SettingsPatch)
 }
 </script>
 
@@ -394,6 +407,20 @@ function setProjJobMcp(v: string) {
           @update:model-value="(v: boolean) => save({ agents: { jobMcp: v } })"
         />
       </SettingRow>
+      <SettingRow
+        :title="t('settings.agents.triageTopN')"
+        :text="t('settings.agents.triageTopNText')"
+      >
+        <InputNumber
+          :model-value="ag.triageTopN"
+          :min="1"
+          :max="20"
+          show-buttons
+          input-class="num-input"
+          :aria-label="t('settings.agents.triageTopN')"
+          @update:model-value="(v: number | null) => v && save.later('triageTopN', { agents: { triageTopN: v } })"
+        />
+      </SettingRow>
     </SettingsPanel>
 
     <SettingsPanel
@@ -516,6 +543,36 @@ function setProjJobMcp(v: string) {
             :aria-label="t('settings.agents.jobMcp')"
             class="role-select"
             @update:model-value="setProjJobMcp"
+          />
+        </SettingRow>
+        <SettingRow
+          :title="t('settings.agents.triageTopN')"
+          :text="t('settings.agents.projectTriageTopNText', { n: ag.triageTopN })"
+        >
+          <InputNumber
+            :model-value="proj?.triageTopN ?? null"
+            :min="1"
+            :max="20"
+            show-buttons
+            input-class="num-input"
+            :placeholder="String(ag.triageTopN)"
+            :aria-label="t('settings.agents.triageTopN')"
+            @update:model-value="setProjTopN"
+          />
+        </SettingRow>
+        <SettingRow
+          :title="t('settings.agents.projectTriagePrompt')"
+          :text="t('settings.agents.projectTriagePromptText')"
+          stack
+        >
+          <Textarea
+            :model-value="projTriagePrompt.text.value"
+            rows="3"
+            auto-resize
+            class="mono prompt"
+            fluid
+            :aria-label="t('settings.agents.projectTriagePrompt')"
+            @update:model-value="(v: string | undefined) => projTriagePrompt.input(v ?? '', patchProject('triagePrompt'))"
           />
         </SettingRow>
       </template>

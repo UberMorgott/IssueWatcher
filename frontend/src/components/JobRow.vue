@@ -5,7 +5,7 @@ import JobBadge from './JobBadge.vue'
 import JobProgress from './JobProgress.vue'
 import type { JobRowData as Row } from '../api/types'
 import { absTime, elapsed, relTime, usd } from '../lib/format'
-import { FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome } from '../lib/jobs'
+import { FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome, jobRef } from '../lib/jobs'
 
 // One virtualised row of the jobs list (same contract as IssueRow).
 defineProps<{ item: Row; top: number; profile: string }>()
@@ -55,11 +55,11 @@ const { t } = useI18n()
         <span
           class="t-title"
           :title="item.title.length > 80 ? item.title : undefined"
-        >{{ item.title }}</span>
+        >{{ item.title || t('job.triage.project') }}</span>
         <span
           v-if="item.state === 'running'"
           class="t-meta t-run"
-        ><span class="mono">{{ item.repo }}#{{ item.number }}</span><JobProgress
+        ><span class="mono">{{ jobRef(item) }}</span><JobProgress
           :id="item.id"
           :attempt="item.attempt"
           :started-at="item.startedAt"
@@ -68,7 +68,7 @@ const { t } = useI18n()
         <span
           v-else
           class="t-meta"
-        ><span class="mono">{{ item.repo }}#{{ item.number }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
+        ><span class="mono">{{ jobRef(item) }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
       </span>
       <span
         class="c-flow"

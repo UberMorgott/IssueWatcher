@@ -201,6 +201,13 @@ export const api = {
   jobAction: (id: number, action: JobAction) => jobCall('POST', `/api/jobs/${id}/${action}`),
   jobReply: (id: number, body: string) => jobCall('POST', `/api/jobs/${id}/reply`, { body }),
   /** Добавить метки: add labels to a label job's issue (checked against the repo, add only) → done. */
+  /** Queue the project's triage; 409 → `job` = the project's unfinished triage. */
+  async triage(projectId: number, profileId?: string): Promise<Result<Job> & { job?: Job }> {
+    const r = await call<Job>('POST', `/api/projects/${projectId}/triage`, profileId ? { profileId } : {})
+    if (r.ok || r.status !== 409) return r
+    const active = await call<JobChunk>('GET', `/api/jobs?flow=triage&state=active&project=${projectId}&limit=1`)
+    return { ...r, job: active.ok ? active.data.items[0] : undefined }
+  },
   jobLabels: (id: number, labels: string[]) => jobCall('POST', `/api/jobs/${id}/labels`, { labels }),
   async jobAttempts(id: number): Promise<Result<JobAttempt[]>> {
     const r = await call<{ attempts: JobAttempt[] }>('GET', `/api/jobs/${id}/attempts`)
