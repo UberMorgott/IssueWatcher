@@ -353,27 +353,76 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 		return n
 	}
 	s.progress(Progress{State: ProgressStarted, Total: len(projects), Changed: step(), Background: bg})
-	var errs []error
-	for i, pr := range projects {
-		items, err := p.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
-		if err != nil {
-			var rl *provider.RateLimitError
-			if errors.As(err, &rl) || errors.Is(err, provider.ErrNotSignedIn) || ctx.Err() != nil {
-				s.refreshTargets(ctx, src, login)
-				return events, src, false, err // stop the cycle; the rest waits for the next one
-			}
-			errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
-			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Background: bg})
-			continue
+	// Plan.Concurrency projects at a time (writes serialize on the store's
+	// writer); progress counts in completion order. A rate limit, sign-out or
+	// store failure stops the cycle: projects not read keep their cursors.
+	var (
+		mu   sync.Mutex
+		errs []error
+		stop error
+		done int
+		wg   sync.WaitGroup
+	)
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, s.plan().Concurrency)
+	halt := func(err error) { // mu held
+		if stop == nil {
+			stop = err
 		}
-		evs, err := s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
-		if err != nil {
-			return events, src, false, err
-		}
-		events = append(events, evs...)
-		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step(), Background: bg})
+		cancel()
 	}
+	for _, pr := range projects {
+		sem <- struct{}{}
+		if cctx.Err() != nil {
+			<-sem
+			break
+		}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			items, err := p.SyncItems(cctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
+			var evs []store.Event
+			if err == nil {
+				evs, err = s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
+				if err != nil {
+					mu.Lock()
+					halt(err)
+					mu.Unlock()
+					return
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				var rl *provider.RateLimitError
+				switch {
+				case errors.As(err, &rl) || errors.Is(err, provider.ErrNotSignedIn):
+					halt(err)
+					return
+				case cctx.Err() != nil: // stopped by another project's failure, or ctx ended
+					if ctx.Err() != nil {
+						halt(ctx.Err())
+					}
+					return
+				}
+				errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
+				done++
+				s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: done, Total: len(projects), Background: bg})
+				return
+			}
+			events = append(events, evs...)
+			done++
+			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: done, Total: len(projects), Changed: step(), Background: bg})
+		})
+	}
+	wg.Wait()
 	s.refreshTargets(ctx, src, login)
+	if stop == nil && ctx.Err() != nil {
+		stop = ctx.Err()
+	}
+	if stop != nil {
+		return events, src, false, stop // the rest waits for the next cycle
+	}
 	return events, src, true, errors.Join(errs...)
 }
 

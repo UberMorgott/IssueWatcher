@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -165,7 +166,6 @@ func TestEmptyStoreBootstraps(t *testing.T) {
 	}
 }
 
-
 // A change check whose findings cannot be stored moves nothing: poll state,
 // checked_at and cursor stay, and the next check fetches and stores the same
 // change.
@@ -217,6 +217,7 @@ func TestFailedStoreKeepsPollState(t *testing.T) {
 		t.Fatalf("comment stored %d %v", n, err)
 	}
 }
+
 // A failed first reconcile (nothing to check yet) is retried at 1, 2 … minutes,
 // not after the hourly reconcile period.
 func TestFailedBootstrapRetriesWithBackoff(t *testing.T) {
@@ -250,5 +251,90 @@ func TestFailedBootstrapRetriesWithBackoff(t *testing.T) {
 	}
 	if d := next(); d < 50*time.Minute {
 		t.Fatalf("after success next reconcile in %v, want the hourly period", d)
+	}
+}
+
+// slowProvider serves n projects, each read taking delay; failAt fails that
+// project's read with a rate limit.
+type slowProvider struct {
+	fakeProvider
+	n      int
+	delay  time.Duration
+	failAt string
+	reads  atomic.Int32
+}
+
+func (f *slowProvider) ListProjects(context.Context) ([]provider.Project, error) {
+	var out []provider.Project
+	for i := range f.n {
+		id := "p" + strconv.Itoa(i)
+		out = append(out, provider.Project{ExternalID: id, Name: id})
+	}
+	return out, nil
+}
+
+func (f *slowProvider) SyncItems(ctx context.Context, p provider.Project, _ time.Time) ([]provider.Item, error) {
+	f.reads.Add(1)
+	if p.ExternalID == f.failAt {
+		return nil, &provider.RateLimitError{Reset: t0.Add(time.Hour)}
+	}
+	select {
+	case <-time.After(f.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return []provider.Item{{ExternalID: "x-" + p.ExternalID, Kind: "issue", Number: 1, Title: "t", Author: "u", Open: true, CreatedAt: t0, UpdatedAt: t0}}, nil
+}
+
+// A reconcile reads Plan.Concurrency projects at a time; progress counts up
+// in completion order.
+func TestReconcileIsParallel(t *testing.T) {
+	st := openStore(t)
+	fp := &slowProvider{platform: "nexus", account: "me", n: 20, delay: 50 * time.Millisecond}
+	s := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Plan: plan5()}) // Concurrency 2
+	p := plan5()
+	p.Concurrency = 4
+	s.SetPlan(p)
+	var (
+		mu    sync.Mutex
+		dones []int
+	)
+	s.OnProgress(func(p Progress) {
+		if p.State == ProgressRepo {
+			mu.Lock()
+			dones = append(dones, p.Done)
+			mu.Unlock()
+		}
+	})
+	start := time.Now()
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d >= 700*time.Millisecond { // 4 workers: ~250 ms
+		t.Fatalf("20 projects x 50 ms took %v with 4 workers (sequential is 1 s)", d)
+	}
+	if len(dones) != 20 || dones[0] != 1 || dones[19] != 20 {
+		t.Fatalf("progress %v", dones)
+	}
+	if n, _ := st.UnreadCount(t.Context()); n != 0 {
+		t.Fatalf("baseline unread %d", n)
+	}
+}
+
+// A rate limit stops the parallel reconcile: it reports the limit, reads no
+// further project, and the cycle is not stamped as complete.
+func TestReconcileStopsOnRateLimit(t *testing.T) {
+	st := openStore(t)
+	fp := &slowProvider{platform: "nexus", account: "me", n: 20, delay: 20 * time.Millisecond, failAt: "p3"}
+	s := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Plan: plan5()})
+	err := s.SyncOnce(t.Context())
+	if _, ok := errors.AsType[*provider.RateLimitError](err); !ok {
+		t.Fatalf("err %v, want the rate limit", err)
+	}
+	if n := fp.reads.Load(); n >= 20 {
+		t.Fatalf("read %d projects after the limit", n)
+	}
+	if src, _, _ := st.LastSource(t.Context(), "nexus", "me"); !src.ReconciledAt.IsZero() {
+		t.Fatalf("a stopped reconcile was stamped complete: %+v", src)
 	}
 }
