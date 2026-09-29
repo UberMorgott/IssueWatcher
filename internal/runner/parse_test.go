@@ -2,8 +2,10 @@ package runner
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -88,6 +90,30 @@ func TestParseCodex(t *testing.T) {
 	applyStructured(`{"reply":"Hi!","notes":""}`, &res)
 	if res.Reply != "Hi!" {
 		t.Fatalf("structured reply: %+v", res)
+	}
+}
+
+// Structured results parse whatever language the agent writes its free text in
+// (claude -p may follow the owner's own language setting): only keys and enum
+// values are fixed, reasons/summaries/replies pass through, clipped by runes.
+func TestStructuredAnyLanguage(t *testing.T) {
+	long := strings.Repeat("я", 600)
+	_, tr := collect(t, []string{`{"type":"result","subtype":"success","num_turns":2,"structured_output":` +
+		`{"picks":[{"number":3,"severity":"critical","reason":"Падение при запуске, блокирует всех"},{"number":4,"severity":"low","reason":"` + long + `"}],` +
+		`"summary":"Два открытых бага, один критичный"}}`}, parseClaude)
+	if tr.Error != "" || tr.Summary != "Два открытых бага, один критичный" || len(tr.Picks) != 2 || tr.Picks[0].Reason != "Падение при запуске, блокирует всех" {
+		t.Fatalf("triage: %+v", tr)
+	}
+	kept, dropped := checkPicks(map[int]store.TriageIssue{3: {ItemID: 30, Number: 3}, 4: {ItemID: 40, Number: 4}}, tr.Picks)
+	if len(kept) != 2 || len(dropped) != 0 || kept[0].Severity != "critical" || len([]rune(kept[1].Reason)) > 501 || !strings.HasPrefix(kept[1].Reason, strings.Repeat("я", 499)) || !utf8.ValidString(kept[1].Reason) {
+		t.Fatalf("checked picks: %+v %+v", kept, dropped)
+	}
+	var lb, rp AgentResult
+	applyStructured(`{"labels":["bug","область: ядро"],"summary":"Это ошибка в ядре"}`, &lb)
+	applyStructured(`{"reply":"Спасибо за отчёт! Исправлено в v0.4.0.","notes":"проверено"}`, &rp)
+	if !slices.Equal(lb.Labels, []string{"bug", "область: ядро"}) || lb.Summary != "Это ошибка в ядре" || lb.Final != "" ||
+		rp.Reply != "Спасибо за отчёт! Исправлено в v0.4.0." || rp.Notes != "проверено" || rp.Final != "" {
+		t.Fatalf("label %+v / reply %+v", lb, rp)
 	}
 }
 
