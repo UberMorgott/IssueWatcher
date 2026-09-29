@@ -225,14 +225,14 @@ func (p *Provider) get(ctx context.Context, u string) ([]byte, error) {
 	return a.Body, nil
 }
 
-func (p *Provider) postForm(ctx context.Context, u string, form url.Values, cookies []*http.Cookie) (answer, error) {
+func (p *Provider) postForm(ctx context.Context, u string, form url.Values, cookie string) (answer, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(form.Encode()))
 	if err != nil {
 		return answer{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	for _, c := range cookies {
-		req.AddCookie(c)
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 	return p.do(req)
 }
@@ -368,7 +368,7 @@ func (p *Provider) fillCreators(ctx context.Context, files []workshopFile) error
 		return nil
 	}
 	form.Set("itemcount", strconv.Itoa(len(form)))
-	a, err := p.postForm(ctx, p.opts.APIURL+"/ISteamRemoteStorage/GetPublishedFileDetails/v1/", form, nil)
+	a, err := p.postForm(ctx, p.opts.APIURL+"/ISteamRemoteStorage/GetPublishedFileDetails/v1/", form, "")
 	if err != nil {
 		return err
 	}
@@ -435,7 +435,7 @@ func (p *Provider) threadPath(creator, fileID string) string {
 func (p *Provider) render(ctx context.Context, creator, fileID string, start, count int) (renderPage, error) {
 	u := p.opts.CommunityURL + fmt.Sprintf(p.threadPath(creator, fileID), "render")
 	form := url.Values{"start": {strconv.Itoa(start)}, "count": {strconv.Itoa(count)}}
-	a, err := p.postForm(ctx, u, form, nil)
+	a, err := p.postForm(ctx, u, form, "")
 	if err != nil {
 		return renderPage{}, err
 	}
@@ -595,9 +595,4 @@ func (p *Provider) FetchChanged(context.Context, provider.Project, []int) ([]pro
 // FullReconcile implements provider.Poller.
 func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, since time.Time) ([]provider.Item, error) {
 	return p.SyncItems(ctx, project, since)
-}
-
-// Reply implements provider.Provider (posting lands in step 11).
-func (p *Provider) Reply(context.Context, string, string) (provider.Comment, error) {
-	return provider.Comment{}, errors.New("steam: replying is not available yet")
 }
