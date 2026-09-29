@@ -17,24 +17,51 @@ import (
 // gitTimeout bounds one git command (fetch and push included).
 const gitTimeout = 5 * time.Minute
 
+// gitWaitDelay bounds the wait for git's output pipes after it exits or is
+// killed (a hook's leftover child may hold them), and for its tree to end.
+const gitWaitDelay = 5 * time.Second
+
 // git runs the git executable with args in dir; env entries are added to the
 // scrubbed environment. It returns trimmed stdout, or an error with stderr.
+// git runs as a process tree (hooks, credential helpers, ssh): a cancel or
+// timeout kills the whole tree, and leftovers die when git exits; auto gc and
+// maintenance stay in the foreground so they are not cut off detached.
 func (r *Runner) git(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	full := append([]string{"-c", "core.longpaths=true", "-c", "core.quotepath=false"}, args...)
-	cmd := exec.CommandContext(ctx, r.opts.Git, full...) //nolint:gosec // G204: fixed git binary, dispatcher-built args
+	full := append([]string{"-c", "core.longpaths=true", "-c", "core.quotepath=false",
+		"-c", "gc.autoDetach=false", "-c", "maintenance.autoDetach=false"}, args...)
+	cmd := exec.Command(r.opts.Git, full...) //nolint:gosec,noctx // G204: fixed git binary, dispatcher-built args; ctx kills the tree below
 	cmd.Dir = dir
 	cmd.Env = append(agentEnv(), append([]string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}, env...)...)
-	prepare(cmd)
+	cmd.WaitDelay = gitWaitDelay
+	prepareTree(cmd)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
+	fail := func(err error) (string, error) {
 		msg := strings.TrimSpace(errb.String())
 		if msg == "" {
 			msg = strings.TrimSpace(out.String())
 		}
+		if ctx.Err() != nil {
+			err = fmt.Errorf("%w (%w)", err, context.Cause(ctx))
+		}
 		return "", fmt.Errorf("git %s: %w: %s", args[0], err, clipRunes(msg, 1500))
+	}
+	if err := cmd.Start(); err != nil {
+		return fail(err)
+	}
+	tree, err := attach(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fail(err)
+	}
+	defer func() { _ = tree.end(gitWaitDelay) }()
+	stop := context.AfterFunc(ctx, tree.kill)
+	defer stop()
+	if err := cmd.Wait(); err != nil {
+		return fail(err)
 	}
 	return strings.TrimRight(out.String(), "\r\n"), nil
 }
