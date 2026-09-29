@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { safeUrl } from '../lib/safeUrl'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
@@ -389,7 +390,7 @@ function agentStats(a: AgentResult): string[] {
             />
             <Button
               as="a"
-              :href="job.itemUrl"
+              :href="safeUrl(job.itemUrl)"
               target="_blank"
               rel="noopener noreferrer"
               icon="pi pi-external-link"
@@ -502,7 +503,7 @@ function agentStats(a: AgentResult): string[] {
       >
         {{ t('job.prOpened', { n: res.pr.number }) }}
         <a
-          :href="res.pr.url"
+          :href="safeUrl(res.pr.url)"
           target="_blank"
           rel="noopener noreferrer"
         >{{ res.pr.url }}</a>
@@ -513,7 +514,7 @@ function agentStats(a: AgentResult): string[] {
       >
         {{ t('job.replyPosted') }}
         <a
-          :href="res.comment.url"
+          :href="safeUrl(res.comment.url)"
           target="_blank"
           rel="noopener noreferrer"
         >{{ t('item.openComment') }}</a>

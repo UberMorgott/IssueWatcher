@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { safeUrl } from '../lib/safeUrl'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Textarea from 'primevue/textarea'
@@ -252,7 +253,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
         </div>
         <Button
           as="a"
-          :href="item.url"
+          :href="safeUrl(item.url)"
           target="_blank"
           rel="noopener noreferrer"
           :label="t('platforms.openOn', { platform: pname })"
@@ -322,7 +323,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               >{{ t('item.youTag') }}</span>
               <a
                 v-if="c.url"
-                :href="c.url"
+                :href="safeUrl(c.url)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="post-link"

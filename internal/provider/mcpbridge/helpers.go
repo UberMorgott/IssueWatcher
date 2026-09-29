@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -98,6 +99,17 @@ func WriteUnsure(err error) bool {
 	}
 	te, ok := errors.AsType[*ToolError](err)
 	return ok && (te.Code == CodeOutcomeUnknown || te.Code == CodeError)
+}
+
+// HTTPS returns u when it is an absolute https URL, else fallback: a page URL
+// from a third party (CFWidget, a server) ends up in the dashboard's href, where
+// a javascript: URL would run.
+func HTTPS(u, fallback string) string {
+	p, err := url.Parse(strings.TrimSpace(u))
+	if err != nil || !strings.EqualFold(p.Scheme, "https") || p.Host == "" {
+		return fallback
+	}
+	return p.String()
 }
 
 // SameText compares two bodies ignoring whitespace differences (read-back).

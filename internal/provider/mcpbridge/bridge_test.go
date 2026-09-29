@@ -225,6 +225,23 @@ func TestPageChanged(t *testing.T) {
 	}
 }
 
+func TestHTTPS(t *testing.T) {
+	const fb = "https://fallback/"
+	for in, want := range map[string]string{
+		"https://www.curseforge.com/hytale/mods/x": "https://www.curseforge.com/hytale/mods/x",
+		"javascript:alert(1)//https://x":           fb,
+		" JavaScript:alert(1)":                     fb,
+		"http://www.curseforge.com/x":              fb,
+		"data:text/html,x":                         fb,
+		"//evil.example/x":                         fb,
+		"":                                         fb,
+	} {
+		if got := mcpbridge.HTTPS(in, fb); got != want {
+			t.Errorf("%q → %q", in, got)
+		}
+	}
+}
+
 func TestTitle(t *testing.T) {
 	if got := mcpbridge.Title("\n  hello world \nsecond"); got != "hello world" {
 		t.Fatal(got)

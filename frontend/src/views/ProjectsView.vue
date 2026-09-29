@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { safeUrl } from '../lib/safeUrl'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
@@ -450,7 +451,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 </div>
                 <Button
                   as="a"
-                  :href="data.url"
+                  :href="safeUrl(data.url)"
                   target="_blank"
                   rel="noopener noreferrer"
                   :label="t('projects.openRepo')"

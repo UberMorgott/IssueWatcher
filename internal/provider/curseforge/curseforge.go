@@ -198,7 +198,7 @@ func (p *Provider) projectURL(ctx context.Context, id int) string {
 	}
 	u = "https://www.curseforge.com/projects/" + key
 	if err := p.call(ctx, "get_project", map[string]any{"project": key}, &r); err == nil && r.URL != nil && *r.URL != "" {
-		u = *r.URL
+		u = mcpbridge.HTTPS(*r.URL, u) // CFWidget data: never a javascript: href
 		p.mu.Lock()
 		p.urls[key] = u
 		p.mu.Unlock()

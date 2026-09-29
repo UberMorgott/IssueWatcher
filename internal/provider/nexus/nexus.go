@@ -205,10 +205,7 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 			if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
 				return nil, errOldServer
 			}
-			url := m.URL
-			if url == "" {
-				url = fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID)
-			}
+			url := mcpbridge.HTTPS(m.URL, fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID))
 			out = append(out, provider.Project{ExternalID: fmt.Sprintf("%s/%d", m.Game, m.ModID), Name: m.Name, URL: url})
 		}
 		offset += len(r.Mods)
