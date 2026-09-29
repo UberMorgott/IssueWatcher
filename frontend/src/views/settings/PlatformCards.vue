@@ -321,7 +321,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           class="status"
           :class="tone(status(c.id))"
         >
-          <span class="dot" /> {{ statusText(c.id) }}
+          <span class="dot" /><span>{{ statusText(c.id) }}</span>
         </div>
         <div
           v-if="statusHint(c.id)"
@@ -643,14 +643,15 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
 
 .status {
   display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   font-size: calc(13px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }
 
 .dot {
+  flex: none;
+  margin-top: 0.45em;
   width: 8px;
   height: 8px;
   border-radius: 50%;

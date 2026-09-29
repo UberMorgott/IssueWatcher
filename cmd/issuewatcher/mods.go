@@ -59,6 +59,7 @@ type modPlatforms struct {
 	checks    map[string]api.PlatformStatus // last «Проверить» result per platform
 	notified  map[string]bool               // relogin card shown since the platform was last connected
 	lastLogin map[string]string             // last logged sign-in state per platform
+	sessions  map[string][2]string          // MCP platforms: session source + browser, learnt after a sync
 }
 
 func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, group *syncer.Group,
@@ -70,6 +71,7 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 	group.OnProgress(func(p syncer.Progress) {
 		if p.State == syncer.ProgressDone || p.State == syncer.ProgressError {
 			go m.watchRelogin(context.Background())
+			go m.refreshSessions(context.Background())
 		}
 	})
 	stm.OnSignIn(func() { go m.connected(context.Background(), steam.Platform) })
@@ -125,6 +127,7 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 			closing = append(closing, cur.bridge) // final: a late call must not start an unowned server
 			delete(m.live, id)
 			delete(m.checks, id)
+			delete(m.sessions, id)
 			m.log.Info("mod platform off", "platform", id)
 		case cur != nil && (want.MCP.Command != cur.cfg.MCP.Command || !slices.Equal(want.MCP.Args, cur.cfg.MCP.Args)):
 			stopping = append(stopping, cur.bridge) // the next call starts the new command
@@ -221,6 +224,9 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 			if id != steam.Platform {
 				ps.Session, ps.Browser = c.Session, c.Browser
 			}
+		case synced && src.Account != "" && src.LastError == "" && m.sessions[id][0] != "":
+			ps.State, ps.Account = api.PlatformConnected, src.Account
+			ps.Session, ps.Browser = m.sessions[id][0], m.sessions[id][1]
 		case synced && src.Account != "" && src.LastError == "":
 			ps.State, ps.Account = api.PlatformConnected, src.Account
 		case synced && src.LastError != "":
@@ -541,6 +547,36 @@ func sessionOf(ctx context.Context, p provider.Provider) (string, string) {
 	}
 }
 
+// refreshSessions learns, after a sync, where each running MCP platform's
+// session came from (a restart forgets it; the card shows it without a «Проверить»).
+func (m *modPlatforms) refreshSessions(ctx context.Context) {
+	m.mu.Lock()
+	var todo []provider.Provider
+	var ids []string
+	for id, mp := range m.live {
+		if m.sessions[id][0] == "" {
+			todo, ids = append(todo, mp.prov), append(ids, id)
+		}
+	}
+	m.mu.Unlock()
+	for i, p := range todo {
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		s, b := sessionOf(cctx, p)
+		cancel()
+		if s == "" {
+			continue
+		}
+		m.mu.Lock()
+		if m.sessions == nil {
+			m.sessions = map[string][2]string{}
+		}
+		if m.live[ids[i]] != nil {
+			m.sessions[ids[i]] = [2]string{s, b}
+		}
+		m.mu.Unlock()
+	}
+}
+
 // steamSession maps the Steam settings view to PlatformStatus.Session.
 func steamSession(st steam.Status) string {
 	switch {
@@ -585,6 +621,7 @@ func (m *modPlatforms) Logout(ctx context.Context, id string, forget bool) (api.
 	}
 	m.log.Info("platform signed out", "platform", id, "forget", forget)
 	m.mu.Lock()
+	delete(m.sessions, id)
 	delete(m.checks, id)
 	delete(m.lastLogin, id)
 	m.mu.Unlock()
@@ -691,6 +728,7 @@ func (m *modPlatforms) connected(ctx context.Context, id string) {
 	m.mu.Lock()
 	m.notified[id] = false
 	delete(m.checks, id)
+	delete(m.sessions, id)
 	m.mu.Unlock()
 	go func() {
 		if _, err := m.Check(context.WithoutCancel(ctx), id); err != nil {
