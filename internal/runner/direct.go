@@ -367,7 +367,7 @@ func (r *Runner) pushLocal(ctx context.Context, loc *LocalResult, url string, lo
 	if err != nil {
 		return err
 	}
-	env, secret := tokenEnv(token)
+	env, secret := tokenEnv(url, token)
 	log.addf(StepInfo, "git push %s %s:%s (%s)", url, shortSHA(loc.HeadSHA), loc.Branch, loc.Dir)
 	// The user's own pre-push hooks run: this is their working copy.
 	if _, err := r.git(ctx, loc.Dir, env, "push", url, loc.HeadSHA+":refs/heads/"+loc.Branch); err != nil {
@@ -378,10 +378,13 @@ func (r *Runner) pushLocal(ctx context.Context, loc *LocalResult, url string, lo
 
 // tokenEnv passes the user's token to git through its environment (never the
 // command line), with credential helpers off; secret is the value to redact.
-func tokenEnv(token string) (env []string, secret string) {
+// The header is scoped to url (http.<url>.extraHeader): git matches it against
+// the URL it actually talks to, after url.*.insteadOf / pushInsteadOf, so a
+// rewrite in the clone's config never carries the token to another host.
+func tokenEnv(url, token string) (env []string, secret string) {
 	auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
 	return []string{"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + auth,
+		"GIT_CONFIG_KEY_0=http." + url + ".extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + auth,
 		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1="}, auth
 }
 

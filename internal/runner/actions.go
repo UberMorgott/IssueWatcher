@@ -294,7 +294,7 @@ func (r *Runner) publish(ctx context.Context, j store.Job, res *Result, log *job
 	log.addf(StepInfo, "git push %s %s", url, j.Branch)
 	// The token reaches git through its environment (GIT_CONFIG_*), never the
 	// command line; credential helpers are off for this push.
-	env, auth := tokenEnv(token)
+	env, auth := tokenEnv(url, token)
 	if _, err := r.git(ctx, wt, env, "push", "--no-verify", url, "+HEAD:refs/heads/"+j.Branch); err != nil {
 		return PRResult{}, errors.New(strings.ReplaceAll(err.Error(), auth, "***"))
 	}
