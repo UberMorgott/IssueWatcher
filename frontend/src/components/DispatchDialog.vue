@@ -8,6 +8,8 @@ import { useI18n } from 'vue-i18n'
 import type { JobFlow } from '../api/types'
 import { useJobsStore } from '../stores/jobs'
 import { FLOW_ICON, useDispatchToast } from '../lib/jobs'
+import { useAppStore } from '../stores/app'
+import FolderDialog from './FolderDialog.vue'
 
 // «Отправить агенту»: flow + profile for the selected issues, then POST /api/jobs.
 const props = defineProps<{ items: { id: number; repo: string; number: number; title: string }[] }>()
@@ -26,6 +28,17 @@ const flowOptions = computed(() => [
   { label: t('jobs.flow.reply'), value: 'reply', icon: FLOW_ICON.reply },
   { label: t('jobs.flow.label'), value: 'label', icon: FLOW_ICON.label },
 ])
+// A fix runs in the project's mapped folder: items without one are skipped
+// (the API refuses them); with none left the fix is disabled.
+const app = useAppStore()
+const unmapped = computed(() => {
+  const byName = new Map(app.repos.map((r) => [r.name, r]))
+  return props.items.filter((i) => byName.has(i.repo) && !byName.get(i.repo)?.localPath)
+})
+const unmappedProjects = computed(() => [...new Set(unmapped.value.map((i) => i.repo))].map((n) => app.repos.find((r) => r.name === n)).filter((r) => !!r))
+const fixBlocked = computed(() => flow.value === 'fix' && props.items.length > 0 && unmapped.value.length === props.items.length)
+const folderOpen = ref(false)
+
 const profileOptions = computed(() => jobs.profiles.map((p) => ({ label: `${p.name} · ${p.cli}${p.model ? ' · ' + p.model : ''}`, value: p.id })))
 
 // Default profile = the role of the flow (coder / responder).
@@ -71,6 +84,20 @@ async function submit() {
           </template>
         </SelectButton>
         <span class="hint">{{ t('jobs.' + flow + 'Hint') }}</span>
+        <span
+          v-if="flow === 'fix' && unmapped.length"
+          class="hint warn"
+        >
+          <i class="pi pi-folder" /> {{ fixBlocked ? t('folder.needed') : t('folder.skipped', { n: unmapped.length }) }}
+          <Button
+            v-if="unmappedProjects.length === 1"
+            :label="t('folder.link')"
+            size="small"
+            link
+            class="folder-link"
+            @click="folderOpen = true"
+          />
+        </span>
       </div>
       <div class="field">
         <span class="lbl">{{ t('jobs.profile') }}</span>
@@ -112,11 +139,16 @@ async function submit() {
         :label="t('jobs.dispatch', items.length)"
         icon="pi pi-sparkles"
         :loading="sending"
-        :disabled="!items.length"
+        :disabled="!items.length || fixBlocked"
+        :title="fixBlocked ? t('folder.needed') : undefined"
         @click="submit"
       />
     </template>
   </Dialog>
+  <FolderDialog
+    v-model:visible="folderOpen"
+    :project="unmappedProjects[0] ?? null"
+  />
 </template>
 
 <style scoped>
@@ -143,6 +175,11 @@ async function submit() {
 
 .hint.warn {
   color: var(--iw-warn);
+}
+
+.folder-link {
+  padding: 0 2px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 .items {

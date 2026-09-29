@@ -29,7 +29,7 @@ const jobs = useJobsStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const mobileNav = ref(false)
 const helpOpen = ref(false)
 
@@ -99,15 +99,20 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'job.changed': {
       const done = jobs.emitJob(data)
       if (done) {
+        // Failed: «Агент: ошибка» + the reason (localized for a known code);
+        // finished: «Агент закончил: <outcome>» + the issue.
+        const failed = done.state === 'failed'
         const outcome = jobOutcome(done)
         const label = outcome ? t('jobs.outcome.' + outcome) : t('jobs.state.' + done.state)
+        const code = done.result.errorCode ?? ''
+        const reason = code && te('app.failReason.' + code) ? t('app.failReason.' + code) : (done.error ?? '').split('\n')[0]
         toast.add({
           group: 'live',
-          severity: done.state === 'failed' || outcome === 'failed' ? 'error' : 'info',
-          summary: t('app.agentFinished', { ref: jobRef(done), outcome: label }),
-          detail: done.title,
+          severity: failed || outcome === 'failed' ? 'error' : 'info',
+          summary: failed ? t('app.agentFailed') : t('app.agentFinished', { outcome: label }),
+          detail: `${jobRef(done)} · ${failed && reason ? reason : done.title}`,
           life: 10000,
-          data: { id: done.itemId, job: done.itemId ? undefined : done.id, icon: done.state === 'failed' ? 'pi pi-times-circle' : 'pi pi-sparkles' },
+          data: { id: done.itemId, job: done.itemId ? undefined : done.id, icon: failed ? 'pi pi-times-circle' : 'pi pi-sparkles' },
         } as never)
       }
       return
@@ -272,7 +277,7 @@ const shortcuts = computed(() => [
 
     <Toast
       group="live"
-      position="bottom-right"
+      position="top-right"
     >
       <template #container="{ message, closeCallback }">
         <div
@@ -307,10 +312,10 @@ const shortcuts = computed(() => [
         </div>
       </template>
     </Toast>
-    <Toast position="bottom-right" />
+    <Toast position="top-center" />
     <Toast
       group="jobs"
-      position="bottom-right"
+      position="top-center"
     >
       <template #message="{ message }">
         <div class="jobs-toast">
@@ -576,6 +581,15 @@ kbd {
 </style>
 
 <style>
+/* Toasts sit top-right below the top bar: clear of the item page's agent
+   buttons (bottom of its sidebar) and of the tray's popup cards (bottom-right
+   of the screen). Live events go top-right, action results top-center, so a
+   dispatch summary and the agent's result never cover each other. */
+.p-toast.p-toast-top-right,
+.p-toast.p-toast-top-center {
+  top: calc(var(--iw-topbar) + 12px) !important;
+}
+
 /* Toast surfaces use the app tokens (the container slot drops PrimeVue's colouring). */
 .p-toast-message {
   background: var(--iw-surface) !important;

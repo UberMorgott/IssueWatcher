@@ -12,6 +12,7 @@ import EChart, { type ChartTheme } from '../components/EChart.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
+import FolderDialog from '../components/FolderDialog.vue'
 import { api } from '../api/client'
 import type { Repo, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
@@ -112,6 +113,14 @@ function chart(repo: Repo, s: Stats) {
   })
 }
 
+// «Выбрать» / «Изменить» in the folder column: the shared folder dialog.
+const folderOpen = ref(false)
+const folderProject = ref<Repo | null>(null)
+function mapFolder(r: Repo) {
+  folderProject.value = r
+  folderOpen.value = true
+}
+
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
 </script>
 
@@ -139,16 +148,20 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
             fluid
           />
         </IconField>
-        <span v-tooltip.bottom="t('projects.discoverTip')">
-          <Button
-            :label="t('projects.discover')"
-            icon="pi pi-folder-open"
-            severity="secondary"
-            outlined
-            disabled
-          />
-        </span>
+        <Button
+          v-tooltip.bottom="t('projects.discoverTip')"
+          as="router-link"
+          to="/settings/projects"
+          :label="t('projects.discover')"
+          icon="pi pi-folder-open"
+          severity="secondary"
+          outlined
+        />
       </div>
+      <FolderDialog
+        v-model:visible="folderOpen"
+        :project="folderProject"
+      />
 
       <div class="panel table-panel">
         <DataTable
@@ -225,18 +238,19 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column class="actions-col">
             <template #body="{ data }: { data: Repo }">
-              <Button
-                v-tooltip.top="t('jobs.triage.runTip', { n: triageTopN(data.name) })"
-                :label="t('jobs.triage.run')"
-                icon="pi pi-sort-amount-down"
-                size="small"
-                severity="secondary"
-                text
-                class="nowrap"
-                :loading="triage.busy.value"
-                :disabled="!data.open"
-                @click.stop="triage.run(data.id, data.name)"
-              />
+              <span v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.name) }) : t('folder.needed')">
+                <Button
+                  :label="t('jobs.triage.run')"
+                  icon="pi pi-sort-amount-down"
+                  size="small"
+                  severity="secondary"
+                  text
+                  class="nowrap"
+                  :loading="triage.busy.value"
+                  :disabled="!data.open || !data.localPath"
+                  @click.stop="triage.run(data.id, data.name)"
+                />
+              </span>
             </template>
           </Column>
           <Column
@@ -304,15 +318,13 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   v-else
                   class="not-mapped"
                 ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
-                <span v-tooltip.top="t('projects.mappingSoon')">
-                  <Button
-                    :label="t('projects.choose')"
-                    size="small"
-                    severity="secondary"
-                    text
-                    disabled
-                  />
-                </span>
+                <Button
+                  :label="data.localPath ? t('projects.change') : t('projects.choose')"
+                  size="small"
+                  severity="secondary"
+                  text
+                  @click.stop="mapFolder(data)"
+                />
               </div>
             </template>
           </Column>

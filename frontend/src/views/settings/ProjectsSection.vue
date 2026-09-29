@@ -16,7 +16,7 @@ import { useSave } from '../../lib/save'
 import { api } from '../../api/client'
 import type { FolderRow, FolderSuggestion, RunMode } from '../../api/types'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const settings = useSettingsStore()
 const app = useAppStore()
 const toast = useToast()
@@ -59,7 +59,10 @@ watch(() => app.dataVersion, loadRows)
 async function setPath(id: number, path: string) {
   const r = await api.setFolder(id, path.trim())
   if (!r.ok) {
-    toast.add({ severity: 'error', summary: t('settings.folders.saveFailed'), detail: r.error, life: 5000 })
+    const code = (r.body as { code?: string } | undefined)?.code ?? ''
+    const name = rows.value.find((x) => x.projectId === id)?.name ?? ''
+    const detail = code && te('folder.error.' + code) ? t('folder.error.' + code, { name }) : r.error
+    toast.add({ severity: 'error', summary: t('settings.folders.saveFailed'), detail, life: 6000 })
     return false
   }
   rows.value = rows.value.map((x) => (x.projectId === id ? r.data : x))

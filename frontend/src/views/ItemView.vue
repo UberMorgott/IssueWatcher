@@ -15,6 +15,7 @@ import JobBadge from '../components/JobBadge.vue'
 import JobProgress from '../components/JobProgress.vue'
 import JobLog from '../components/JobLog.vue'
 import DirectResult from '../components/DirectResult.vue'
+import FolderDialog from '../components/FolderDialog.vue'
 import { canPush, FLOW_ICON, isActive, isDirect, JOB_FLOWS, jobOutcome, useDispatchToast, usePush } from '../lib/jobs'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 import { useI18n } from 'vue-i18n'
@@ -91,6 +92,11 @@ watch(
 )
 
 const repo = computed(() => app.repos.find((r) => r.id === item.value?.repoId))
+/** A fix runs in the project's mapped folder: without one it is disabled (the API refuses it too). */
+const noFolder = computed(() => !!repo.value && !repo.value.localPath)
+const folderOpen = ref(false)
+/** Issue flows (a triage is per project: Projects › «Запустить проект»). */
+const ITEM_FLOWS = JOB_FLOWS.filter((f) => f !== 'triage')
 
 // The top bar is the page heading: Issues › owner/repo#12.
 useCrumbs(() => {
@@ -167,6 +173,7 @@ async function dispatch(flow: JobFlow, profileId?: string) {
   dispatching.value = false
   report(r)
   if (r.ok) void loadJobs()
+  else if (r.status === 409 && (r.body as { code?: string } | undefined)?.code === 'no_folder') void app.loadRepos() // mapping changed meanwhile
 }
 function profileMenu(flow: JobFlow) {
   const role = jobsStore.roleProfile(flow)
@@ -407,6 +414,14 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               class="muted"
             >
               {{ t('item.notMapped') }}
+              <Button
+                v-if="repo"
+                :label="t('folder.link')"
+                size="small"
+                link
+                class="folder-link"
+                @click="folderOpen = true"
+              />
             </dd>
             <dt>{{ t('item.metaTotals') }}</dt>
             <dd v-if="repo">
@@ -496,17 +511,37 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 />
               </template>
             </div>
-            <SplitButton
-              v-for="f in JOB_FLOWS"
+            <template
+              v-for="f in ITEM_FLOWS"
               :key="f"
-              :label="t('item.' + f + 'WithAgent')"
-              :icon="FLOW_ICON[f]"
-              :model="profileMenu(f)"
-              :disabled="!!activeJob(f) || dispatching"
-              :severity="f === 'fix' ? undefined : 'secondary'"
-              :title="activeJob(f) ? t('item.jobRunning') : undefined"
-              class="agent-btn"
-              @click="dispatch(f)"
+            >
+              <SplitButton
+                :label="t('item.' + f + 'WithAgent')"
+                :icon="FLOW_ICON[f]"
+                :model="profileMenu(f)"
+                :disabled="!!activeJob(f) || dispatching || (f === 'fix' && noFolder)"
+                :severity="f === 'fix' ? undefined : 'secondary'"
+                :title="activeJob(f) ? t('item.jobRunning') : f === 'fix' && noFolder ? t('folder.needed') : undefined"
+                class="agent-btn"
+                @click="dispatch(f)"
+              />
+              <div
+                v-if="f === 'fix' && noFolder"
+                class="folder-hint"
+              >
+                <i class="pi pi-folder" /> {{ t('folder.needed') }}
+                <Button
+                  :label="t('folder.link')"
+                  size="small"
+                  link
+                  class="folder-link"
+                  @click="folderOpen = true"
+                />
+              </div>
+            </template>
+            <FolderDialog
+              v-model:visible="folderOpen"
+              :project="repo ?? null"
             />
           </div>
         </aside>
@@ -744,6 +779,21 @@ dd {
 
 .agent-btn :deep(.p-splitbutton-button) {
   flex: 1;
+}
+
+.folder-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin-top: -2px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
+  color: var(--iw-warn);
+}
+
+.folder-link {
+  padding: 0 2px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
 }
 
 @media (width <= 1023px) {

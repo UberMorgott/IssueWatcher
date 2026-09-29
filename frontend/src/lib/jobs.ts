@@ -148,9 +148,10 @@ export function matches(j: Job, f: { state: string; flow: string; project: numbe
 export function useDispatchToast() {
   const toast = useToast()
   const { t } = useI18n()
-  return (res: { ok: true; data: { jobs: QueuedJob[] } } | { ok: false; error: string }) => {
+  return (res: { ok: true; data: { jobs: QueuedJob[] } } | { ok: false; error: string; body?: unknown }) => {
     if (!res.ok) {
-      toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail: res.error, life: 6000 })
+      const noFolder = (res.body as { code?: string } | undefined)?.code === 'no_folder' // 409: nothing queued
+      toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail: noFolder ? t('folder.needed') : res.error, life: 6000 })
       return
     }
     const { queued, existing, failed } = summarise(res.data.jobs)
@@ -165,7 +166,10 @@ export function useDispatchToast() {
       group: 'jobs',
       severity: failed.length && !queued.length ? 'error' : existing.length || failed.length ? 'warn' : 'success',
       summary: parts.join(' · '),
-      detail: failed.map((f) => (f.error === 'not_found' ? t('jobs.itemMissing', { id: f.itemId }) : f.error)).join('; '),
+      detail: [
+        ...failed.filter((f) => f.error !== 'no_folder').map((f) => (f.error === 'not_found' ? t('jobs.itemMissing', { id: f.itemId }) : f.error)),
+        ...(failed.some((f) => f.error === 'no_folder') ? [t('folder.skipped', { n: failed.filter((f) => f.error === 'no_folder').length })] : []),
+      ].join('; '),
       life: 8000,
       data: { links },
     } as never)
