@@ -1,6 +1,7 @@
 package syncer
 
 import (
+	"database/sql"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -34,6 +35,13 @@ func (c *clock) Add(d time.Duration) {
 // one issue each, recently updated (active).
 func tiered(t *testing.T, repos []string, plan Plan) (*Syncer, *githubtest.Server, *clock, chan update) {
 	t.Helper()
+	s, gh, clk, updates, _ := tieredDB(t, repos, plan)
+	return s, gh, clk, updates
+}
+
+// tieredDB is tiered that also returns the database.
+func tieredDB(t *testing.T, repos []string, plan Plan) (*Syncer, *githubtest.Server, *clock, chan update, *sql.DB) {
+	t.Helper()
 	gh := githubtest.New(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	gh.Mu.Lock()
@@ -63,7 +71,7 @@ func tiered(t *testing.T, repos []string, plan Plan) (*Syncer, *githubtest.Serve
 		Store: store.New(db), Provider: github.NewProvider(a), Log: slog.New(slog.DiscardHandler), Plan: plan, Now: clk.Now,
 		OnUpdate: func(evs []store.Event, unread int) { updates <- update{evs, unread} },
 	})
-	return s, gh, clk, updates
+	return s, gh, clk, updates, db
 }
 
 func drain(ch chan update) []store.Event {

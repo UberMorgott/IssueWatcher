@@ -219,6 +219,7 @@ func (s *Syncer) untilNext(now time.Time) time.Duration {
 // result of one project's change check.
 type checkResult struct {
 	t     *target
+	prev  provider.PollState // the poll state before the check (restored when storing fails)
 	items []provider.Item
 	ch    provider.Changes
 	err   error
@@ -300,23 +301,31 @@ func (s *Syncer) checkDue(ctx context.Context, now time.Time) {
 		if r.ch.MinInterval > 0 {
 			t.minEvery = r.ch.MinInterval
 		}
-		if len(r.items) > 0 {
-			evs, err := s.opts.Store.ApplyItems(ctx, src, t.ID, r.items, login)
-			if err != nil {
-				s.opts.Log.Error("sync: store changes", "project", t.ExternalID, "err", err)
+		if len(r.items) == 0 {
+			if err := s.opts.Store.SavePollState(ctx, t.ID, t.poll, now); err != nil {
+				s.opts.Log.Error("sync: save poll state", "project", t.ExternalID, "err", err)
 			}
-			events = append(events, evs...)
-			for _, it := range r.items {
-				if it.UpdatedAt.After(t.activity) {
-					t.activity = it.UpdatedAt
-				}
-				if it.UpdatedAt.After(t.Cursor) {
-					t.Cursor = it.UpdatedAt
-				}
-			}
+			s.reschedule(t, now)
+			continue
 		}
-		if err := s.opts.Store.SavePollState(ctx, t.ID, t.poll, now); err != nil {
-			s.opts.Log.Error("sync: save poll state", "project", t.ExternalID, "err", err)
+		// Items, cursor and poll state in one transaction: when storing fails
+		// nothing moves (cursor, since marks, ETags), so the next check sees
+		// the same changes again instead of losing them.
+		evs, err := s.opts.Store.ApplyChecked(ctx, src, t.ID, r.items, login, t.poll, now)
+		if err != nil {
+			s.opts.Log.Error("sync: store changes", "project", t.ExternalID, "err", err)
+			t.poll = r.prev
+			s.reschedule(t, now)
+			continue
+		}
+		events = append(events, evs...)
+		for _, it := range r.items {
+			if it.UpdatedAt.After(t.activity) {
+				t.activity = it.UpdatedAt
+			}
+			if it.UpdatedAt.After(t.Cursor) {
+				t.Cursor = it.UpdatedAt
+			}
 		}
 		s.reschedule(t, now)
 	}
@@ -360,7 +369,7 @@ func (s *Syncer) checkOne(ctx context.Context, pl provider.Poller, t *target) ch
 	prev := t.poll // a failed check leaves the poll state as it was: the changes are re-detected next time
 	prev.ETags = maps.Clone(t.poll.ETags)
 	ch, err := pl.DetectChanges(ctx, p, &t.poll)
-	r := checkResult{t: t, ch: ch, err: err, cost: ch.Requests}
+	r := checkResult{t: t, prev: prev, ch: ch, err: err, cost: ch.Requests}
 	switch {
 	case err != nil:
 	case ch.Overflow:

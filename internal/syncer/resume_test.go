@@ -12,6 +12,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -164,3 +165,55 @@ func TestEmptyStoreBootstraps(t *testing.T) {
 	}
 }
 
+
+// A change check whose findings cannot be stored moves nothing: poll state,
+// checked_at and cursor stay, and the next check fetches and stores the same
+// change.
+func TestFailedStoreKeepsPollState(t *testing.T) {
+	s, gh, clk, updates, db := tieredDB(t, []string{"octo/a"}, plan5())
+	s.Step(t.Context())
+	clk.Add(6 * time.Minute)
+	s.Step(t.Context()) // ETags stored
+	drain(updates)
+	var poll0, checked0, cursor0 string
+	row := `SELECT poll_state, checked_at, sync_cursor FROM projects WHERE external_id = 'octo/a'`
+	if err := db.QueryRowContext(t.Context(), row).Scan(&poll0, &checked0, &cursor0); err != nil {
+		t.Fatal(err)
+	}
+
+	gh.Mu.Lock()
+	is := gh.Issues[0]
+	is.Comments = append(is.Comments, githubtest.Comment{ID: "C_9", Author: "bob", Body: "hi", CreatedAt: clk.Now()})
+	is.UpdatedAt = clk.Now()
+	gh.Mu.Unlock()
+	if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER fail_once BEFORE INSERT ON comments BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	clk.Add(6 * time.Minute)
+	s.Step(t.Context())
+	var poll1, checked1, cursor1 string
+	if err := db.QueryRowContext(t.Context(), row).Scan(&poll1, &checked1, &cursor1); err != nil {
+		t.Fatal(err)
+	}
+	if poll1 != poll0 || checked1 != checked0 || cursor1 != cursor0 {
+		t.Fatalf("failed store moved the state: poll %q→%q checked %q→%q cursor %q→%q", poll0, poll1, checked0, checked1, cursor0, cursor1)
+	}
+	if evs := drain(updates); len(evs) != 0 {
+		t.Fatalf("events from a failed store: %+v", evs)
+	}
+
+	if _, err := db.ExecContext(t.Context(), `DROP TRIGGER fail_once`); err != nil {
+		t.Fatal(err)
+	}
+	gql := gh.Hits().GraphQL
+	clk.Add(6 * time.Minute)
+	s.Step(t.Context())
+	evs := drain(updates)
+	if len(evs) != 1 || evs[0].Kind != store.EventNewComment || gh.Hits().GraphQL == gql {
+		t.Fatalf("change not re-detected after the failure: %+v", evs)
+	}
+	var n int
+	if err := db.QueryRowContext(t.Context(), `SELECT count(*) FROM comments WHERE external_id = 'C_9'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("comment stored %d %v", n, err)
+	}
+}

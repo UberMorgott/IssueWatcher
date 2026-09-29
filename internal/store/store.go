@@ -163,6 +163,22 @@ func activeProjects(ctx context.Context, tx *sql.Tx, sourceID int64) (map[string
 // notifying about. The first sync of a project is a silent baseline. Items and
 // comments authored by self never notify.
 func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string) ([]Event, error) {
+	return s.applyItems(ctx, sourceID, projectID, items, self, nil, time.Time{})
+}
+
+// ApplyChecked is ApplyItems for a change check's findings: the items, the
+// project's cursor and its poll state (checked at checked) are written in one
+// transaction, so a failure leaves all three as they were and the next check
+// re-detects the same changes.
+func (s *Store) ApplyChecked(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string,
+	poll provider.PollState, checked time.Time,
+) ([]Event, error) {
+	return s.applyItems(ctx, sourceID, projectID, items, self, &poll, checked)
+}
+
+func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string,
+	poll *provider.PollState, checked time.Time,
+) ([]Event, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: begin: %w", err)
@@ -199,6 +215,16 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET sync_cursor = ?, synced_at = ? WHERE id = ?`,
 		cursor, ts(time.Now()), projectID); err != nil {
 		return nil, fmt.Errorf("store: update cursor: %w", err)
+	}
+	if poll != nil {
+		b, err := json.Marshal(poll)
+		if err != nil {
+			return nil, fmt.Errorf("store: encode poll state: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE projects SET poll_state = ?, checked_at = ? WHERE id = ?`,
+			string(b), ts(checked), projectID); err != nil {
+			return nil, fmt.Errorf("store: save poll state: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit items: %w", err)
