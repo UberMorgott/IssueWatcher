@@ -122,55 +122,60 @@ func TestAutomateMatching(t *testing.T) {
 func TestAutomateCaps(t *testing.T) {
 	e := autoSetup(t, 9, func(s *config.Settings) {
 		s.Agents.Automation.MaxPerDay = 2
-		s.Agents.Automation.Rules = []config.Rule{rule("all", "octo/demo", config.EventNewIssue, config.FlowReply)}
+		s.Agents.Automation.Rules = []config.Rule{
+			rule("all", "octo/demo", config.EventNewIssue, config.FlowReply),
+			rule("other", "octo/other", config.EventNewIssue, config.FlowReply),
+		}
 	})
 	ctx := t.Context()
-	issue := func(i int) []store.Event { return []store.Event{ev(store.EventNewIssue, "octo/demo", e.items[i])} }
-	auto := func(i int) decision {
+	decide := func(repo string, item int64) decision {
 		t.Helper()
-		got := e.r.Automate(ctx, issue(i))
+		got := e.r.Automate(ctx, []store.Event{ev(store.EventNewIssue, repo, item)})
 		if len(got) != 1 {
-			t.Fatalf("item %d: %+v", i, got)
+			t.Fatalf("item %d: %+v", item, got)
 		}
 		return decisions(got)[0]
 	}
-	queued, dayCap, ruleCap := decision{"all", "queued", ""}, decision{"all", "skipped", "day_cap"}, decision{"all", "skipped", "rule_cap"}
-	// Global maxPerDay 2 (inherited by the project), rolling 24 h.
-	for i, want := range []decision{queued, queued, dayCap} {
+	auto := func(i int) decision { t.Helper(); return decide("octo/demo", e.items[i]) }
+	other := func(i int) decision { t.Helper(); return decide("octo/other", e.items[9+i]) }
+	queued, totalCap, dayCap, ruleCap := decision{"all", "queued", ""}, decision{"all", "skipped", "total_cap"},
+		decision{"all", "skipped", "day_cap"}, decision{"all", "skipped", "rule_cap"}
+	// Global maxPerDay 2 = total across all projects, rolling 24 h.
+	for i, want := range []decision{queued, queued, totalCap} {
 		if got := auto(i); got != want {
 			t.Fatalf("item %d: %+v, want %+v", i, got, want)
 		}
 	}
+	if got := other(0); got != (decision{"other", "skipped", "total_cap"}) {
+		t.Fatalf("total spans projects: %+v", got)
+	}
 	e.advance(23 * time.Hour)
-	if got := auto(2); got != dayCap {
+	if got := auto(2); got != totalCap {
 		t.Fatalf("after 23 h: %+v", got)
 	}
 	e.advance(90 * time.Minute) // the first two left the window
 	if got := auto(2); got != queued {
 		t.Fatalf("after 24.5 h: %+v", got)
 	}
-	// Rule cap on top: 1 per day even though the project allows 2.
+	// Rule cap on top: 1 per day even though the total allows 2.
 	e.advance(25 * time.Hour)
 	e.set(func(s *config.Settings) { s.Agents.Automation.Rules[0].MaxPerDay = 1 })
 	if a, b := auto(3), auto(4); a != queued || b != ruleCap {
 		t.Fatalf("rule cap: %+v %+v", a, b)
 	}
-	// Project override beats the global cap (5 > 2); rule cap off.
+	// Project override = extra per-project cap under the total; other projects unaffected.
 	e.advance(25 * time.Hour)
-	five := 5
+	one := 1
 	e.set(func(s *config.Settings) {
+		s.Agents.Automation.MaxPerDay = 5
 		s.Agents.Automation.Rules[0].MaxPerDay = 0
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{MaxPerDay: &five}}
+		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{MaxPerDay: &one}}
 	})
-	if a, b, c := auto(4), auto(5), auto(6); a != queued || b != queued || c != queued {
-		t.Fatalf("project override: %+v %+v %+v", a, b, c)
+	if a, b, c := auto(4), auto(5), other(1); a != queued || b != dayCap || c != (decision{"other", "queued", ""}) {
+		t.Fatalf("project cap: %+v %+v %+v", a, b, c)
 	}
 	// Two concurrent batches against the last free slot of a cap of 1 → one job.
 	e.advance(25 * time.Hour)
-	e.set(func(s *config.Settings) {
-		one := 1
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{MaxPerDay: &one}}
-	})
 	var (
 		wg  sync.WaitGroup
 		mu  sync.Mutex

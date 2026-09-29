@@ -11,7 +11,7 @@ import (
 )
 
 // Skip reasons decided before the store transaction (the store adds exists,
-// max_attempts, day_cap, rule_cap).
+// max_attempts, total_cap, day_cap, rule_cap).
 const (
 	ReasonNoProfile   = "no_profile"   // the rule's profile (or the flow's role) does not exist
 	ReasonAutoFixOff  = "auto_fix_off" // fix rule where allowAutoFix is off
@@ -70,7 +70,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 		}
 		req := store.AutomationRequest{
 			At: r.opts.Now(), ItemID: ev.ItemID, Event: string(ev.Kind), RuleID: rule.ID, Flow: rule.Flow, ProfileID: profile,
-			DayCap: pol.MaxPerDay, RuleCap: rule.MaxPerDay, MaxAttempts: pol.MaxAttempts,
+			TotalCap: pol.TotalPerDay, DayCap: pol.ProjectPerDay, RuleCap: rule.MaxPerDay, MaxAttempts: pol.MaxAttempts,
 		}
 		if _, ok := cfg.Profile(profile); !ok {
 			req.Skip = ReasonNoProfile

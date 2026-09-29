@@ -93,7 +93,7 @@ func TestAutomationMigration(t *testing.T) {
 	if a.MaxParallel != 3 || a.Prompts.Reply != "mine" || a.Prompts.Label != DefaultLabelPrompt || a.ModeFor("octo/app") != ModeWorktreePR {
 		t.Fatalf("agents: %+v", a)
 	}
-	if p := a.AutomationFor("octo/app"); p != (AutomationPolicy{MaxPerDay: 10, MaxAttempts: 2}) {
+	if p := a.AutomationFor("octo/app"); p != (AutomationPolicy{TotalPerDay: 10, MaxAttempts: 2}) {
 		t.Fatalf("inherited policy: %+v", p)
 	}
 	raw := read(t, dir)
@@ -125,9 +125,9 @@ func TestAutomationOverrides(t *testing.T) {
 	}
 	a := got.Agents
 	for project, want := range map[string]AutomationPolicy{
-		"octo/app":   {Enabled: false, MaxPerDay: 20, MaxAttempts: 5, AllowAutoFix: true},
-		"octo/lib":   {Enabled: true, MaxPerDay: 3, MaxAttempts: 2, AutoApplyLabels: true},
-		"octo/other": {Enabled: true, MaxPerDay: 20, MaxAttempts: 2},
+		"octo/app":   {Enabled: false, TotalPerDay: 20, MaxAttempts: 5, AllowAutoFix: true},
+		"octo/lib":   {Enabled: true, TotalPerDay: 20, ProjectPerDay: 3, MaxAttempts: 2, AutoApplyLabels: true},
+		"octo/other": {Enabled: true, TotalPerDay: 20, MaxAttempts: 2},
 	} {
 		if p := a.AutomationFor(project); p != want {
 			t.Errorf("%s: %+v, want %+v", project, p, want)

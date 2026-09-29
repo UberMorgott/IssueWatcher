@@ -18,7 +18,8 @@ const (
 
 	ReasonExists      = "exists"       // the item has an unfinished job of this flow
 	ReasonMaxAttempts = "max_attempts" // rule jobs for item+flow reached maxAttempts
-	ReasonDayCap      = "day_cap"      // the project's rule jobs in 24 h reached maxPerDay
+	ReasonTotalCap    = "total_cap"    // rule jobs of all projects in 24 h reached the global maxPerDay
+	ReasonDayCap      = "day_cap"      // the project's rule jobs in 24 h reached its maxPerDay override
 	ReasonRuleCap     = "rule_cap"     // the rule's jobs in 24 h reached its maxPerDay
 )
 
@@ -38,7 +39,9 @@ type AutomationRequest struct {
 	ProfileID string
 	// Skip: a reason found before the transaction; only the log row is written.
 	Skip string
-	// DayCap caps the project's rule jobs in the 24 h before At (≥ 1).
+	// TotalCap caps rule jobs of all projects in the 24 h before At (≥ 1).
+	TotalCap int
+	// DayCap caps the project's rule jobs in the 24 h before At; 0 = no project cap.
 	DayCap int
 	// RuleCap caps this rule's jobs in the 24 h before At; 0 = no rule cap.
 	RuleCap int
@@ -165,13 +168,15 @@ func automateTx(ctx context.Context, tx *sql.Tx, req AutomationRequest, at, sinc
 			[]any{req.ItemID, req.Flow}},
 		{ReasonMaxAttempts, req.MaxAttempts, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND item_id = ? AND flow = ?`,
 			[]any{req.ItemID, req.Flow}},
+		{ReasonTotalCap, req.TotalCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND created_at > ?`,
+			[]any{since}},
 		{ReasonDayCap, req.DayCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND project_id = ? AND created_at > ?`,
 			[]any{projectID, since}},
 		{ReasonRuleCap, req.RuleCap, `SELECT count(*) FROM jobs WHERE origin = 'rule' AND rule_id = ? AND created_at > ?`,
 			[]any{req.RuleID, since}},
 	}
 	for _, c := range checks {
-		if c.limit <= 0 { // rule cap 0 = none
+		if c.limit <= 0 { // project/rule cap 0 = none
 			continue
 		}
 		var n int
