@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 )
@@ -158,5 +159,36 @@ func TestItemJoinsComments(t *testing.T) {
 	}
 	if s := string(out); !strings.Contains(s, `"item":{"id":3`) || !strings.Contains(s, `"comments":{"items":[{"id":1}]`) {
 		t.Fatalf("item %s", s)
+	}
+}
+
+// A publishing call outlives the short read timeout (a push with the user's
+// hooks, a slow GitHub answer); when even its own deadline passes, the error
+// says the outcome is unknown instead of inviting a blind retry.
+func TestPublishTimeouts(t *testing.T) {
+	release := make(chan struct{})
+	c, _ := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/jobs/1/push":
+			time.Sleep(150 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"id":1}`))
+		case "/api/items/2/comments":
+			<-release
+		default:
+			time.Sleep(150 * time.Millisecond)
+		}
+	})
+	t.Cleanup(func() { close(release) }) // before serve's srv.Close (cleanups run last-in first-out)
+	c.ReadTimeout, c.PublishTimeout = 50*time.Millisecond, time.Second
+	if _, err := c.Job(t.Context(), 1); err == nil || errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("slow read: %v", err)
+	}
+	if _, err := c.JobAction(t.Context(), 1, "push"); err != nil {
+		t.Fatalf("push slower than the read timeout: %v", err)
+	}
+	c.PublishTimeout = 50 * time.Millisecond
+	_, err := c.Reply(t.Context(), 2, "hi")
+	if !errors.Is(err, ErrOutcomeUnknown) || !strings.Contains(err.Error(), "before retrying") {
+		t.Fatalf("timed-out reply: %v", err)
 	}
 }

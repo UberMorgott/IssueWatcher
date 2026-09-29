@@ -21,8 +21,13 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 )
 
-// Timeout bounds one API call.
-const Timeout = 10 * time.Second
+// Default deadlines of one API call: reads are quick; a publishing call (push
+// with the user's hooks, bounded by the runner's 5 min git timeout, then
+// GitHub) may take minutes, and cutting it off leaves its outcome unknown.
+const (
+	ReadTimeout    = 10 * time.Second
+	PublishTimeout = 6 * time.Minute
+)
 
 // maxResponse bounds a response body (job logs are the largest).
 const maxResponse = 32 << 20
@@ -30,6 +35,11 @@ const maxResponse = 32 << 20
 // ErrNotRunning: no running app for the data dir (no runtime.json, or nothing
 // listens on its port any more).
 var ErrNotRunning = errors.New("IssueWatcher is not running (start the app first)")
+
+// ErrOutcomeUnknown: a POST was sent but no answer came back (deadline, lost
+// connection). The app may have done it (posted the comment, pushed): check
+// the item or job before retrying.
+var ErrOutcomeUnknown = errors.New("no answer from the app: it may have done it anyway, check the item or job state before retrying")
 
 // APIError is a non-2xx answer of the API; Message is its {error} text.
 type APIError struct {
@@ -44,13 +54,14 @@ func (e *APIError) Error() string {
 // Client talks to the app that owns DataDir.
 type Client struct {
 	DataDir string
-	http    *http.Client
+	// Deadlines of GET and of POST calls (New sets ReadTimeout, PublishTimeout).
+	ReadTimeout, PublishTimeout time.Duration
+	http                        *http.Client
 }
 
 // New returns a client for the app owning dataDir.
 func New(dataDir string) *Client {
-	return &Client{DataDir: dataDir, http: &http.Client{
-		Timeout: Timeout,
+	return &Client{DataDir: dataDir, ReadTimeout: ReadTimeout, PublishTimeout: PublishTimeout, http: &http.Client{
 		// Never follow a redirect: the token must only reach the app itself.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport:     &http.Transport{Proxy: nil}, // loopback only: never through a proxy
@@ -98,6 +109,12 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		}
 		body = bytes.NewReader(b)
 	}
+	timeout := c.ReadTimeout
+	if method != http.MethodGet {
+		timeout = c.PublishTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
 		return nil, err
@@ -110,6 +127,9 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	if err != nil {
 		if errors.Is(err, syscall.ECONNREFUSED) || isRefused(err) {
 			return nil, ErrNotRunning // stale runtime.json of a crashed app
+		}
+		if method != http.MethodGet {
+			return nil, fmt.Errorf("control: %s %s: %w (%w)", method, path, ErrOutcomeUnknown, err)
 		}
 		return nil, fmt.Errorf("control: %s %s: %w", method, path, err)
 	}
