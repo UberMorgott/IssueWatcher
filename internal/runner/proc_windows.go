@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"slices"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -18,6 +19,7 @@ const createNoWindow = 0x08000000
 // Object (kill-on-close), so kill ends the whole tree: the CLI, its node
 // children, MCP servers (aegis, serena), shells, test runners.
 type procTree struct {
+	mu  sync.Mutex // job is closed while kill may run from another goroutine
 	job windows.Handle
 }
 
@@ -48,7 +50,7 @@ func attach(cmd *exec.Cmd) (*procTree, error) {
 		return nil, fmt.Errorf("runner: job object limits: %w", err)
 	}
 	pid := uint32(cmd.Process.Pid) //nolint:gosec // G115: a PID we just started
-	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
+	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|processSuspendResume, false, pid)
 	if err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("runner: open process: %w", err)
@@ -58,7 +60,7 @@ func attach(cmd *exec.Cmd) (*procTree, error) {
 		_ = windows.CloseHandle(job)
 		return nil, fmt.Errorf("runner: assign job object: %w", err)
 	}
-	if err := resume(pid); err != nil {
+	if err := resume(h); err != nil {
 		_ = windows.TerminateJobObject(job, 1)
 		_ = windows.CloseHandle(job)
 		return nil, err
@@ -66,38 +68,32 @@ func attach(cmd *exec.Cmd) (*procTree, error) {
 	return &procTree{job: job}, nil
 }
 
-// resume resumes the threads of a process started with CREATE_SUSPENDED (os/exec
-// does not keep the thread handle).
-func resume(pid uint32) error {
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
-	if err != nil {
-		return fmt.Errorf("runner: thread snapshot: %w", err)
-	}
-	defer func() { _ = windows.CloseHandle(snap) }()
-	te := windows.ThreadEntry32{Size: uint32(unsafe.Sizeof(windows.ThreadEntry32{}))}
-	resumed := 0
-	for err = windows.Thread32First(snap, &te); err == nil; err = windows.Thread32Next(snap, &te) {
-		if te.OwnerProcessID != pid {
-			continue
-		}
-		th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, te.ThreadID)
-		if err != nil {
-			continue
-		}
-		if _, err := windows.ResumeThread(th); err == nil {
-			resumed++
-		}
-		_ = windows.CloseHandle(th)
-	}
-	if resumed == 0 {
-		return errors.New("runner: could not resume the started process")
+// processSuspendResume is PROCESS_SUSPEND_RESUME (not in x/sys/windows).
+const processSuspendResume = 0x0800
+
+var procNtResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
+// resume resumes a process started with CREATE_SUSPENDED through its own handle
+// (os/exec does not keep the thread handle). No system-wide thread snapshot:
+// it costs ~50 ms per start with thousands of threads, and a main thread it
+// misses stays suspended while another listed thread counts as resumed.
+func resume(h windows.Handle) error {
+	if st, _, _ := procNtResumeProcess.Call(uintptr(h)); st != 0 {
+		return fmt.Errorf("runner: resume the started process: NTSTATUS 0x%08x", st)
 	}
 	return nil
 }
 
-// kill terminates every process in the tree.
+// kill terminates every process in the tree. It is safe against a concurrent
+// close (a context's AfterFunc racing the end of a git call): a closed handle
+// value may already belong to another tree's job.
 func (p *procTree) kill() {
-	if p != nil && p.job != 0 {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.job != 0 {
 		_ = windows.TerminateJobObject(p.job, 1)
 	}
 }
@@ -110,7 +106,12 @@ type jobAccounting struct {
 
 // active counts the processes still alive in the tree (-1 = unknown).
 func (p *procTree) active() int {
-	if p == nil || p.job == 0 {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.job == 0 {
 		return 0
 	}
 	var info jobAccounting
@@ -123,7 +124,12 @@ func (p *procTree) active() int {
 
 // pids lists the processes in the tree now.
 func (p *procTree) pids() []uint32 {
-	if p == nil || p.job == 0 {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.job == 0 {
 		return nil
 	}
 	// JOBOBJECT_BASIC_PROCESS_ID_LIST: two DWORD counts, then ULONG_PTR ids.
@@ -146,7 +152,7 @@ func (p *procTree) pids() []uint32 {
 // servers die with it), waits until no process is left and releases the job.
 // The error names processes that were still alive after wait.
 func (p *procTree) end(wait time.Duration) error {
-	if p == nil || p.job == 0 {
+	if p == nil {
 		return nil
 	}
 	defer p.close()
@@ -162,7 +168,12 @@ func (p *procTree) end(wait time.Duration) error {
 
 // close releases the job object (kill-on-close ends stragglers).
 func (p *procTree) close() {
-	if p != nil && p.job != 0 {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.job != 0 {
 		_ = windows.CloseHandle(p.job)
 		p.job = 0
 	}
