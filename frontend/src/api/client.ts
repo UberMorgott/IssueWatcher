@@ -32,7 +32,7 @@ import { t, te } from '../i18n'
  * Result of an API call. Never throws: pages render empty/error states from
  * `ok` + `status` instead (404 = endpoint not built yet, 401 = session gone).
  */
-export type Result<T> = { ok: true; data: T; status: number } | { ok: false; status: number; error: string }
+export type Result<T> = { ok: true; data: T; status: number } | { ok: false; status: number; error: string; body?: unknown }
 
 export type JobAction = 'cancel' | 'retry' | 'dismiss' | 'pr' | 'push'
 
@@ -50,13 +50,15 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<Res
   }
   if (!res.ok) {
     let error = res.statusText || `HTTP ${res.status}`
+    let body: unknown
     try {
-      const j = (await res.json()) as { error?: string }
-      if (j.error) error = j.error
+      body = await res.json()
+      const e = (body as { error?: string } | null)?.error
+      if (e) error = e
     } catch {
       /* non-JSON error body */
     }
-    return { ok: false, status: res.status, error }
+    return { ok: false, status: res.status, error, body }
   }
   if (res.status === 204 || res.status === 202) return { ok: true, data: undefined as T, status: res.status }
   try {
@@ -205,8 +207,10 @@ export const api = {
   async triage(projectId: number, profileId?: string): Promise<Result<Job> & { job?: Job }> {
     const r = await call<Job>('POST', `/api/projects/${projectId}/triage`, profileId ? { profileId } : {})
     if (r.ok || r.status !== 409) return r
-    const active = await call<JobChunk>('GET', `/api/jobs?flow=triage&state=active&project=${projectId}&limit=1`)
-    return { ...r, job: active.ok ? active.data.items[0] : undefined }
+    // The 409 carries the unfinished triage itself: no second lookup that could
+    // miss it once it finished in between.
+    const job = (r.body as { job?: Job } | undefined)?.job
+    return { ...r, job: job?.id ? normJob(job) : undefined }
   },
   jobLabels: (id: number, labels: string[]) => jobCall('POST', `/api/jobs/${id}/labels`, { labels }),
   async jobAttempts(id: number): Promise<Result<JobAttempt[]>> {
