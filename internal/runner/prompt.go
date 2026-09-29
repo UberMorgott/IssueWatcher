@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cmp"
 	"regexp"
 	"slices"
 	"strconv"
@@ -175,7 +176,11 @@ func render(tmpl string, p promptInput) string {
 // prompts builds the system text (global + project layer) and the task text of flow.
 func prompts(cfg config.Agents, flow string, p promptInput) (system, task string) {
 	system = render(cfg.Prompts.System, p)
-	if pa, ok := cfg.Projects[p.in.ProjectKey]; ok && strings.TrimSpace(pa.Prompt) != "" {
+	key := p.in.ProjectKey
+	if flow == flowFix || flow == flowFixDirect || flow == flowFixFolder || flow == flowReview {
+		key = cmp.Or(p.in.CodeKey, key) // code work follows the code project's notes (a mod page's linked repo)
+	}
+	if pa, ok := cfg.Projects[key]; ok && strings.TrimSpace(pa.Prompt) != "" {
 		system += "\n\nProject notes from the maintainer:\n" + render(pa.Prompt, p)
 	}
 	switch flow {

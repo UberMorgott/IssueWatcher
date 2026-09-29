@@ -38,6 +38,34 @@ func (e *env) modItem(name string) (page, item int64) {
 	return mods[0].ID, chunk.Items[0].ID
 }
 
+// A mod page fix changes the linked repo's code, so the repo's mode, verify
+// and project notes decide, not the mod page's (absent) override.
+func TestModFixFollowsCodeProjectSettings(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, func(s *config.Settings) {
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeWorktreePR, Verify: "echo repo-verify", Prompt: "Repo notes {branch}."}
+	})
+	page, item := e.modItem("Demo Mod")
+	if err := e.st.SetProjectLinks(t.Context(), e.proj[0].ID, []int64{page}); err != nil {
+		t.Fatal(err)
+	}
+	if in, err := e.st.JobInput(t.Context(), item); err != nil || in.CodeKey != "github:octo/demo" || in.ProjectKey != "nexus:skyrim/7" {
+		t.Fatalf("job input: %+v %v", in, err)
+	}
+	j := e.wait(e.enqueue(flowFix, item)[0].ID, store.JobNeedsReview)
+	res := result(t, j)
+	if res.Mode != config.ModeWorktreePR || j.Worktree == "" || !exists(j.Worktree) || res.Local != nil {
+		t.Fatalf("mode: %+v %s", j, j.Result)
+	}
+	if res.Verify == nil || res.Verify.Command != "echo repo-verify" {
+		t.Fatalf("verify: %+v", res.Verify)
+	}
+	sys, err := os.ReadFile(filepath.Join(jobDir(e.data, j.ID), "fix.system.md"))
+	if err != nil || !strings.Contains(string(sys), "Repo notes "+j.Branch) {
+		t.Fatalf("system prompt: %s %v", sys, err)
+	}
+}
+
 // A fix of a mod-page item runs in the linked code project's folder, its
 // prompt never asks for "Fixes #N", and Push stays off unless agents.modPush
 // allows it for that mod page.

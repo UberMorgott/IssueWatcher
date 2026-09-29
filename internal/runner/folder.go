@@ -206,7 +206,7 @@ func (r *Runner) runFolder(ctx context.Context, j *store.Job, res *Result, log *
 		return store.JobNeedsReview, nil
 	}
 
-	pa := cfg.Projects[in.ProjectKey]
+	pa := cfg.Projects[in.CodeKey]
 	if c := strings.TrimSpace(pa.Verify); c != "" {
 		r.phase(ctx, j, "verify")
 		v := r.verify(ctx, dir, files, append(append([]string{}, r.opts.Shell...), c), c, log)

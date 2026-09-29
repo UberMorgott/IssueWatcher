@@ -474,7 +474,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 		// the folder in place; no worktree, commit, push or PR.
 		return r.runFolder(ctx, j, res, log, prof, cfg, in, files, st)
 	}
-	if cfg.ModeFor(in.ProjectKey) == config.ModeDirect {
+	if cfg.ModeFor(in.CodeKey) == config.ModeDirect {
 		return r.runDirect(ctx, j, res, log, prof, cfg, in, files)
 	}
 	res.Mode = config.ModeWorktreePR
@@ -526,7 +526,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 		return store.JobNeedsReview, nil // nothing changed: the agent's summary says why
 	}
 
-	pa := cfg.Projects[in.ProjectKey]
+	pa := cfg.Projects[in.CodeKey]
 	if cmd, label := r.verifyCommand(in.LocalPath, wt, pa); len(cmd) > 0 {
 		r.phase(ctx, j, "verify")
 		v := r.verify(ctx, wt, files, cmd, label, log)
