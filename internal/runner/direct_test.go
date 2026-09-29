@@ -143,6 +143,27 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 	})
 }
 
+// Push goes to the project's own URL with the token, never to whatever origin
+// points at now (it may have been re-pointed after the run).
+func TestDirectPushIgnoresRepointedOrigin(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, nil)
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	head := result(t, j).Local.HeadSHA
+	evil := filepath.Join(t.TempDir(), "evil.git")
+	run(t, e.local, "init", "-q", "--bare", "-b", "main", evil)
+	run(t, e.local, "remote", "set-url", "origin", evil)
+	if _, err := e.r.Push(t.Context(), j.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, e.bare, "rev-parse", "main"); got != head {
+		t.Fatalf("project remote main %s, want %s", got, head)
+	}
+	if refs := run(t, evil, "for-each-ref"); refs != "" {
+		t.Fatalf("push reached the re-pointed origin: %s", refs)
+	}
+}
+
 // Facts win over the claim: a commit without "Fixes #N" is flagged; an issue
 // closed while the job waits for a push ends it (the owner pushed by hand).
 func TestDirectNoFixesRefAndClose(t *testing.T) {

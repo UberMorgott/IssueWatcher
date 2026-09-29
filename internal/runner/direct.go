@@ -297,7 +297,12 @@ func (r *Runner) Push(ctx context.Context, id int64) (store.Job, error) {
 		return r.unlockPublish(ctx, j, res, lerr)
 	}
 	defer log.close()
-	perr := r.pushLocal(ctx, res.Local, log)
+	var perr error
+	if in, err := r.opts.Store.JobInput(ctx, j.ItemID); err != nil {
+		perr = err
+	} else {
+		perr = r.pushLocal(ctx, res.Local, r.opts.GitURL(in.ProjectURL), log)
+	}
 	if perr != nil {
 		log.add(StepError, "push failed: "+perr.Error())
 	} else {
@@ -310,7 +315,9 @@ func (r *Runner) Push(ctx context.Context, id int64) (store.Job, error) {
 	return r.unlockPublish(ctx, j, res, perr)
 }
 
-func (r *Runner) pushLocal(ctx context.Context, loc *LocalResult, log *jobLog) error {
+// pushLocal pushes to url (the project's own push URL), not to origin: the
+// token must only reach the platform, whatever origin points at now.
+func (r *Runner) pushLocal(ctx context.Context, loc *LocalResult, url string, log *jobLog) error {
 	if loc.Branch == "" {
 		return errors.New("the folder was on a detached HEAD: push it by hand")
 	}
@@ -325,9 +332,9 @@ func (r *Runner) pushLocal(ctx context.Context, loc *LocalResult, log *jobLog) e
 		return err
 	}
 	env, secret := tokenEnv(token)
-	log.addf(StepInfo, "git push origin %s:%s (%s)", shortSHA(loc.HeadSHA), loc.Branch, loc.Dir)
+	log.addf(StepInfo, "git push %s %s:%s (%s)", url, shortSHA(loc.HeadSHA), loc.Branch, loc.Dir)
 	// The user's own pre-push hooks run: this is their working copy.
-	if _, err := r.git(ctx, loc.Dir, env, "push", "origin", loc.HeadSHA+":refs/heads/"+loc.Branch); err != nil {
+	if _, err := r.git(ctx, loc.Dir, env, "push", url, loc.HeadSHA+":refs/heads/"+loc.Branch); err != nil {
 		return errors.New(strings.ReplaceAll(err.Error(), secret, "***"))
 	}
 	return nil
