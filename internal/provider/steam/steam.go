@@ -62,6 +62,7 @@ type Provider struct {
 	settings Settings
 	loaded   bool
 	creators map[string]string // publishedfileid → creator SteamID64
+	codeURLs map[string]string // publishedfileid → GitHub repo its description links ("" = none)
 
 	gap  sync.Mutex // serialises requests: one at a time, MinGap apart
 	last time.Time
@@ -100,7 +101,7 @@ func New(opts Options) *Provider {
 	opts.CommunityURL = strings.TrimRight(opts.CommunityURL, "/")
 	opts.APIURL = strings.TrimRight(opts.APIURL, "/")
 	opts.LoginURL = strings.TrimRight(opts.LoginURL, "/")
-	return &Provider{opts: opts, creators: map[string]string{}}
+	return &Provider{opts: opts, creators: map[string]string{}, codeURLs: map[string]string{}}
 }
 
 // Platform implements provider.Provider.
@@ -277,13 +278,22 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 			return nil, err
 		}
 	}
+	if err := p.fillCreators(ctx, files); err != nil {
+		p.opts.Log.Warn("steam: item details lookup failed", "err", err)
+	}
 	out := make([]provider.Project, 0, len(files))
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	for _, f := range files {
 		name := f.Title
 		if name == "" {
 			name = f.ID
 		}
-		out = append(out, provider.Project{ExternalID: f.ID, Name: name, URL: p.fileURL(f.ID)})
+		pr := provider.Project{ExternalID: f.ID, Name: name, URL: p.fileURL(f.ID), CodeURL: p.codeURLs[f.ID]}
+		if f.AppID > 0 {
+			pr.Game = "steam:" + strconv.Itoa(f.AppID) // the auto-linker learns its repo prefix
+		}
+		out = append(out, pr)
 	}
 	return out, nil
 }
@@ -323,9 +333,6 @@ func (p *Provider) profileFiles(ctx context.Context, s Settings) ([]workshopFile
 		if added == 0 || len(out) >= total {
 			break
 		}
-	}
-	if err := p.fillCreators(ctx, out); err != nil {
-		p.opts.Log.Warn("steam: creator lookup failed", "err", err)
 	}
 	return out, nil
 }
@@ -371,13 +378,15 @@ func (p *Provider) userFiles(ctx context.Context, s Settings) ([]workshopFile, e
 	return out, nil
 }
 
-// fillCreators looks up the creators the cache lacks (one keyless
-// GetPublishedFileDetails request for all of them).
+// fillCreators looks up the creators and description GitHub links the cache
+// lacks (one keyless GetPublishedFileDetails request for all of them).
 func (p *Provider) fillCreators(ctx context.Context, files []workshopFile) error {
 	form := url.Values{}
 	p.mu.Lock()
 	for _, f := range files {
-		if _, ok := p.creators[f.ID]; !ok {
+		_, known := p.creators[f.ID]
+		_, read := p.codeURLs[f.ID]
+		if !known || !read {
 			form.Set("publishedfileids["+strconv.Itoa(len(form))+"]", f.ID)
 		}
 	}
@@ -397,9 +406,10 @@ func (p *Provider) fillCreators(ctx context.Context, files []workshopFile) error
 	var r struct {
 		Response struct {
 			Details []struct {
-				ID      string `json:"publishedfileid"`
-				Result  int    `json:"result"`
-				Creator string `json:"creator"`
+				ID          string `json:"publishedfileid"`
+				Result      int    `json:"result"`
+				Creator     string `json:"creator"`
+				Description string `json:"description"`
 			} `json:"publishedfiledetails"`
 		} `json:"response"`
 	}
@@ -411,6 +421,9 @@ func (p *Provider) fillCreators(ctx context.Context, files []workshopFile) error
 	for _, d := range r.Response.Details {
 		if d.Result == 1 && d.Creator != "" {
 			p.creators[d.ID] = d.Creator
+		}
+		if d.Result == 1 {
+			p.codeURLs[d.ID] = provider.GitHubRepoURL(d.Description)
 		}
 	}
 	return nil

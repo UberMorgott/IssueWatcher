@@ -5,6 +5,8 @@ package provider
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -78,7 +80,27 @@ type Project struct {
 	ExternalID string // stable platform key, e.g. owner/repo
 	Name       string
 	URL        string
+	// Game is a mod page's game key when its URL does not name the game
+	// (Steam: "steam:<appid>"), "" = unknown or in the URL.
+	Game string
+	// CodeURL is the GitHub repository the mod page's own text links to, "" = none.
+	CodeURL string
 }
+
+// GitHubRepoURL finds the first https://github.com/<owner>/<repo> link in a
+// mod page's text and returns it as that canonical URL ("" = none).
+func GitHubRepoURL(text string) string {
+	for _, m := range githubRepoRe.FindAllStringSubmatch(text, -1) {
+		switch strings.ToLower(m[1]) {
+		case "sponsors", "orgs", "topics", "features", "marketplace", "settings", "apps", "login":
+			continue
+		}
+		return "https://github.com/" + m[1] + "/" + strings.TrimSuffix(m[2], ".git")
+	}
+	return ""
+}
+
+var githubRepoRe = regexp.MustCompile(`(?i)github\.com/([a-z0-9](?:[a-z0-9-]{0,38}))/([a-z0-9._-]+)`)
 
 // Comment on an item.
 type Comment struct {

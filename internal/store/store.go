@@ -118,10 +118,11 @@ func (s *Store) SyncProjects(ctx context.Context, sourceID int64, list []provide
 			row    = Project{ExternalID: p.ExternalID, Name: p.Name, URL: p.URL}
 			cursor string
 		)
-		err := tx.QueryRowContext(ctx, `INSERT INTO projects (source_id, external_id, name, url, active)
-			VALUES (?, ?, ?, ?, 1)
-			ON CONFLICT (source_id, external_id) DO UPDATE SET name = excluded.name, url = excluded.url, active = 1
-			RETURNING id, sync_cursor`, sourceID, p.ExternalID, p.Name, p.URL).Scan(&row.ID, &cursor)
+		err := tx.QueryRowContext(ctx, `INSERT INTO projects (source_id, external_id, name, url, game, code_url, active)
+			VALUES (?, ?, ?, ?, ?, ?, 1)
+			ON CONFLICT (source_id, external_id) DO UPDATE SET name = excluded.name, url = excluded.url,
+				game = coalesce(nullif(excluded.game, ''), game), code_url = coalesce(nullif(excluded.code_url, ''), code_url), active = 1
+			RETURNING id, sync_cursor`, sourceID, p.ExternalID, p.Name, p.URL, p.Game, p.CodeURL).Scan(&row.ID, &cursor)
 		if err != nil {
 			return nil, fmt.Errorf("store: upsert project %s: %w", p.ExternalID, err)
 		}

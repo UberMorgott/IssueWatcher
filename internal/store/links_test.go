@@ -26,7 +26,7 @@ func TestMigration009ProjectLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	code, err := s.SyncProjects(ctx, gh, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "https://github.com/o/app"}, {ExternalID: "o/lib", Name: "o/lib", URL: "u2"}})
+	code, err := seedProjects(ctx, db, gh, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "https://github.com/o/app"}, {ExternalID: "o/lib", Name: "o/lib", URL: "u2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestMigration009ProjectLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mods, err := s.SyncProjects(ctx, nx, []provider.Project{{ExternalID: "skyrim/1", Name: "Mod One", URL: "https://nexusmods.com/skyrim/mods/1"}, {ExternalID: "skyrim/2", Name: "Mod Two"}})
+	mods, err := seedProjects(ctx, db, nx, []provider.Project{{ExternalID: "skyrim/1", Name: "Mod One", URL: "https://nexusmods.com/skyrim/mods/1"}, {ExternalID: "skyrim/2", Name: "Mod Two"}})
 	if err != nil {
 		t.Fatal(err)
 	}

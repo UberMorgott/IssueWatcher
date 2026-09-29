@@ -22,8 +22,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Fatalf("user_version = %d, want 10", version)
+	if version != 11 {
+		t.Fatalf("user_version = %d, want 11", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
@@ -62,7 +62,7 @@ func TestMigration006FreshJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projects, err := s.SyncProjects(ctx, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}})
+	projects, err := seedProjects(ctx, db, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestMigration008TriageJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projects, err := s.SyncProjects(ctx, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}, {ExternalID: "o/b", Name: "o/b", URL: "u2"}})
+	projects, err := seedProjects(ctx, db, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}, {ExternalID: "o/b", Name: "o/b", URL: "u2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,4 +234,19 @@ func TestForeignKeysEnforced(t *testing.T) {
 	if err == nil {
 		t.Fatal("insert with dangling item_id succeeded; foreign_keys pragma not applied")
 	}
+}
+
+// seedProjects inserts projects with the columns every schema version has
+// (SyncProjects writes columns of the latest migration).
+func seedProjects(ctx context.Context, db *sql.DB, sourceID int64, list []provider.Project) ([]Project, error) {
+	out := make([]Project, 0, len(list))
+	for _, p := range list {
+		row := Project{ExternalID: p.ExternalID, Name: p.Name, URL: p.URL}
+		if err := db.QueryRowContext(ctx, `INSERT INTO projects (source_id, external_id, name, url, active) VALUES (?, ?, ?, ?, 1) RETURNING id`,
+			sourceID, p.ExternalID, p.Name, p.URL).Scan(&row.ID); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }

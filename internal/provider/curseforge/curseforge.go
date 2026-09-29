@@ -57,6 +57,7 @@ type Provider struct {
 	mu      sync.Mutex
 	account string            // display name = comment author name
 	urls    map[string]string // project id → page URL (get_project, cached)
+	codes   map[string]string // project id → GitHub repo its summary links ("" = none)
 }
 
 // New creates the provider.
@@ -73,7 +74,7 @@ func New(opts Options) *Provider {
 	if opts.ReadBackWaits == nil {
 		opts.ReadBackWaits = []time.Duration{5 * time.Second, 10 * time.Second}
 	}
-	return &Provider{opts: opts, urls: map[string]string{}}
+	return &Provider{opts: opts, urls: map[string]string{}, codes: map[string]string{}}
 }
 
 // Platform implements provider.Provider.
@@ -218,7 +219,11 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 	out := make([]provider.Project, 0, len(r.Projects))
 	for _, pr := range r.Projects {
 		id := strconv.Itoa(pr.ID)
-		out = append(out, provider.Project{ExternalID: id, Name: pr.Name, URL: p.projectURL(ctx, pr.ID)})
+		u := p.projectURL(ctx, pr.ID)
+		p.mu.Lock()
+		code := p.codes[id]
+		p.mu.Unlock()
+		out = append(out, provider.Project{ExternalID: id, Name: pr.Name, URL: u, CodeURL: code})
 	}
 	return out, nil
 }
@@ -234,13 +239,15 @@ func (p *Provider) projectURL(ctx context.Context, id int) string {
 		return u
 	}
 	var r struct {
-		URL *string `json:"url"`
+		URL     *string `json:"url"`
+		Summary string  `json:"summary"`
 	}
 	u = "https://www.curseforge.com/projects/" + key
 	if err := p.call(ctx, "get_project", map[string]any{"project": key}, &r); err == nil && r.URL != nil && *r.URL != "" {
 		u = mcpbridge.HTTPS(*r.URL, u) // CFWidget data: never a javascript: href
 		p.mu.Lock()
 		p.urls[key] = u
+		p.codes[key] = provider.GitHubRepoURL(r.Summary)
 		p.mu.Unlock()
 	}
 	return u
