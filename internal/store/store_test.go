@@ -166,7 +166,7 @@ func TestApplyItemsKinds(t *testing.T) {
 	}
 	evs, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{
 		kinded("comment:1", KindComment, "bob", comment("r1", "carol"), comment("r2", "me")), // reply in the thread; own reply silent
-		kinded("comment:2", KindComment, "me"),                                            // own new thread: silent
+		kinded("comment:2", KindComment, "me"),                                               // own new thread: silent
 		kinded("bug:3", KindBug, "dave"),
 	}, "me")
 	if err != nil || len(evs) != 2 {

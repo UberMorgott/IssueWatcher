@@ -237,6 +237,11 @@ func (r *Runner) CreatePR(ctx context.Context, id int64) (store.Job, error) {
 	if r.opts.Publisher == nil {
 		return store.Job{}, ErrUnavailable
 	}
+	if j, err := r.opts.Store.Job(ctx, id); err != nil {
+		return j, err
+	} else if err := r.modPushAllowed(j); err != nil {
+		return j, err
+	}
 	j, err := r.lockPublish(ctx, id, flowFix)
 	if err != nil {
 		return j, err
@@ -279,6 +284,9 @@ func (r *Runner) publish(ctx context.Context, j store.Job, res *Result, log *job
 			summary = res.Agent.Summary
 		}
 		msg := "fix: " + oneLineTitle(in.Title) + " (#" + strconv.Itoa(in.Number) + ")"
+		if in.Mod { // #N is the mod page's local number, not an issue of the code repo
+			msg = "fix: " + oneLineTitle(in.Title) + "\n\nReported on " + in.URL
+		}
 		if summary != "" {
 			msg += "\n\n" + summary
 		}
@@ -318,15 +326,18 @@ func (r *Runner) publish(ctx context.Context, j store.Job, res *Result, log *job
 	if _, err := r.git(ctx, wt, env, "push", "--no-verify", url, "+HEAD:refs/heads/"+j.Branch); err != nil {
 		return PRResult{}, errors.New(strings.ReplaceAll(err.Error(), auth, "***"))
 	}
-	if pr, ok, err := pub.FindPullRequest(ctx, in.ProjectName, j.Branch); err == nil && ok {
+	if pr, ok, err := pub.FindPullRequest(ctx, in.CodeRepo(), j.Branch); err == nil && ok {
 		log.addf(StepInfo, "PR for %s already exists", j.Branch)
 		return PRResult{Number: pr.Number, URL: pr.URL, Commit: head}, nil
 	}
 	base := res.BaseBranch
 	if base == "" {
-		base, _ = pub.DefaultBranch(ctx, in.ProjectName)
+		base, _ = pub.DefaultBranch(ctx, in.CodeRepo())
 	}
-	body := "Fixes #" + strconv.Itoa(in.Number)
+	body, title := "Fixes #"+strconv.Itoa(in.Number), oneLineTitle(in.Title)+" (#"+strconv.Itoa(in.Number)+")"
+	if in.Mod {
+		body, title = "Fix for a report on "+in.ProjectName+": "+in.URL, oneLineTitle(in.Title)
+	}
 	if res.Agent != nil && res.Agent.Summary != "" {
 		body += "\n\n" + res.Agent.Summary
 	}
@@ -338,13 +349,22 @@ func (r *Runner) publish(ctx context.Context, j store.Job, res *Result, log *job
 		body += "\n\nVerify (`" + res.Verify.Command + "`): " + mark
 	}
 	body += "\n\n_Drafted by a local agent through IssueWatcher; reviewed by the maintainer before publishing._"
-	pr, err := pub.CreatePullRequest(ctx, in.ProjectName, provider.NewPullRequest{
-		Title: oneLineTitle(in.Title) + " (#" + strconv.Itoa(in.Number) + ")", Head: j.Branch, Base: base, Body: body, Draft: true,
+	pr, err := pub.CreatePullRequest(ctx, in.CodeRepo(), provider.NewPullRequest{
+		Title: title, Head: j.Branch, Base: base, Body: body, Draft: true,
 	})
 	if err != nil {
 		return PRResult{}, err
 	}
 	return PRResult{Number: pr.Number, URL: pr.URL, Commit: head}, nil
+}
+
+// modPushAllowed refuses publishing a mod-page fix (its commit is in the
+// linked code project) unless agents.modPush allows it for that mod page.
+func (r *Runner) modPushAllowed(j store.Job) error {
+	if j.Mod && !r.opts.Settings().Agents.ModPushFor(j.ProjectKey) {
+		return ErrModItem
+	}
+	return nil
 }
 
 // SendReply («Отправить») posts the (edited) reply of a reply job.

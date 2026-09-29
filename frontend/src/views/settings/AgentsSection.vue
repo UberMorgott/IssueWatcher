@@ -277,6 +277,24 @@ function setProjJobMcp(v: string) {
   const value = v === 'inherit' ? null : v === 'on'
   void save({ agents: { projects: { [projectName.value]: { jobMcp: value } } } } as unknown as SettingsPatch)
 }
+// modPush (mod pages only, key not github:): inherit / on / off.
+const isModPage = computed(() => !!projectName.value && !projectName.value.startsWith('github:'))
+const modPushOptions = computed(() => [
+  {
+    label: t('settings.automation.inherit', { value: t(ag.value?.modPush ? 'settings.automation.on' : 'settings.automation.off') }),
+    value: 'inherit',
+  },
+  { label: t('settings.automation.on'), value: 'on' },
+  { label: t('settings.automation.off'), value: 'off' },
+])
+const projModPush = computed(() => {
+  const v = proj.value?.modPush
+  return v === undefined || v === null ? 'inherit' : v ? 'on' : 'off'
+})
+function setProjModPush(v: string) {
+  const value = v === 'inherit' ? null : v === 'on'
+  void save({ agents: { projects: { [projectName.value]: { modPush: value } } } } as unknown as SettingsPatch)
+}
 // triageTopN: empty = inherit (null removes the override).
 function setProjTopN(v: number | null) {
   const name = projectName.value
@@ -405,6 +423,16 @@ function setProjTopN(v: number | null) {
           :model-value="ag.jobMcp"
           :aria-label="t('settings.agents.jobMcp')"
           @update:model-value="(v: boolean) => save({ agents: { jobMcp: v } })"
+        />
+      </SettingRow>
+      <SettingRow
+        :title="t('settings.agents.modPush')"
+        :text="t('settings.agents.modPushText')"
+      >
+        <ToggleSwitch
+          :model-value="ag.modPush"
+          :aria-label="t('settings.agents.modPush')"
+          @update:model-value="(v: boolean) => save({ agents: { modPush: v } })"
         />
       </SettingRow>
       <SettingRow
@@ -543,6 +571,21 @@ function setProjTopN(v: number | null) {
             :aria-label="t('settings.agents.jobMcp')"
             class="role-select"
             @update:model-value="setProjJobMcp"
+          />
+        </SettingRow>
+        <SettingRow
+          v-if="isModPage"
+          :title="t('settings.agents.modPush')"
+          :text="t('settings.agents.projectModPushText')"
+        >
+          <Select
+            :model-value="projModPush"
+            :options="modPushOptions"
+            option-label="label"
+            option-value="value"
+            :aria-label="t('settings.agents.modPush')"
+            class="role-select"
+            @update:model-value="setProjModPush"
           />
         </SettingRow>
         <SettingRow

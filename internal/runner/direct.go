@@ -238,7 +238,10 @@ func (r *Runner) localFacts(ctx context.Context, j *store.Job, in store.JobInput
 	if len(loc.Commits) == 0 {
 		return "", nil
 	}
-	if !loc.FixesRef {
+	switch {
+	case in.Mod && loc.FixesRef:
+		log.addf(StepInfo, "warning: a commit message says \"#%d\" of a mod-page report: pushing it may close an unrelated issue of %s", in.Number, in.CodeRepo())
+	case !in.Mod && !loc.FixesRef:
 		log.addf(StepInfo, "warning: no commit message says \"Fixes #%d\": pushing will not close the issue", in.Number)
 	}
 	from := loc.StartSHA
@@ -283,6 +286,9 @@ func (r *Runner) Push(ctx context.Context, id int64) (store.Job, error) {
 	res := parseResult(j)
 	if res.Mode != config.ModeDirect || res.Local == nil || len(res.Local.Commits) == 0 || res.Local.Pushed {
 		return j, ErrNotAllowed
+	}
+	if err := r.modPushAllowed(j); err != nil {
+		return j, err
 	}
 	if r.opts.Publisher == nil {
 		return j, ErrUnavailable

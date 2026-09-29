@@ -321,6 +321,8 @@ func (s *Server) jobError(w http.ResponseWriter, err error) bool {
 		return false
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, http.StatusNotFound, "not found")
+	case errors.Is(err, runner.ErrModItem):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": runner.CodeModItem})
 	case errors.Is(err, runner.ErrNotAllowed), errors.Is(err, store.ErrJobExists):
 		errJSON(w, http.StatusConflict, err.Error())
 	case errors.Is(err, runner.ErrBadRequest):

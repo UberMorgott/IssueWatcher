@@ -79,13 +79,14 @@ type AutomationItem struct {
 	ProjectURL string
 }
 
-// AutomationItemFacts returns item itemID's labels and its project's folder.
+// AutomationItemFacts returns item itemID's labels and the folder its fixes run
+// in (its project's, or a linked mod page's code project's).
 func (s *Store) AutomationItemFacts(ctx context.Context, itemID int64) (AutomationItem, error) {
 	var (
 		it     AutomationItem
 		labels string
 	)
-	err := s.db.QueryRowContext(ctx, `SELECT i.labels, p.local_path, p.url FROM items i JOIN projects p ON p.id = i.project_id
+	err := s.db.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
 		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL)
 	if errors.Is(err, sql.ErrNoRows) {
 		return it, ErrNotFound

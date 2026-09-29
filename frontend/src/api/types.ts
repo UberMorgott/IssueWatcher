@@ -31,6 +31,9 @@ export interface Repo {
   platform: string
   /** Settings key platform:external_id (agents.projects keys, rule projects). */
   key: string
+  /** A mod page's linked code project id; a code project's mod page ids (project_links). */
+  linkedTo?: number
+  links?: number[]
   open: number
   closed: number
   unread: number
@@ -239,6 +242,8 @@ export interface ProjectAgent {
   noAegis: boolean
   /** Overrides Agents.jobMcp; missing = inherit. */
   jobMcp?: boolean
+  /** Mod pages: overrides Agents.modPush; missing = inherit. */
+  modPush?: boolean
   /** Missing or "" = 'direct'. */
   mode?: RunMode | ''
   /** Overrides Agents.triageTopN; missing = inherit. */
@@ -326,6 +331,8 @@ export interface Agents {
   automation: Automation
   /** Each job's agent run gets IssueWatcher's MCP server for its issue (per run only). */
   jobMcp: boolean
+  /** Allow Push / PR of mod-page fixes (they run in the linked code project); off = commit stays local. */
+  modPush: boolean
   /** Project triage: how many ranked picks get a fix job (1–20). */
   triageTopN: number
 }
@@ -507,8 +514,13 @@ export interface Job {
   phase: JobPhase
   branch: string
   worktree: string
-  /** The project's mapped folder (direct jobs run here). */
+  /** The folder fixes run in: the project's mapped folder, or a mod page's linked code project's. */
   localPath: string
+  /** The item is on a mod page; codeProject = its linked code project (Push/PR need agents.modPush). */
+  mod?: boolean
+  codeProject?: string
+  /** Settings key platform:external_id. */
+  projectKey?: string
   baseSha: string
   error: string
   result: JobResult

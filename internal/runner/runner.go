@@ -30,6 +30,7 @@ const branchPrefix = "iw/"
 // Error codes in Result.ErrorCode (the UI links the fix for some).
 const (
 	CodeNoFolder    = "no_folder"    // project has no working local folder → Settings › Projects and folders
+	CodeModItem     = "mod_item"     // push / PR of a mod-page fix while agents.modPush is off
 	CodeNoProfile   = "no_profile"   // profile missing → Settings › Agents
 	CodeNoCLI       = "no_cli"       // executable not found → Settings › Agents
 	CodeTimeout     = "timeout"      // profile time limit
@@ -112,6 +113,9 @@ var (
 	// ErrNoFolder: a fix job was asked for items whose project has no usable
 	// local folder (CodeNoFolder); no job was created.
 	ErrNoFolder = errors.New("no usable local folder is mapped to the project; map it in Settings › Projects and folders")
+	// ErrModItem: push / PR of a mod-page fix while agents.modPush is off for
+	// that mod page (CodeModItem); the commit stays in the linked code folder.
+	ErrModItem = errors.New("pushing fixes of mod-page items is off: the commit stays local (Settings › Agents › mod pages: allow push)")
 )
 
 // New prepares a runner; Start runs it.
@@ -466,7 +470,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	}
 	res.Mode = config.ModeWorktreePR
 
-	baseBranch, sha, err := r.baseRef(ctx, in.LocalPath, in.ProjectName, log)
+	baseBranch, sha, err := r.baseRef(ctx, in.LocalPath, in.CodeRepo(), log)
 	if err != nil {
 		return "", coded(CodeGit, err)
 	}

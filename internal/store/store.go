@@ -65,11 +65,11 @@ type Event struct {
 	ItemKind string // issue | comment | bug
 	ItemID   int64
 	Project  string // settings key platform:external_id (agents.projects, rules)
-	Repo   string
-	Number int
-	Title  string
-	Actor  string // issue/comment author; "" for closes
-	Body   string // comment text for new_comment
+	Repo     string
+	Number   int
+	Title    string
+	Actor    string // issue/comment author; "" for closes
+	Body     string // comment text for new_comment
 }
 
 // UpsertSource returns the id of (platform, account), creating it if needed.

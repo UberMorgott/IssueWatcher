@@ -58,22 +58,28 @@ type Job struct {
 	FinishedAt string          `json:"finishedAt"`
 	UpdatedAt  string          `json:"updatedAt"`
 	// From the item and project.
-	Repo    string `json:"repo"`
+	Repo string `json:"repo"`
 	// ProjectKey is the settings key platform:external_id (agents.projects, rules).
 	ProjectKey string `json:"projectKey"`
 	Number     int    `json:"number"`
-	Title   string `json:"title"`
-	ItemURL string `json:"itemUrl"`
-	// LocalPath is the project's mapped folder (direct fix jobs run there).
+	Title      string `json:"title"`
+	ItemURL    string `json:"itemUrl"`
+	// LocalPath is the folder fix jobs run in: the project's mapped folder, or
+	// for a mod page the linked code project's.
 	LocalPath string `json:"localPath"`
+	// Mod: the item is on a mod page (not a code project); CodeProject is the
+	// linked code project's name ("" = not linked).
+	Mod         bool   `json:"mod"`
+	CodeProject string `json:"codeProject,omitempty"`
 }
 
 const jobColumns = `j.id, coalesce(j.item_id, 0), j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
-	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''), p.local_path`
+	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''),
+	coalesce(cp.local_path, p.local_path), s.platform <> '` + CodePlatform + `', coalesce(cp.name, '')`
 
 // A project job (triage) has no item (item_id NULL): its item fields read as zero.
-const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id JOIN sources s ON s.id = p.source_id`
+const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id JOIN sources s ON s.id = p.source_id` + linkJoin
 
 func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	var (
@@ -82,7 +88,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	)
 	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.Origin, &j.RuleID, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
 		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
-		&j.Repo, &j.ProjectKey, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath)
+		&j.Repo, &j.ProjectKey, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath, &j.Mod, &j.CodeProject)
 	if err != nil {
 		return j, err
 	}
@@ -562,10 +568,25 @@ type JobInput struct {
 	Author         string
 	ProjectName    string // owner/repo
 	ProjectKey     string // platform:external_id (settings key)
-	ProjectURL     string
-	LocalPath      string
-	Labels         []string
-	Comments       []Comment
+	// ProjectURL and LocalPath are where the code lives: the project's own, or
+	// for a linked mod page the code project's.
+	ProjectURL string
+	LocalPath  string
+	Labels     []string
+	Comments   []Comment
+	// Mod: the item is on a mod page; CodeProject is the linked code project's
+	// name (owner/repo, "" = not linked).
+	Mod         bool
+	CodeProject string
+}
+
+// CodeRepo is the repository (owner/repo) the item's code lives in: the
+// project itself, or a mod page's linked code project.
+func (in JobInput) CodeRepo() string {
+	if in.Mod {
+		return in.CodeProject
+	}
+	return in.ProjectName
 }
 
 // SetItemLabels stores item itemID's labels as the platform reported them
@@ -593,9 +614,10 @@ func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 	var in JobInput
 	var labels string
 	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
-		p.name, `+projectKeySQL+`, p.url, p.local_path FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id
+		p.name, `+projectKeySQL+`, `+folderCols+`, s.platform <> '`+CodePlatform+`', coalesce(cp.name, '')
+		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id`+linkJoin+`
 		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author, &labels,
-		&in.ProjectName, &in.ProjectKey, &in.ProjectURL, &in.LocalPath)
+		&in.ProjectName, &in.ProjectKey, &in.LocalPath, &in.ProjectURL, &in.Mod, &in.CodeProject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}

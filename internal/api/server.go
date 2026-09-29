@@ -132,6 +132,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Store != nil && opts.Sync != nil {
 		s.registerData(mux)
+		s.registerLinks(mux)
 		opts.Sync.OnProgress(s.syncProgress)
 	}
 	if opts.Settings != nil {

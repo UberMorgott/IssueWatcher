@@ -178,7 +178,7 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 	case flowReply:
 		task = render(cfg.Prompts.Reply, p)
 	case flowFixDirect:
-		task = render(cfg.Prompts.FixDir, p)
+		task = render(modTemplate(cfg.Prompts.FixDir, p.in), p) + modNote(p.in)
 	case flowLabel:
 		task = render(cfg.Prompts.Label, p)
 		if !strings.Contains(cfg.Prompts.Label, "{labels}") {
@@ -198,7 +198,31 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 			task += "\n\nThe change:\n" + render("{diff}", p)
 		}
 	default:
-		task = render(cfg.Prompts.Fix, p)
+		task = render(modTemplate(cfg.Prompts.Fix, p.in), p) + modNote(p.in)
 	}
 	return system, task
+}
+
+// closingRefRe finds a closing reference to the item in a fix template
+// ("Fixes #{issue.number}", optionally quoted).
+var closingRefRe = regexp.MustCompile(`(?i)"?\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#\{issue\.number\}"?`)
+
+// modTemplate: a mod-page item's number is the dashboard's own ordinal, so a
+// "Fixes #N" commit would close an unrelated issue of the code repository;
+// the fix references the report URL instead.
+func modTemplate(tmpl string, in store.JobInput) string {
+	if !in.Mod {
+		return tmpl
+	}
+	return closingRefRe.ReplaceAllString(tmpl, `"Reported on {issue.url}"`)
+}
+
+// modNote tells the agent where a mod-page report comes from and forbids #N references.
+func modNote(in store.JobInput) string {
+	if !in.Mod {
+		return ""
+	}
+	return "\n\nThis report comes from the mod page " + in.ProjectName + " on " + in.Platform + ", not from the issue tracker of the code. " +
+		"The code is the linked project " + in.CodeProject + " (the current folder). Never write \"Fixes #N\", \"Closes #N\" or any other #number " +
+		"reference in commit messages: it would close an unrelated issue of " + in.CodeProject + "; reference the report URL " + in.URL + " instead."
 }

@@ -26,6 +26,10 @@ type Agents struct {
 	// TriageTopN is how many of a project triage's ranked picks get a fix job
 	// (1–20); per-project override in Projects.
 	TriageTopN int `json:"triageTopN"`
+	// ModPush allows «Push» / «Создать PR» for fixes of mod-page items (they run
+	// in the linked code project's folder); off = the commit stays local.
+	// Per-project override (keyed by the mod page) in Projects.
+	ModPush bool `json:"modPush"`
 }
 
 // DefaultTriageTopN is the built-in TriageTopN; MaxTriageTopN its upper bound.
@@ -101,6 +105,8 @@ type ProjectAgent struct {
 	// TriagePrompt is appended to the triage task for this project (its own
 	// criticality criteria); "" = none.
 	TriagePrompt string `json:"triagePrompt,omitempty"`
+	// ModPush overrides Agents.ModPush for this mod page; nil = inherit.
+	ModPush *bool `json:"modPush,omitempty"`
 	// Automation overrides the global automation defaults for this project.
 	Automation ProjectAutomation `json:"automation,omitzero"`
 }
@@ -220,6 +226,15 @@ func (a Agents) JobMCPFor(project string) bool {
 		return *o
 	}
 	return a.JobMCP
+}
+
+// ModPushFor reports whether fixes of mod page project's (platform:external_id)
+// items may be pushed / opened as a PR in the linked code project.
+func (a Agents) ModPushFor(project string) bool {
+	if o := a.Projects[project].ModPush; o != nil {
+		return *o
+	}
+	return a.ModPush
 }
 
 // blankDefaultPrompts stores prompts equal to the built-in text as "" in the
