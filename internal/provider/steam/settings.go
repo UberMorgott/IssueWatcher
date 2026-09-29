@@ -24,16 +24,23 @@ type Settings struct {
 	// Web session cookies for posting (steamcommunity.com).
 	LoginSecure string `json:"steamLoginSecure,omitempty"`
 	SessionID   string `json:"sessionid,omitempty"`
-	// SessionExpired: Steam refused the cookies; the user must paste new ones.
-	SessionExpired bool      `json:"sessionExpired,omitempty"`
-	CheckedAt      time.Time `json:"checkedAt,omitzero"`
+	// RefreshToken (QR sign-in) renews the web cookies when they expire.
+	RefreshToken string `json:"refreshToken,omitempty"`
+	// SessionExpired: Steam refused the cookies (and the refresh token, if
+	// any); the user must sign in again.
+	SessionExpired bool `json:"sessionExpired,omitempty"`
+	// Verified: a session check (or a post) succeeded with these cookies;
+	// replies are offered only then.
+	Verified  bool      `json:"verified,omitempty"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 // Session states reported by Status.
 const (
-	SessionNone    = "none"    // no cookies stored: read-only
-	SessionStored  = "stored"  // cookies stored, not yet refused
-	SessionExpired = "expired" // Steam refused them: re-login needed
+	SessionNone     = "none"     // no cookies stored: read-only
+	SessionStored   = "stored"   // cookies stored, not yet refused
+	SessionVerified = "verified" // cookies checked by Steam: replies on
+	SessionExpired  = "expired"  // Steam refused them: re-login needed
 )
 
 // Status is the non-secret view of Settings (GET /api/providers/steam).
@@ -43,7 +50,8 @@ type Status struct {
 	AppID      int    `json:"appId"`
 	HasAPIKey  bool   `json:"hasApiKey"`
 	HasCookies bool   `json:"hasCookies"`
-	Session    string `json:"session"` // none | stored | expired
+	Session    string `json:"session"`  // none | stored | verified | expired
+	SignedIn   bool   `json:"signedIn"` // signed in by QR: renews itself
 	CheckedAt  string `json:"checkedAt,omitempty"`
 }
 
@@ -51,11 +59,13 @@ func (s Settings) status() Status {
 	st := Status{
 		Configured: s.SteamID != "", SteamID: s.SteamID, AppID: s.AppID,
 		HasAPIKey: s.APIKey != "", HasCookies: s.LoginSecure != "" && s.SessionID != "",
-		Session: SessionNone,
+		Session: SessionNone, SignedIn: s.RefreshToken != "",
 	}
 	switch {
 	case st.HasCookies && s.SessionExpired:
 		st.Session = SessionExpired
+	case st.HasCookies && s.Verified:
+		st.Session = SessionVerified
 	case st.HasCookies:
 		st.Session = SessionStored
 	}
@@ -135,8 +145,8 @@ func (s Settings) apply(u Update) (Settings, error) {
 		}
 		*f.out, cookies = v, true
 	}
-	if cookies {
-		s.SessionExpired, s.CheckedAt = false, time.Time{}
+	if cookies { // pasted by hand: unverified, and no longer the QR session
+		s.SessionExpired, s.Verified, s.CheckedAt, s.RefreshToken = false, false, time.Time{}, ""
 	}
 	return s, nil
 }

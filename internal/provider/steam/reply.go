@@ -14,9 +14,9 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 )
 
-// ErrSessionExpired: Steam refused the stored web cookies; the user must paste
-// new ones (Settings › Платформы › Steam). It is a provider.ErrNotSignedIn.
-var ErrSessionExpired = fmt.Errorf("%w: Steam session expired — paste new cookies (re-login needed)", provider.ErrNotSignedIn)
+// ErrSessionExpired: Steam refused the stored web cookies; the user must sign
+// in again (Settings › Платформы › Steam). It is a provider.ErrNotSignedIn.
+var ErrSessionExpired = fmt.Errorf("%w: Steam session expired — sign in again", provider.ErrNotSignedIn)
 
 // ErrOutcomeUnknown: the post may or may not have landed and a read-back did
 // not find it. Never retried automatically (a retry could post twice).
@@ -52,12 +52,29 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if err != nil {
 		return provider.Comment{}, err
 	}
-	switch {
-	case s.SteamID == "" || s.LoginSecure == "" || s.SessionID == "":
-		return provider.Comment{}, fmt.Errorf("%w: paste the Steam cookies to post", provider.ErrNotSignedIn)
-	case s.SessionExpired:
+	if s.SteamID == "" || s.LoginSecure == "" || s.SessionID == "" {
+		return provider.Comment{}, fmt.Errorf("%w: sign in to Steam to post", provider.ErrNotSignedIn)
+	}
+	if s, err = p.ensureFresh(ctx, s); err != nil {
+		return provider.Comment{}, err
+	}
+	if s.SessionExpired {
 		return provider.Comment{}, ErrSessionExpired
 	}
+	c, err := p.replyOnce(ctx, s, fileID, commentID, body)
+	if errors.Is(err, ErrSessionExpired) && s.RefreshToken != "" {
+		// Refused before posting: renew the web session once and post again.
+		s2, rerr := p.refresh(ctx, s)
+		if rerr != nil {
+			return provider.Comment{}, err
+		}
+		return p.replyOnce(ctx, s2, fileID, commentID, body)
+	}
+	return c, err
+}
+
+// replyOnce posts with the session s; a refusal marks s expired.
+func (p *Provider) replyOnce(ctx context.Context, s Settings, fileID, commentID, body string) (provider.Comment, error) {
 	creator, err := p.creator(ctx, fileID)
 	if err != nil {
 		return provider.Comment{}, err
@@ -206,7 +223,7 @@ func (p *Provider) setSession(seen Settings, expired bool) {
 		p.mu.Unlock()
 		return
 	}
-	s.SessionExpired, s.CheckedAt = expired, p.opts.Now().UTC()
+	s.SessionExpired, s.Verified, s.CheckedAt = expired, !expired, p.opts.Now().UTC()
 	p.settings = s
 	p.mu.Unlock()
 	if err := saveSettings(p.opts.Dir, s); err != nil {

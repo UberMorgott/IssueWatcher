@@ -29,6 +29,7 @@ const Platform = "steam"
 const (
 	defaultCommunity = "https://steamcommunity.com"
 	defaultAPI       = "https://api.steampowered.com"
+	defaultLogin     = "https://login.steampowered.com"
 	pageSize         = 50 // comments per render request (Steam honours 50)
 	filesPerPage     = 30 // myworkshopfiles numperpage
 	maxPages         = 200
@@ -40,6 +41,7 @@ type Options struct {
 	Dir          string // data\secrets (steam.json)
 	CommunityURL string // default https://steamcommunity.com (tests: httptest)
 	APIURL       string // default https://api.steampowered.com
+	LoginURL     string // default https://login.steampowered.com
 	HTTP         *http.Client
 	Log          *slog.Logger
 	Now          func() time.Time
@@ -47,6 +49,10 @@ type Options struct {
 	MinGap time.Duration
 	// PageSize is the comments per render request (default 50).
 	PageSize int
+	// QRInterval overrides the QR poll interval Steam asks for (tests).
+	QRInterval time.Duration
+	// OnSignIn runs after a QR sign-in stored the session.
+	OnSignIn func()
 }
 
 // Provider reads (and, with the user's cookies, posts) Workshop comments.
@@ -61,6 +67,9 @@ type Provider struct {
 
 	gap  sync.Mutex // serialises requests: one at a time, MinGap apart
 	last time.Time
+
+	qmu sync.Mutex // the QR sign-in
+	qr  *qrLogin
 }
 
 // New creates the provider; settings are read lazily from Options.Dir.
@@ -70,6 +79,9 @@ func New(opts Options) *Provider {
 	}
 	if opts.APIURL == "" {
 		opts.APIURL = defaultAPI
+	}
+	if opts.LoginURL == "" {
+		opts.LoginURL = defaultLogin
 	}
 	if opts.HTTP == nil {
 		opts.HTTP = &http.Client{Timeout: 30 * time.Second}
@@ -88,18 +100,22 @@ func New(opts Options) *Provider {
 	}
 	opts.CommunityURL = strings.TrimRight(opts.CommunityURL, "/")
 	opts.APIURL = strings.TrimRight(opts.APIURL, "/")
+	opts.LoginURL = strings.TrimRight(opts.LoginURL, "/")
 	return &Provider{opts: opts, creators: map[string]string{}}
 }
 
 // Platform implements provider.Provider.
 func (p *Provider) Platform() string { return Platform }
 
-// Capabilities implements provider.Provider. Reply stays off until the owner
-// has verified one live post (TASKS.md Phase 5 step 12).
+// Capabilities implements provider.Provider. Reply is on only while the
+// stored web session has passed a check (QR sign-in, «Проверить» or a post)
+// and Steam has not refused it since.
 func (p *Provider) Capabilities() provider.Capabilities {
+	s, _ := p.current()
 	return provider.Capabilities{
 		ListProjects: true, SyncItems: true, ListComments: true,
-		Auth: provider.AuthCookieSession, Kinds: []string{"comment"},
+		Reply: s.LoginSecure != "" && s.SessionID != "" && s.Verified && !s.SessionExpired,
+		Auth:  provider.AuthCookieSession, Kinds: []string{"comment"},
 	}
 }
 

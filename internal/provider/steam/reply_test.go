@@ -85,7 +85,7 @@ func TestReplyPostsExactFormAndCookies(t *testing.T) {
 	if c.ExternalID != "900000000000000001" || c.Author != ownerID || c.Body != want["comment"] {
 		t.Fatalf("comment %+v", c)
 	}
-	if st, _ := p.Status(); st.Session != SessionStored || st.CheckedAt == "" {
+	if st, _ := p.Status(); st.Session != SessionVerified || st.CheckedAt == "" || !p.Capabilities().Reply { // a post verifies the session
 		t.Fatalf("status %+v", st)
 	}
 	// A body that already addresses someone is posted as is.
