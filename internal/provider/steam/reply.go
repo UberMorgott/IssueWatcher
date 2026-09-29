@@ -41,8 +41,9 @@ type postAnswer struct {
 // Reply implements provider.Provider. Steam comments are flat, so the reply is
 // a new top-level comment on the Workshop item that starts with @<author> of
 // the comment replied to (unless the body already starts with '@'). Posting
-// needs the user's steamLoginSecure + sessionid cookies; a refusal marks the
-// session expired. Never retried.
+// needs the user's steamLoginSecure + sessionid cookies; a refusal renews
+// them from the refresh token once and marks the session expired only when
+// that renewal is refused too. A post that may have landed is never retried.
 func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (provider.Comment, error) {
 	fileID, commentID, ok := parseItemExternalID(itemExternalID)
 	if !ok {
@@ -62,18 +63,32 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 		return provider.Comment{}, ErrSessionExpired
 	}
 	c, err := p.replyOnce(ctx, s, fileID, commentID, body)
-	if errors.Is(err, ErrSessionExpired) && s.RefreshToken != "" {
-		// Refused before posting: renew the web session once and post again.
-		s2, rerr := p.refresh(ctx, s)
-		if rerr != nil {
-			return provider.Comment{}, err
-		}
-		return p.replyOnce(ctx, s2, fileID, commentID, body)
+	if !errors.Is(err, errRefused) {
+		return c, err
+	}
+	if s.RefreshToken == "" {
+		return provider.Comment{}, p.expire(s)
+	}
+	// Refused before posting: renew the web session once and post again. The
+	// session is flagged expired only when the renewal is refused (refresh
+	// flags it on ErrRefreshExpired); a transient renewal failure (5xx,
+	// network, ctx) leaves it alone so the next attempt retries.
+	s2, rerr := p.refresh(ctx, s)
+	if rerr != nil {
+		return provider.Comment{}, rerr
+	}
+	c, err = p.replyOnce(ctx, s2, fileID, commentID, body)
+	if errors.Is(err, errRefused) {
+		return provider.Comment{}, p.expire(s2)
 	}
 	return c, err
 }
 
-// replyOnce posts with the session s; a refusal marks s expired.
+// errRefused: Steam refused the cookies before posting. Reply decides whether
+// that expires the session (after trying the refresh token).
+var errRefused = errors.New("steam: post refused, not signed in")
+
+// replyOnce posts with the session s; a refusal returns errRefused.
 func (p *Provider) replyOnce(ctx context.Context, s Settings, fileID, commentID, body string) (provider.Comment, error) {
 	creator, err := p.creator(ctx, fileID)
 	if err != nil {
@@ -106,20 +121,20 @@ func (p *Provider) replyOnce(ctx context.Context, s Settings, fileID, commentID,
 		p.opts.Log.Warn("steam: post failed, reading back", "item", fileID, "err", err)
 		return p.readBack(context.WithoutCancel(ctx), creator, fileID, s, text, sent)
 	case a.Status == http.StatusUnauthorized || a.Status == http.StatusForbidden || (a.URL != nil && strings.Contains(a.URL.Path, "/login")):
-		return provider.Comment{}, p.expire(s)
+		return provider.Comment{}, errRefused
 	case a.Status != http.StatusOK:
 		return provider.Comment{}, fmt.Errorf("steam: post comment: HTTP %d", a.Status)
 	}
 	var r postAnswer
 	if err := json.Unmarshal(a.Body, &r); err != nil {
 		if strings.Contains(strings.ToLower(string(a.Body)), "login") { // an HTML sign-in page
-			return provider.Comment{}, p.expire(s)
+			return provider.Comment{}, errRefused
 		}
 		return provider.Comment{}, fmt.Errorf("steam: post comment: %w", err)
 	}
 	if !r.Success {
 		if notLoggedIn(r.Error) {
-			return provider.Comment{}, p.expire(s)
+			return provider.Comment{}, errRefused
 		}
 		return provider.Comment{}, fmt.Errorf("steam: post comment refused: %s", cmpStr(r.Error, "success=false"))
 	}

@@ -305,6 +305,56 @@ func TestAccessExpiry(t *testing.T) {
 }
 
 func TestReplyRenewsRefusedSessionAndPostsOnce(t *testing.T) {
+	st, a, p := replyRenewFixture(t)
+	a.mu.Lock()
+	a.valid = append(a.valid, "revoked") // the web session was dropped; the refresh token still works
+	a.mu.Unlock()
+	c, err := p.Reply(context.Background(), ItemExternalID(fileID, targetID), "renewed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.posts) != 2 || c.Body != "@user1 renewed" {
+		t.Fatalf("posts %d body %q", len(st.posts), c.Body)
+	}
+	if s, _ := p.Status(); s.Session != SessionVerified {
+		t.Fatalf("session %q", s.Session)
+	}
+}
+
+// A refused post whose renewal fails transiently (503) returns the transient
+// error and never flags the session expired; the next reply renews and posts.
+func TestReplyRefusedTransientRefreshKeepsSession(t *testing.T) {
+	st, a, p := replyRenewFixture(t)
+	a.mu.Lock()
+	a.valid = append(a.valid, "revoked")
+	a.failFinal = http.StatusServiceUnavailable
+	a.mu.Unlock()
+	_, err := p.Reply(context.Background(), ItemExternalID(fileID, targetID), "later")
+	if err == nil || errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("err %v, want a transient error", err)
+	}
+	if s, _ := p.Status(); s.Session == SessionExpired || !s.SignedIn {
+		t.Fatalf("status %+v", s)
+	}
+	a.mu.Lock()
+	a.failFinal = 0
+	a.mu.Unlock()
+	c, err := p.Reply(context.Background(), ItemExternalID(fileID, targetID), "later")
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if c.Body != "@user1 later" || len(st.posts) != 3 {
+		t.Fatalf("posts %d body %q", len(st.posts), c.Body)
+	}
+	if s, _ := p.Status(); s.Session != SessionVerified {
+		t.Fatalf("after retry %q", s.Session)
+	}
+}
+
+// replyRenewFixture: a signed-in provider whose post endpoint accepts only
+// cookies the fake auth server considers valid.
+func replyRenewFixture(t *testing.T) (*fakeSteam, *fakeAuth, *Provider) {
+	t.Helper()
 	st := newFake(t)
 	a := newFakeAuth(t)
 	auth := map[string]bool{
@@ -334,19 +384,7 @@ func TestReplyRenewsRefusedSessionAndPostsOnce(t *testing.T) {
 	p := New(Options{Dir: t.TempDir(), CommunityURL: mux.URL, APIURL: mux.URL, LoginURL: mux.URL,
 		MinGap: time.Millisecond, PageSize: 10, QRInterval: 5 * time.Millisecond})
 	signInQR(t, p)
-	a.mu.Lock()
-	a.valid = append(a.valid, "revoked") // the web session was dropped; the refresh token still works
-	a.mu.Unlock()
-	c, err := p.Reply(context.Background(), ItemExternalID(fileID, targetID), "renewed")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(st.posts) != 2 || c.Body != "@user1 renewed" {
-		t.Fatalf("posts %d body %q", len(st.posts), c.Body)
-	}
-	if s, _ := p.Status(); s.Session != SessionVerified {
-		t.Fatalf("session %q", s.Session)
-	}
+	return st, a, p
 }
 
 // A QR attempt cancelled after its session check but before the store must not
