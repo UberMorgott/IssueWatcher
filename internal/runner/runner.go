@@ -72,6 +72,8 @@ type Options struct {
 	GitURL func(projectURL string) string
 	// Verify runs the verify command (tests override the shell); default cmd.exe /c.
 	Shell []string
+	// Now is the automation clock (24 h caps); default time.Now.
+	Now func() time.Time
 }
 
 // Runner owns the queue.
@@ -79,6 +81,8 @@ type Runner struct {
 	opts Options
 
 	minute time.Duration // unit of profile timeouts (tests shrink it)
+
+	autoMu sync.Mutex // Automate batches
 
 	mu      sync.Mutex
 	running map[int64]*activeRun
@@ -128,6 +132,9 @@ func New(opts Options) *Runner {
 	}
 	if opts.OnSteps == nil {
 		opts.OnSteps = func(int64, int, []Step) {}
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
 	}
 	return &Runner{opts: opts, minute: time.Minute, running: map[int64]*activeRun{}, wake: make(chan struct{}, 1)}
 }

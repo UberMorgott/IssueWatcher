@@ -22,10 +22,10 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Fatalf("user_version = %d, want 6", version)
+	if version != 7 {
+		t.Fatalf("user_version = %d, want 7", version)
 	}
-	for _, table := range []string{"sources", "projects", "items", "comments", "jobs"} {
+	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
 		err := db.QueryRowContext(ctx,
 			"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&n)

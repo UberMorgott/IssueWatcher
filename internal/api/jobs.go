@@ -24,6 +24,7 @@ import (
 //	POST /api/jobs/{id}/labels {labels[]} add labels to the label job's issue (checked, add only) → done
 //	GET  /api/projects/{id}/labels       [{name, color, description}] the project's labels
 //	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
+//	GET  /api/automation/log?cursor=&limit=  rule decisions, newest first {items, nextCursor, more}
 //
 // SSE: job.changed (job), job.log {id, attempt, steps}.
 
@@ -57,6 +58,7 @@ func (s *Server) registerJobs(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/jobs/{id}/"+action, s.jobAction(f))
 	}
 	mux.HandleFunc("GET /api/agents/detect", s.handleDetect)
+	mux.HandleFunc("GET /api/automation/log", s.handleAutomationLog)
 }
 
 func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +78,24 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.internalError(w, "list jobs", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chunk)
+}
+
+func (s *Server) handleAutomationLog(w http.ResponseWriter, r *http.Request) {
+	limit, err := queryInt(r, "limit")
+	if err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	chunk, err := s.opts.Store.AutomationLog(r.Context(), r.URL.Query().Get("cursor"), int(min(limit, 1000)))
+	if errors.Is(err, store.ErrBadCursor) {
+		errJSON(w, http.StatusBadRequest, "bad cursor")
+		return
+	}
+	if err != nil {
+		s.internalError(w, "automation log", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, chunk)

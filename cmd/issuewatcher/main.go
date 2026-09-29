@@ -198,7 +198,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 			setBadge(int64(unread))
 			publishLive(srv, live.Load().Filter(events, time.Now()))
 			if jobs != nil {
-				jobs.Refresh() // a closed issue ends its direct fix job
+				jobs.Automate(context.Background(), events) // rules → rule jobs (off by default)
+				jobs.Refresh()                              // a closed issue ends its direct fix job
 			}
 		},
 	})

@@ -61,6 +61,7 @@ type env struct {
 	steps int
 	cards []store.Job
 	reply []string
+	clock time.Time // automation clock (Options.Now)
 }
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -161,7 +162,9 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 	}
 	t.Setenv("FAKECLI_RECORD", e.record)
 	t.Setenv("GH_TOKEN", "must-not-reach-the-agent")
+	e.clock = now
 	e.r = New(Options{
+		Now: func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.clock },
 		Store: e.st, DataDir: e.data, Publisher: github.NewProvider(a), Labels: github.NewProvider(a), Log: slog.New(slog.DiscardHandler),
 		Settings: func() config.Settings { e.mu.Lock(); defer e.mu.Unlock(); return e.cfg },
 		GitURL:   func(string) string { return e.bare },
