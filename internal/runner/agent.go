@@ -179,9 +179,17 @@ func cliArgs(s agentSpec) (args []string, stdin string, lastMsg string, err erro
 		lastMsg = filepath.Join(s.workDir, s.flow+".last.txt")
 		_ = os.Remove(lastMsg)
 		args = []string{"exec", "--json", "--ephemeral", "-C", s.dir, "-o", lastMsg, "--output-schema", schemaFile}
-		if s.readOnly {
+		switch {
+		case s.readOnly:
 			args = append(args, "-s", "read-only", "--skip-git-repo-check")
-		} else {
+		case s.flow == flowFixDirect:
+			// Direct mode commits in the user's own clone: workspace-write keeps .git
+			// read-only (index.lock: Permission denied) and, on Windows, runs as a
+			// sandbox user git rejects ("dubious ownership"), with no network or Go/npm
+			// caches outside the folder. Full access = the user's rights, as claude's
+			// direct run has (E2E 2026-09-29, codex-cli 0.157.1).
+			args = append(args, "-s", "danger-full-access")
+		default:
 			args = append(args, "-s", "workspace-write")
 		}
 		if p.Model != "" {

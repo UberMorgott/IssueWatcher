@@ -118,6 +118,12 @@ func TestPromptLayers(t *testing.T) {
 		!strings.HasPrefix(stdin, "Instructions") || filepath.Base(last) != "reply.last.txt" {
 		t.Fatalf("codex args %v stdin %q last %q err %v", codexArgs, stdin, last, err)
 	}
+	for flow, want := range map[string]string{flowFix: "-s workspace-write", flowFixDirect: "-s danger-full-access"} {
+		a, _, _, err := cliArgs(agentSpec{profile: config.AgentProfile{ID: "c", CLI: config.CLICodex}, flow: flow, dir: "D", workDir: t.TempDir()})
+		if err != nil || !strings.Contains(strings.Join(a, " "), want) {
+			t.Fatalf("codex %s args %v err %v, want %s", flow, a, err, want)
+		}
+	}
 }
 
 func TestSlugs(t *testing.T) {
