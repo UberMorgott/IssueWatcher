@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
-	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -37,9 +36,37 @@ func TestLabelsAPI(t *testing.T) {
 	var repos []store.Repo
 	e.call(t, http.MethodGet, "/api/projects", "", &repos)
 	pid := strconv.FormatInt(repos[0].ID, 10)
-	var labels []provider.Label
-	if code := e.call(t, http.MethodGet, "/api/projects/"+pid+"/labels", "", &labels); code != http.StatusOK || len(labels) != 3 || labels[1].Name != "documentation" {
-		t.Fatalf("project labels %d %+v", code, labels)
+	// Labels come from SQLite: the first GET finds none and starts a
+	// background fetch; its result lands with data.changed{reason:labels}.
+	br := openStream(t, e.s)
+	var pl ProjectLabels
+	if code := e.call(t, http.MethodGet, "/api/projects/"+pid+"/labels", "", &pl); code != http.StatusOK || len(pl.Labels) != 0 || !pl.Refreshing || pl.FetchedAt != "" {
+		t.Fatalf("first labels read %d %+v", code, pl)
+	}
+	for {
+		name, data := readEvent(t, br)
+		if name == EventDataChanged && data == `{"reason":"labels","repo":"octo/app"}` {
+			break
+		}
+	}
+	listCalls := func() int {
+		n := 0
+		for _, c := range e.gh.Calls() {
+			if c.Method == http.MethodGet && c.Path == "/repos/octo/app/labels" {
+				n++
+			}
+		}
+		return n
+	}
+	before := listCalls()
+	for range 3 {
+		if code := e.call(t, http.MethodGet, "/api/projects/"+pid+"/labels", "", &pl); code != http.StatusOK || len(pl.Labels) != 3 ||
+			pl.Labels[1].Name != "documentation" || pl.Refreshing || pl.FetchedAt == "" {
+			t.Fatalf("project labels %d %+v", code, pl)
+		}
+	}
+	if n := listCalls(); n != before || before != 1 {
+		t.Fatalf("label list calls: %d before, %d after three reads; GET must not call GitHub", before, n)
 	}
 	if code := e.call(t, http.MethodGet, "/api/projects/99999/labels", "", nil); code != http.StatusNotFound {
 		t.Fatalf("labels of a missing project: %d", code)
@@ -102,8 +129,9 @@ func TestLabelsAPI(t *testing.T) {
 	if err := e.auth.Logout(); err != nil {
 		t.Fatal(err)
 	}
-	if code := e.call(t, http.MethodGet, "/api/projects/"+pid+"/labels", "", nil); code != http.StatusConflict {
-		t.Fatalf("labels signed out: %d", code)
+	// Signed out: the stored labels are still served (no GitHub call).
+	if code := e.call(t, http.MethodGet, "/api/projects/"+pid+"/labels", "", &pl); code != http.StatusOK || len(pl.Labels) != 3 {
+		t.Fatalf("labels signed out: %d %+v", code, pl)
 	}
 	if code := e.call(t, http.MethodPost, review(), `{"labels":["enhancement"]}`, nil); code != http.StatusConflict {
 		t.Fatalf("apply signed out: %d", code)

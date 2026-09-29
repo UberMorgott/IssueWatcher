@@ -22,7 +22,7 @@ import type {
   JobAttempt,
   JobFlow,
   JobQuery,
-  RepoLabel,
+  ProjectLabels,
   JobStep,
   QueuedJob,
   AutomationChunk,
@@ -232,7 +232,7 @@ export const api = {
     const r = await call<{ attempts: JobAttempt[] }>('GET', `/api/jobs/${id}/attempts`)
     return r.ok ? { ...r, data: (r.data.attempts ?? []).map((a) => ({ ...a, result: a.result && typeof a.result === 'object' ? a.result : {} })) } : r
   },
-  projectLabels: (id: number) => call<RepoLabel[]>('GET', `/api/projects/${id}/labels`),
+  projectLabels: (id: number) => call<ProjectLabels>('GET', `/api/projects/${id}/labels`),
   detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
   // --- platforms (Settings › Платформы) and mod page links
   platforms: () => call<PlatformStatus[]>('GET', '/api/platforms'),

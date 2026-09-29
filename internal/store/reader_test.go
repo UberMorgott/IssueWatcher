@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -60,5 +61,36 @@ func TestReadsDoNotWaitForAWrite(t *testing.T) {
 	}
 	if _, err := rd.ExecContext(ctx, `UPDATE items SET title = 'x'`); err == nil {
 		t.Fatal("the reader pool accepts writes")
+	}
+}
+
+func TestProjectLabelsStored(t *testing.T) {
+	s := newStore(t)
+	ctx := t.Context()
+	src, err := s.UpsertSource(ctx, "github", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := s.SyncProjects(ctx, src, []provider.Project{{ExternalID: "o/app", Name: "o/app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := projects[0].ID
+	if l, at, err := s.ProjectLabels(ctx, id); err != nil || len(l) != 0 || !at.IsZero() {
+		t.Fatalf("never fetched: %v %v %v", l, at, err)
+	}
+	want := []provider.Label{{Name: "zeta", Color: "ff0000"}, {Name: "alpha", Description: "d"}}
+	if err := s.SetProjectLabels(ctx, id, want, t0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetProjectLabels(ctx, id, want, t0); err != nil { // replace, not append
+		t.Fatal(err)
+	}
+	l, at, err := s.ProjectLabels(ctx, id)
+	if err != nil || len(l) != 2 || l[0] != want[0] || l[1] != want[1] || !at.Equal(t0) {
+		t.Fatalf("stored labels %+v %v %v", l, at, err)
+	}
+	if _, _, err := s.ProjectLabels(ctx, 9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("labels of no project: %v", err)
 	}
 }

@@ -136,18 +136,33 @@ function attemptNote(a: JobAttempt): string {
   return a.error
 }
 
-// Label flow: the repository's labels for the editor (loaded while under review).
+// Label flow: the repository's labels for the editor (loaded while under review),
+// read from the local store; a first or stale list arrives in the background
+// (data.changed 'labels'), a skeleton shows until then.
 const repoLabels = ref<RepoLabel[]>([])
 const labelsError = ref('')
+const labelsLoading = ref(false)
+const labelsProject = computed(() => (job.value?.flow === 'label' && job.value.state === 'needs_review' ? job.value.projectId : 0))
+async function loadLabels(pid: number) {
+  if (!pid) return
+  const r = await api.projectLabels(pid)
+  if (pid !== labelsProject.value) return
+  if (!r.ok) {
+    labelsError.value = r.error
+    labelsLoading.value = false
+    return
+  }
+  repoLabels.value = r.data.labels
+  labelsLoading.value = r.data.refreshing && !r.data.labels.length
+  labelsError.value = !r.data.refreshing && !r.data.labels.length ? (r.data.error ?? '') : ''
+}
+watch(labelsProject, (pid) => void loadLabels(pid), { immediate: true })
 watch(
-  () => (job.value?.flow === 'label' && job.value.state === 'needs_review' ? job.value.projectId : 0),
-  async (pid) => {
-    if (!pid) return
-    const r = await api.projectLabels(pid)
-    labelsError.value = r.ok ? '' : r.error
-    if (r.ok) repoLabels.value = r.data
+  () => app.dataVersion,
+  () => {
+    const ch = app.lastChanges
+    if (labelsProject.value && (ch === null || ch.some((c) => c.reason === 'labels'))) void loadLabels(labelsProject.value)
   },
-  { immediate: true },
 )
 const labelOptions = computed(() => {
   const names = repoLabels.value.map((l) => l.name)
@@ -647,7 +662,12 @@ function agentStats(a: AgentResult): string[] {
           <span class="muted small">{{ can.labels ? t('job.labels.text') : '' }}</span>
         </div>
         <template v-if="can.labels">
+          <Skeleton
+            v-if="labelsLoading"
+            height="2.5rem"
+          />
           <MultiSelect
+            v-else
             v-model="picked"
             :options="labelOptions"
             option-label="label"

@@ -144,7 +144,7 @@ export interface RepoChunk {
 
 /** data.changed live event. */
 export interface DataChange {
-  reason: 'sync' | 'read' | 'reply' | 'job'
+  reason: 'sync' | 'read' | 'reply' | 'job' | 'folder' | 'labels'
   itemId?: number
   repo?: string
 }
@@ -561,6 +561,15 @@ export interface TriageResult {
 }
 
 /** GET /api/projects/{id}/labels row (provider.Label). */
+/** GET /api/projects/{id}/labels: the labels stored in SQLite; a stale list refreshes in the background (data.changed reason 'labels'). */
+export interface ProjectLabels {
+  labels: RepoLabel[]
+  /** '' = never fetched. */
+  fetchedAt: string
+  refreshing: boolean
+  error?: string
+}
+
 export interface RepoLabel {
   name: string
   /** Hex without '#', '' when unknown. */

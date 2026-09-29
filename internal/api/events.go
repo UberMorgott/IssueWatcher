@@ -31,7 +31,7 @@ const (
 // DataChange is the data.changed payload: why the stored data changed and, for
 // local actions, which item.
 type DataChange struct {
-	Reason string `json:"reason"` // sync | read | reply
+	Reason string `json:"reason"` // sync | read | reply | job | folder | labels
 	ItemID int64  `json:"itemId,omitempty"`
 	Repo   string `json:"repo,omitempty"`
 }
@@ -183,7 +183,7 @@ type hub struct {
 	mu      sync.Mutex
 	seq     uint64
 	clients map[chan sseMsg]uint64 // → connect order; the highest is the active tab
-	joined  chan struct{}           // signalled (non-blocking) on every subscribe
+	joined  chan struct{}          // signalled (non-blocking) on every subscribe
 }
 
 func newHub() *hub { return &hub{clients: map[chan sseMsg]uint64{}, joined: make(chan struct{}, 1)} }

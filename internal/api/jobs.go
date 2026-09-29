@@ -295,22 +295,6 @@ func (s *Server) handleProjectTriage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, j)
 }
 
-func (s *Server) handleProjectLabels(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	p, err := s.opts.Store.Repo(r.Context(), id)
-	if s.jobError(w, err) {
-		return
-	}
-	labels, err := s.opts.Runner.RepoLabels(r.Context(), p.Name)
-	if s.jobError(w, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, labels)
-}
-
 // jobError writes the HTTP error for a runner/store error; false when err is nil.
 // A publish that failed returns 502 with the job (state back to needs_review).
 func (s *Server) jobError(w http.ResponseWriter, err error) bool {

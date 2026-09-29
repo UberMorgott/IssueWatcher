@@ -92,11 +92,15 @@ type Server struct {
 	mu       sync.Mutex
 	launches map[string]launch
 
-	gh     *githubAuth // nil without Options.GitHub
-	hub    *hub        // live events for open tabs (events.go)
-	pace   syncPacer   // sync.status / data.changed pacing per source (events.go)
-	opener opener      // OpenBrowser decisions and the pending new tab (open.go)
-	pickMu sync.Mutex  // one native folder dialog at a time (dialog.go)
+	gh     *githubAuth  // nil without Options.GitHub
+	hub    *hub         // live events for open tabs (events.go)
+	pace   syncPacer    // sync.status / data.changed pacing per source (events.go)
+	opener opener       // OpenBrowser decisions and the pending new tab (open.go)
+	pickMu sync.Mutex   // one native folder dialog at a time (dialog.go)
+	labels labelRefresh // background label fetches (labels.go)
+
+	bg     context.Context // background work of the server (label fetches), ended by Shutdown
+	stopBg context.CancelFunc
 }
 
 type launch struct {
@@ -124,6 +128,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		launches: map[string]launch{},
 		hub:      newHub(),
 	}
+	s.bg, s.stopBg = context.WithCancel(context.WithoutCancel(ctx))
 	s.index, _ = fs.ReadFile(opts.Assets, "index.html") // nil → 503 "frontend not built"
 
 	mux := http.NewServeMux()
@@ -233,6 +238,7 @@ func (s *Server) Serve() error {
 
 // Shutdown stops the server gracefully.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopBg()
 	return s.srv.Shutdown(ctx)
 }
 
