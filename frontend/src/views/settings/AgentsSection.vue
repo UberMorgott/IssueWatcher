@@ -71,6 +71,7 @@ function useDraft(source: () => string | undefined) {
 type Draft = Omit<AgentProfile, 'args'> & { argsText: string }
 const editing = ref<Draft | null>(null)
 const editIndex = ref(-1) // -1 = new profile
+const editId = ref<string>() // the edited profile's id when the dialog opened (undefined = new)
 const idTouched = ref(false)
 const detected = ref<DetectedCLI[] | null>(null)
 const detecting = ref(false)
@@ -92,6 +93,7 @@ function slug(s: string): string {
 function openProfile(i: number) {
   const p = i >= 0 ? ag.value?.profiles[i] : undefined
   editIndex.value = i
+  editId.value = p?.id
   idTouched.value = i >= 0
   detected.value = null
   formError.value = ''
@@ -137,14 +139,19 @@ async function saveProfile() {
     maxBudgetUsd: rest.cli === 'claude' ? rest.maxBudgetUsd || 0 : 0,
   }
   // A function of the latest saved list (by profile id): the store rebuilds it
-  // on a 409 retry, so a stale array never overwrites a newer save.
-  const oldId = editIndex.value >= 0 ? cur.profiles[editIndex.value]?.id : undefined
+  // on a 409 retry, so a stale array never overwrites a newer save. A profile
+  // deleted meanwhile (another tab) is a conflict: never re-added by an edit.
+  const oldId = editId.value
   saving.value = true
   const ok = await save((s) => {
     const next = s.agents.profiles.slice()
-    const k = oldId === undefined ? -1 : next.findIndex((x) => x.id === oldId)
-    if (k >= 0) next[k] = p
-    else next.push(p)
+    if (oldId === undefined) {
+      next.push(p)
+    } else {
+      const k = next.findIndex((x) => x.id === oldId)
+      if (k < 0) throw new Error(t('settings.agents.profileGone'))
+      next[k] = p
+    }
     return { agents: { profiles: next } }
   })
   saving.value = false

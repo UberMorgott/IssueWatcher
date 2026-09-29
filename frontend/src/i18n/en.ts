@@ -750,6 +750,7 @@ const en = {
       editTitle: 'Agent profile',
       idText: 'Letters a–z, digits and hyphens; cannot be changed later.',
       idFixed: 'Roles and jobs refer to the profile by this id.',
+      profileGone: 'This profile was deleted meanwhile (another tab?): nothing saved.',
       path: 'Executable',
       pathPlaceholder: 'Empty = found on PATH',
       detect: 'Find',

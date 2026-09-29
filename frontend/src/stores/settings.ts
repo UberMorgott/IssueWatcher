@@ -59,14 +59,20 @@ export const useSettingsStore = defineStore('settings', () => {
    * Saves a change; returns '' or an error message (validation text from the server).
    * A function patch is rebuilt from the latest settings on every attempt: use it
    * for arrays (a merge patch replaces them whole), so a retry after 409 never
-   * re-sends a stale array over a newer save.
+   * re-sends a stale array over a newer save. A function patch may throw to
+   * give up when the latest settings void it (its message is returned).
    */
   async function patch(p: SettingsPatch | ((s: Settings) => SettingsPatch)): Promise<string> {
     if (!doc.value) return t('settings.unavailable')
     saving.value++
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
-        const body = typeof p === 'function' ? p(doc.value.settings) : p
+        let body: SettingsPatch
+        try {
+          body = typeof p === 'function' ? p(doc.value.settings) : p
+        } catch (e) {
+          return e instanceof Error ? e.message : String(e) // the change no longer applies to the latest settings
+        }
         const r = await api.patchSettings(doc.value.revision, body)
         if (r.ok) {
           apply(r.data)
