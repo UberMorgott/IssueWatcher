@@ -91,7 +91,7 @@ function onLive(name: LiveEventName, data: unknown) {
       if (data) updates.apply(data as UpdateStatus)
       return
     case 'sync.status':
-      void app.onSyncStatus(data as SyncProgress | null)
+      app.onSyncStatus(data as SyncProgress | null)
       return
     case 'data.changed':
       app.invalidate((data as DataChange | null) ?? undefined)
@@ -194,7 +194,7 @@ function takeOver() {
 
 useShortcuts({
   sync: () => {
-    if (app.githubConnected && !app.syncing) void app.syncNow()
+    if (app.anyConnected && !app.syncing) void app.syncNow()
   },
   search: () => {
     if (route.name !== 'issues') void router.push({ name: 'issues', query: { focus: '1' } })

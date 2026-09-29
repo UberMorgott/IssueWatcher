@@ -94,6 +94,7 @@ type Server struct {
 
 	gh     *githubAuth // nil without Options.GitHub
 	hub    *hub        // live events for open tabs (events.go)
+	pace   syncPacer   // sync.status / data.changed pacing per source (events.go)
 	opener opener      // OpenBrowser decisions and the pending new tab (open.go)
 	pickMu sync.Mutex  // one native folder dialog at a time (dialog.go)
 }

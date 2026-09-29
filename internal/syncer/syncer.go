@@ -77,6 +77,10 @@ type Progress struct {
 	Changed int    `json:"changed"`
 	Unread  int    `json:"unread"`
 	Error   string `json:"error,omitempty"`
+	// Background marks a cycle nobody asked for (the scheduled or resumed
+	// reconcile, change checks): the UI shows it as a quiet hint and never
+	// blocks on it. A Trigger (Sync now, sign-in) or a project row sync is not.
+	Background bool `json:"background,omitempty"`
 }
 
 // Syncer runs the schedule.
@@ -98,6 +102,7 @@ type Syncer struct {
 	nextReconcile  time.Time
 	reconciledOnce bool
 	forceReconcile bool
+	userForce      bool // the forced reconcile was asked for (Trigger), not a background one
 	warmed         bool // warmStart ran (first Step)
 	bootRetry      int  // failed reconciles in a row with no targets (retry backoff)
 	verifyAccount  bool // resumed from the store: the first check confirms the account
@@ -199,7 +204,7 @@ func (s *Syncer) Run(ctx context.Context) {
 		case <-s.trigger:
 			t.Stop()
 			s.mu.Lock()
-			s.forceReconcile = true
+			s.forceReconcile, s.userForce = true, true
 			s.mu.Unlock()
 		case <-s.wake:
 			t.Stop()
@@ -249,13 +254,17 @@ func (s *Syncer) update(f func(*Status)) {
 	s.mu.Unlock()
 }
 
-// SyncOnce runs one full reconcile. Signed out is not an error: nothing to do.
-func (s *Syncer) SyncOnce(ctx context.Context) error {
+// SyncOnce runs one full reconcile asked for by the user. Signed out is not
+// an error: nothing to do.
+func (s *Syncer) SyncOnce(ctx context.Context) error { return s.syncOnce(ctx, false) }
+
+// syncOnce runs one full reconcile; bg marks its progress as background.
+func (s *Syncer) syncOnce(ctx context.Context, bg bool) error {
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
 	var changed int
-	events, src, complete, err := s.cycleOnce(ctx, &changed)
+	events, src, complete, err := s.cycleOnce(ctx, &changed, bg)
 	now := s.now()
 	if complete { // every project was read (per-project errors included): a restart resumes from here
 		if merr := s.opts.Store.MarkReconciled(ctx, src, now); merr != nil {
@@ -303,7 +312,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	if uerr == nil {
 		s.opts.OnUpdate(events, unread)
 	}
-	p := Progress{State: ProgressDone, Unread: unread, Changed: changed}
+	p := Progress{State: ProgressDone, Unread: unread, Changed: changed, Background: bg}
 	if err := errors.Join(err, uerr); err != nil {
 		p.State, p.Error = ProgressError, err.Error()
 	}
@@ -314,7 +323,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 // cycleOnce syncs every project; *changed accumulates rows that really changed.
 // complete reports that every project was read (per-project errors included)
 // of source src.
-func (s *Syncer) cycleOnce(ctx context.Context, changed *int) (events []store.Event, src int64, complete bool, err error) {
+func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events []store.Event, src int64, complete bool, err error) {
 	p := s.opts.Provider
 	login, err := p.Account(ctx)
 	if err != nil {
@@ -343,7 +352,7 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) (events []store.Ev
 		*changed += n
 		return n
 	}
-	s.progress(Progress{State: ProgressStarted, Total: len(projects), Changed: step()})
+	s.progress(Progress{State: ProgressStarted, Total: len(projects), Changed: step(), Background: bg})
 	var errs []error
 	for i, pr := range projects {
 		items, err := p.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
@@ -354,7 +363,7 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) (events []store.Ev
 				return events, src, false, err // stop the cycle; the rest waits for the next one
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
-			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects)})
+			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Background: bg})
 			continue
 		}
 		evs, err := s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
@@ -362,7 +371,7 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) (events []store.Ev
 			return events, src, false, err
 		}
 		events = append(events, evs...)
-		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step()})
+		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step(), Background: bg})
 	}
 	s.refreshTargets(ctx, src, login)
 	return events, src, true, errors.Join(errs...)

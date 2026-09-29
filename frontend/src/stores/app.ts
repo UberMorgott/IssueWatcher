@@ -56,6 +56,8 @@ export const useAppStore = defineStore('app', () => {
   const authError = ref('')
   const github = computed(() => providers.value.find((p) => p.id === 'github'))
   const githubConnected = computed(() => !!github.value?.connected)
+  /** Any source can sync: GitHub signed in, or a mod platform connected. */
+  const anyConnected = computed(() => githubConnected.value || platforms.value.some((p) => p.state === 'connected'))
 
   async function loadAuth() {
     const r = await api.authStatus()
@@ -105,10 +107,19 @@ export const useAppStore = defineStore('app', () => {
     return platforms.value.find((p) => p.id === platform)?.capabilities ?? fallbackCaps(platform)
   }
 
-  // --- sync (progress arrives as sync.status live events)
+  // --- sync (progress arrives as sync.status live events, per source)
   const sync = ref<SyncStatus | null>(null)
   const syncRequested = ref(false)
-  const progress = ref<SyncProgress | null>(null)
+  /** The running cycle of each source (platform[:account]); a finished one is removed. */
+  const cycles = ref<Record<string, SyncProgress>>({})
+  /** The cycle the user asked for (Sync now, sign-in, row sync): the topbar shows it and the sync button waits for it. */
+  const progress = computed<SyncProgress | null>(() => Object.values(cycles.value).find((p) => !p.background) ?? null)
+  /** Background work summed over the sources (scheduled reconcile, change checks): a quiet hint only. */
+  const background = computed<{ done: number; total: number; repo: string } | null>(() => {
+    const bg = Object.values(cycles.value).filter((p) => p.background)
+    if (!bg.length) return null
+    return { done: bg.reduce((n, p) => n + p.done, 0), total: bg.reduce((n, p) => n + p.total, 0), repo: bg.find((p) => p.repo)?.repo ?? '' }
+  })
   async function loadSync() {
     const r = await api.syncStatus()
     if (r.ok) sync.value = r.data
@@ -130,22 +141,35 @@ export const useAppStore = defineStore('app', () => {
     }, 15000)
     return ''
   }
-  /** Applies one sync.status step; a finished cycle refreshes status and counts. */
-  async function onSyncStatus(p: SyncProgress | null) {
-    syncRequested.value = false
-    window.clearTimeout(requestTimer)
+  /** Applies one sync.status step; finished cycles refresh status and counts once (debounced over the sources). */
+  function onSyncStatus(p: SyncProgress | null) {
+    if (!p?.background) {
+      syncRequested.value = false
+      window.clearTimeout(requestTimer)
+    }
+    const key = p?.source ?? ''
     if (p && (p.state === 'started' || p.state === 'progress')) {
-      progress.value = p
+      cycles.value = { ...cycles.value, [key]: p }
       return
     }
-    progress.value = null
+    if (key in cycles.value) {
+      const next = { ...cycles.value }
+      delete next[key]
+      cycles.value = next
+    }
+    window.clearTimeout(refreshTimer)
+    refreshTimer = window.setTimeout(() => void refreshAfterSync(), 400)
+  }
+  let refreshTimer: number | undefined
+  async function refreshAfterSync() {
     void loadRepos() // unread badge, per-project last sync
     void loadPlatforms() // account state per platform
     const wasSignedIn = sync.value?.signedIn
     await loadSync()
     if (sync.value && sync.value.signedIn !== wasSignedIn) await loadAuth()
   }
-  const syncing = computed(() => syncRequested.value || !!progress.value || !!sync.value?.running)
+  /** A sync the user asked for is running (background work never counts: it must not block anything). */
+  const syncing = computed(() => syncRequested.value || !!progress.value)
 
   // --- data
   const repos = ref<Repo[]>([])
@@ -217,6 +241,7 @@ export const useAppStore = defineStore('app', () => {
     authError,
     github,
     githubConnected,
+    anyConnected,
     loadAuth,
     connect,
     disconnect,
@@ -229,6 +254,7 @@ export const useAppStore = defineStore('app', () => {
     syncNow,
     syncing,
     progress,
+    background,
     onSyncStatus,
     repos,
     reposLoaded,

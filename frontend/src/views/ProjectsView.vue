@@ -287,7 +287,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 icon="pi pi-sync"
                 size="small"
                 :loading="app.syncing"
-                :disabled="!app.githubConnected"
+                :disabled="!app.anyConnected"
                 @click="app.syncNow()"
               />
             </EmptyState>

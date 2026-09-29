@@ -141,16 +141,16 @@ func (s *Syncer) Step(ctx context.Context) time.Duration {
 		s.warmStart(ctx, now)
 	}
 	s.mu.Lock()
-	paused, force := s.pausedUntil, s.forceReconcile
+	paused, force, user := s.pausedUntil, s.forceReconcile, s.userForce
 	s.mu.Unlock()
 	if now.Before(paused) && !force {
 		return paused.Sub(now)
 	}
 	if force || s.targetsEmpty() || !now.Before(s.nextReconcileAt()) {
 		s.mu.Lock()
-		s.forceReconcile = false
+		s.forceReconcile, s.userForce = false, false
 		s.mu.Unlock()
-		err := s.SyncOnce(ctx)
+		err := s.syncOnce(ctx, !force || !user)
 		if err != nil && ctx.Err() == nil {
 			s.opts.Log.Warn("sync failed", "err", err)
 		}
@@ -345,8 +345,8 @@ func (s *Syncer) checkDue(ctx context.Context, now time.Time) {
 		return
 	}
 	s.opts.OnUpdate(events, unread)
-	s.progress(Progress{State: ProgressRepo, Changed: changed, Unread: unread, Done: len(batch), Total: len(batch)})
-	s.progress(Progress{State: ProgressDone, Changed: changed, Unread: unread})
+	s.progress(Progress{State: ProgressRepo, Changed: changed, Unread: unread, Done: len(batch), Total: len(batch), Background: true})
+	s.progress(Progress{State: ProgressDone, Changed: changed, Unread: unread, Background: true})
 }
 
 func (s *Syncer) reschedule(t *target, now time.Time) {

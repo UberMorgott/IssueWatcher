@@ -196,7 +196,9 @@ func TestFirstSyncPublishesProgressAndDataChanged(t *testing.T) {
 			break
 		}
 	}
-	want := "sync.status:started data.changed sync.status:progress data.changed sync.status:progress sync.status:done"
+	// Paced: the two quick project steps are held back (done supersedes them)
+	// and their data changes coalesce into one data.changed before done.
+	want := "sync.status:started data.changed sync.status:done"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("events\n got %s\nwant %s", strings.Join(got, " "), want)
 	}
@@ -239,5 +241,47 @@ func TestShutdownEndsStreams(t *testing.T) {
 		if _, err := br.ReadString('\n'); err != nil {
 			return // stream closed
 		}
+	}
+}
+
+// A burst of progress (a cycle over many projects) is paced: a few sync.status
+// and one data.changed per window, the latest step kept, the tab never dropped.
+func TestSyncEventsArePaced(t *testing.T) {
+	s, _ := newTestServer(t, 0)
+	br := openStream(t, s)
+	s.syncProgress(syncer.Progress{State: syncer.ProgressStarted, Source: "github:me", Total: 200, Background: true})
+	for i := range 200 {
+		s.syncProgress(syncer.Progress{State: syncer.ProgressRepo, Source: "github:me", Repo: "o/r" + strconv.Itoa(i), Done: i + 1, Total: 200, Changed: 1, Background: true})
+	}
+	time.Sleep(600 * time.Millisecond) // the held-back step and data.changed go out
+	s.syncProgress(syncer.Progress{State: syncer.ProgressDone, Source: "github:me", Background: true})
+	var status, data int
+	var last syncer.Progress
+	for {
+		name, raw := readEvent(t, br)
+		switch name {
+		case EventDataChanged:
+			data++
+			if raw != `{"reason":"sync"}` {
+				t.Fatalf("coalesced data.changed %s", raw)
+			}
+		case EventSyncStatus:
+			status++
+			if err := json.Unmarshal([]byte(raw), &last); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if last.State == syncer.ProgressDone {
+			break
+		}
+		if last.State == syncer.ProgressRepo && last.Done != 200 && status > 2 {
+			t.Fatalf("stale step delivered after the pace: %+v", last)
+		}
+	}
+	if status > 4 || data != 1 {
+		t.Fatalf("sync.status %d, data.changed %d: want ≤4 and 1", status, data)
+	}
+	if s.Clients() != 1 {
+		t.Fatal("the tab was dropped")
 	}
 }

@@ -36,12 +36,130 @@ type DataChange struct {
 	Repo   string `json:"repo,omitempty"`
 }
 
-// syncProgress mirrors a sync step to the open tabs: always sync.status, plus
-// data.changed when the step wrote something (the first, silent sync too).
+// Pacing of sync events per source: a cycle over many projects must not flood
+// the tabs (a 32-slot buffer drops a slow tab, whose reconnect reloads
+// everything). sync.status progress goes out at most every syncStatusEvery
+// (the latest step wins), started/done/error at once; the data.changed of
+// the steps that wrote something coalesce into one per dataChangedEvery.
+const (
+	syncStatusEvery  = 250 * time.Millisecond
+	dataChangedEvery = 500 * time.Millisecond
+)
+
+// syncPacer holds each source's pending sync events.
+type syncPacer struct {
+	mu  sync.Mutex
+	src map[string]*sourcePace
+}
+
+type sourcePace struct {
+	lastStatus time.Time
+	pending    *syncer.Progress // progress held back by the pace
+	statusT    *time.Timer
+	dirty      bool   // a step changed data since the last data.changed
+	repo       string // the one repo changed in the window, " = several
+	repos      int
+	dataT      *time.Timer
+}
+
+// syncProgress mirrors a sync step to the open tabs (paced, see syncPacer):
+// sync.status, plus data.changed when steps wrote something (the first,
+// silent sync too).
 func (s *Server) syncProgress(p syncer.Progress) {
-	s.Publish(EventSyncStatus, p)
-	if p.Changed > 0 && p.State != syncer.ProgressDone && p.State != syncer.ProgressError {
-		s.Publish(EventDataChanged, DataChange{Reason: "sync", Repo: p.Repo})
+	s.pace.mu.Lock()
+	if s.pace.src == nil {
+		s.pace.src = map[string]*sourcePace{}
+	}
+	sp := s.pace.src[p.Source]
+	if sp == nil {
+		sp = &sourcePace{}
+		s.pace.src[p.Source] = sp
+	}
+	final := p.State == syncer.ProgressDone || p.State == syncer.ProgressError
+	if p.Changed > 0 && !final {
+		if sp.repos == 0 || sp.repo != p.Repo {
+			sp.repos++
+		}
+		sp.repo, sp.dirty = p.Repo, true
+		if sp.dataT == nil {
+			sp.dataT = time.AfterFunc(dataChangedEvery, func() { s.flushData(p.Source) })
+		}
+	}
+	var out []sseEvent
+	now := time.Now()
+	switch {
+	case final:
+		sp.pending = nil
+		if sp.statusT != nil {
+			sp.statusT.Stop()
+			sp.statusT = nil
+		}
+		out = append(out, s.takeDataLocked(sp)...) // the data first: done refreshes what the tab shows
+		out = append(out, sseEvent{EventSyncStatus, p})
+		sp.lastStatus = now
+	case p.State == syncer.ProgressStarted || now.Sub(sp.lastStatus) >= syncStatusEvery:
+		sp.pending = nil
+		out = append(out, sseEvent{EventSyncStatus, p})
+		sp.lastStatus = now
+	default:
+		sp.pending = &p
+		if sp.statusT == nil {
+			sp.statusT = time.AfterFunc(syncStatusEvery-now.Sub(sp.lastStatus), func() { s.flushStatus(p.Source) })
+		}
+	}
+	s.pace.mu.Unlock()
+	for _, e := range out {
+		s.Publish(e.name, e.data)
+	}
+}
+
+type sseEvent struct {
+	name string
+	data any
+}
+
+// takeDataLocked returns the coalesced data.changed of sp, if any. s.pace.mu held.
+func (s *Server) takeDataLocked(sp *sourcePace) []sseEvent {
+	if sp.dataT != nil {
+		sp.dataT.Stop()
+		sp.dataT = nil
+	}
+	if !sp.dirty {
+		return nil
+	}
+	repo := sp.repo
+	if sp.repos > 1 {
+		repo = ""
+	}
+	sp.dirty, sp.repo, sp.repos = false, "", 0
+	return []sseEvent{{EventDataChanged, DataChange{Reason: "sync", Repo: repo}}}
+}
+
+func (s *Server) flushData(source string) {
+	s.pace.mu.Lock()
+	var out []sseEvent
+	if sp := s.pace.src[source]; sp != nil {
+		sp.dataT = nil
+		out = s.takeDataLocked(sp)
+	}
+	s.pace.mu.Unlock()
+	for _, e := range out {
+		s.Publish(e.name, e.data)
+	}
+}
+
+func (s *Server) flushStatus(source string) {
+	s.pace.mu.Lock()
+	var p *syncer.Progress
+	if sp := s.pace.src[source]; sp != nil {
+		p, sp.pending, sp.statusT = sp.pending, nil, nil
+		if p != nil {
+			sp.lastStatus = time.Now()
+		}
+	}
+	s.pace.mu.Unlock()
+	if p != nil {
+		s.Publish(EventSyncStatus, *p)
 	}
 }
 

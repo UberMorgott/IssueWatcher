@@ -66,6 +66,8 @@ const ru: Messages = {
     notConnected: 'Не подключено',
     syncing: 'Синхронизация…',
     syncProgress: 'Синхронизация {done}/{total}…',
+    background: 'Фоновое обновление {done}/{total}',
+    backgroundShort: 'Фоновое обновление',
     current: 'Сейчас',
     syncUnavailable: 'Синхронизация недоступна',
     rateLimited: 'Лимит запросов',

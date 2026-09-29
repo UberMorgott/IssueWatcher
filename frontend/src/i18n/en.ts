@@ -65,6 +65,8 @@ const en = {
     notConnected: 'Not connected',
     syncing: 'Syncing…',
     syncProgress: 'Syncing {done}/{total}…',
+    background: 'Background refresh {done}/{total}',
+    backgroundShort: 'Background refresh',
     current: 'Now syncing',
     syncUnavailable: 'Sync unavailable',
     rateLimited: 'Rate limited',

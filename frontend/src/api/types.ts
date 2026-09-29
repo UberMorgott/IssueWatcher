@@ -213,6 +213,8 @@ export interface SyncProgress {
   changed: number
   unread: number
   error?: string
+  /** A cycle nobody asked for (scheduled/resumed reconcile, change checks): shown as a quiet hint, never blocks. */
+  background?: boolean
 }
 
 export interface Health {

@@ -124,7 +124,7 @@ function setField(key: keyof ProviderSync, v: number | null) {
           size="small"
           severity="secondary"
           :loading="app.syncing"
-          :disabled="!app.githubConnected"
+          :disabled="!app.anyConnected"
           @click="app.syncNow()"
         />
       </SettingRow>

@@ -22,17 +22,27 @@ const { t } = useI18n()
 const title = computed(() => routeTitle(route))
 
 type Tone = 'ok' | 'busy' | 'warn' | 'error' | 'off'
+/** Every source's status (the top-level fields alone are the GitHub one). */
+const sources = computed(() => app.sync?.sources ?? (app.sync ? [{ ...app.sync, platform: 'github', account: '' }] : []))
+const rateLimitedUntil = computed(() => sources.value.map((s) => s.rateLimitedUntil).find(Boolean) ?? '')
+const lastError = computed(() => sources.value.filter((s) => s.signedIn).map((s) => s.lastError).find(Boolean) ?? '')
+const lastSync = computed(() => sources.value.map((s) => s.lastSync).filter(Boolean).sort().at(-1) ?? '')
 const status = computed<{ tone: Tone; text: string }>(() => {
-  const s = app.sync
-  if (!app.githubConnected) return { tone: 'off', text: t('topbar.notConnected') }
+  if (!app.anyConnected) return { tone: 'off', text: t('topbar.notConnected') }
   const p = app.progress
   if (p && p.total > 0) return { tone: 'busy', text: t('topbar.syncProgress', { done: p.done, total: p.total }) }
   if (app.syncing) return { tone: 'busy', text: t('topbar.syncing') }
-  if (!s) return { tone: 'off', text: t('topbar.syncUnavailable') }
-  if (s.rateLimitedUntil) return { tone: 'warn', text: t('topbar.rateLimited') }
-  if (s.lastError) return { tone: 'error', text: t('topbar.syncError') }
-  if (s.lastSync) return { tone: 'ok', text: t('topbar.synced', { time: relTime(s.lastSync) }) }
+  if (!app.sync) return { tone: 'off', text: t('topbar.syncUnavailable') }
+  if (rateLimitedUntil.value) return { tone: 'warn', text: t('topbar.rateLimited') }
+  if (lastError.value) return { tone: 'error', text: t('topbar.syncError') }
+  if (lastSync.value) return { tone: 'ok', text: t('topbar.synced', { time: relTime(lastSync.value) }) }
   return { tone: 'off', text: t('topbar.waitingFirstSync') }
+})
+/** Background work (scheduled reconcile, change checks): a quiet spinner with a tooltip, never a blocked button. */
+const backgroundText = computed(() => {
+  const b = app.background
+  if (!b || app.syncing) return ''
+  return b.total > 0 ? t('topbar.background', { done: b.done, total: b.total }) : t('topbar.backgroundShort')
 })
 
 const pop = ref<InstanceType<typeof Popover>>()
@@ -113,6 +123,12 @@ const accountItems = computed(() => [
       >
         <span class="dot" />
         <span class="sync-text">{{ status.text }}</span>
+        <i
+          v-if="backgroundText"
+          v-tooltip.bottom="backgroundText"
+          class="pi pi-sync bg-spin"
+          :aria-label="backgroundText"
+        />
       </button>
       <Popover ref="pop">
         <div class="sync-pop">
@@ -125,8 +141,14 @@ const accountItems = computed(() => [
           >
             <span class="muted">{{ t('topbar.current') }}</span><span class="mono">{{ app.progress.repo }}</span>
           </div>
+          <div
+            v-if="backgroundText"
+            class="row"
+          >
+            <span class="muted">{{ backgroundText }}</span><span class="mono">{{ app.background?.repo }}</span>
+          </div>
           <div class="row">
-            <span class="muted">{{ t('topbar.lastSync') }}</span><span>{{ absTime(app.sync?.lastSync) || t('common.never') }}</span>
+            <span class="muted">{{ t('topbar.lastSync') }}</span><span>{{ absTime(lastSync) || t('common.never') }}</span>
           </div>
           <div class="row">
             <span class="muted">{{ t('topbar.interval') }}</span><span class="mono">{{ duration(app.sync?.interval) || '—' }}</span>
@@ -135,16 +157,16 @@ const accountItems = computed(() => [
             <span class="muted">{{ t('topbar.liveUpdates') }}</span><span>{{ liveConnected ? t('topbar.liveConnected') : t('topbar.liveReconnecting') }}</span>
           </div>
           <div
-            v-if="app.sync?.rateLimitedUntil"
+            v-if="rateLimitedUntil"
             class="row warn"
           >
-            <span>{{ t('topbar.rateLimitedUntil') }}</span><span>{{ absTime(app.sync.rateLimitedUntil) }}</span>
+            <span>{{ t('topbar.rateLimitedUntil') }}</span><span>{{ absTime(rateLimitedUntil) }}</span>
           </div>
           <p
-            v-if="app.sync?.lastError"
+            v-if="lastError"
             class="err"
           >
-            {{ app.sync.lastError }}
+            {{ lastError }}
           </p>
         </div>
       </Popover>
@@ -157,7 +179,7 @@ const accountItems = computed(() => [
         text
         rounded
         :aria-label="t('common.syncNow')"
-        :disabled="!app.githubConnected || app.syncing"
+        :disabled="!app.anyConnected || app.syncing"
         @click="syncNow"
       />
       <Button
@@ -272,6 +294,12 @@ const accountItems = computed(() => [
 
 .sync-chip:hover {
   border-color: var(--iw-border-strong);
+}
+
+.bg-spin {
+  font-size: calc(11px * var(--iw-fs, 1));
+  color: var(--iw-dimmed);
+  animation: spin 1.6s linear infinite;
 }
 
 .dot {
