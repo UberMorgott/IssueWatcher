@@ -18,7 +18,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 ## Phase 1 — GitHub
 - [x] Auth backend: GitHub App manifest flow + web flow/PKCE/loopback + refresh; device-flow fallback (`internal/provider/github`, `internal/api/github_auth.go`)
 - [x] Sync backend: repos via installations, issues/comments via GraphQL, cursors, poller, rate limit (`internal/syncer`)
-- [x] HTTP API: auth (providers list, start opens browser), projects, items (filters/pages), detail, read, reply, stats, sync (ARCHITECTURE.md → HTTP API; legacy /api/repos, /api/issues aliases kept)
+- [x] HTTP API: auth (providers list, start opens browser), projects, items (filters/pages), detail, read, reply, stats, sync (ARCHITECTURE.md → HTTP API)
 - [x] Notifications: new issue / new comment / closed → tray balloon; badge = unread items
 - [x] Sign-in callback focuses an open dashboard tab via SSE `navigate` (uses the SPA agent's hub in `internal/api/events.go`)
 - [ ] **Manual live test (user)** — see below
@@ -27,7 +27,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Issues: lazy DataTable on `/api/items`, URL-backed filters (source/project/label/state/unread/text), multi-select bulk bar ("Send to agent" disabled → Phase 2, mark read), J/K/Enter/X keys; `/item/:id` detail with thread + reply composer (Ctrl+Enter)
 - [x] Projects (counts, progress, `localPath` column, per-project chart), Connections (GitHub wired incl. device code + copy; CurseForge / Nexus Mods / Steam planned), Agents + Settings pages
 - [x] SSE hub `GET /api/events` (`internal/api/events.go`) + client with backoff, toasts; tray / notification / second launch reuse an open tab via `navigate{path}` (new tab only when no client is connected)
-- [ ] Drop legacy `/api/repos`, `/api/issues`, `/api/auth/{start,logout,device}` aliases (SPA no longer uses them)
+- [x] Drop legacy `/api/repos`, `/api/issues`, `/api/auth/{start,logout,device}` aliases (tests moved to `/api/projects`, `/api/items`, `/api/auth/github/*`; `repo=` query alias kept)
 - [ ] Manual check with a real GitHub account: onboarding → connect → live toasts; tray click focusing the existing tab in a real (non-headless) browser
 - [x] Russian UI (vue-i18n, ru default + en switch), Russian tray/balloons/auth pages
 - [x] Live reactivity: `sync.status` progress + `data.changed` → quiet refetch in every view
@@ -93,7 +93,7 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] E2E smoke (real claude 2.1.284 + codex-cli 0.157.1, headless instance, throwaway repo): fix job → needs_review with a correct diff and `go test` verify passed; reply job → draft; cancel of a running claude kills its tree
 - [ ] **Manual (user, real GitHub)**: «Создать PR» on a real repo (push with the GitHub App user token, draft PR); «Отправить» a reply draft; tray card click opens the job
 - [x] ~~Open decisions~~ (2), (1) settled by Phase 2b: direct mode in the folder with the user's own settings is the default; worktree-pr stays optional. Still open: (3)–(5). Original list: (1) worktrees share the mapped clone's `.git` (refs, config, hooks) — keep, or a private clone in `data\repos\<project>` as Codex suggests; (2) agents run with the user's rights and user-level CLI config (CLAUDE.md, hooks, MCP, language rules — e2e summaries came back in Russian) — add `--setting-sources project` / `--safe-mode` / a separate profile per role?; (3) claude `--permission-mode auto` vs `acceptEdits` + allowlist; (4) earlier attempts keep only log + diff (no per-attempt result history); (5) no Codex cost cap (tokens shown only)
-- [ ] Jobs count badge in the sidebar (needs an active-count endpoint)
+- [x] Jobs count badge in the sidebar (active = queued/running/needs_review, counted from the live jobs store; no new endpoint)
 
 ## Phase 2b — direct mode (owner decision 2026-09-28; replaces the Phase 2 defaults)
 - [x] Per-project run mode `direct` (default) | `worktree-pr` (Settings › Проекты и папки); config v4 migration: existing projects → direct; `prompts.fixDirect`
