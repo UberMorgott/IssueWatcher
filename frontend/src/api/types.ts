@@ -284,7 +284,7 @@ export interface AutomationEntry {
   ruleId: string
   flow: RuleFlow
   decision: 'queued' | 'skipped'
-  /** Skipped: no_profile | unavailable | auto_fix_off | no_folder | exists | max_attempts | day_cap | rule_cap. */
+  /** Skipped: no_profile | unavailable | auto_fix_off | no_folder | exists | max_attempts | total_cap | day_cap | rule_cap. */
   reason: string
   jobId: number | null
   repo: string

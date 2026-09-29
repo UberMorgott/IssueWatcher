@@ -35,10 +35,18 @@ const over = computed<ProjectAutomation>(() => (projectName.value ? ag.value?.pr
 type BoolKey = 'enabled' | 'allowAutoFix' | 'autoApplyLabels'
 type NumKey = 'maxPerDay' | 'maxAttempts'
 const BOOLS: BoolKey[] = ['enabled', 'allowAutoFix', 'autoApplyLabels']
-const NUMS: { key: NumKey; max: number }[] = [
-  { key: 'maxPerDay', max: 500 },
-  { key: 'maxAttempts', max: 10 },
+// maxPerDay is not inherited: the global value is the total over all projects,
+// a project value is an extra cap (empty = none).
+const NUMS: { key: NumKey; max: number; title: string; inherits: boolean }[] = [
+  { key: 'maxPerDay', max: 500, title: 'projectMaxPerDay', inherits: false },
+  { key: 'maxAttempts', max: 10, title: 'maxAttempts', inherits: true },
 ]
+function numText(n: (typeof NUMS)[number]): string {
+  const value = ag.value?.automation[n.key]
+  return n.inherits
+    ? t('settings.automation.inheritNumber', { value })
+    : t('settings.automation.projectMaxPerDayText', { total: value })
+}
 
 /** null in a merge patch removes the field = inherit. */
 function patch(field: keyof ProjectAutomation, v: boolean | number | null): SettingsPatch {
@@ -100,17 +108,17 @@ function setNum(k: NumKey, v: number | null) {
       <SettingRow
         v-for="n in NUMS"
         :key="n.key"
-        :title="t('settings.automation.' + n.key)"
-        :text="t('settings.automation.inheritNumber', { value: ag.automation[n.key] })"
+        :title="t('settings.automation.' + n.title)"
+        :text="numText(n)"
       >
         <InputNumber
           :model-value="over[n.key] ?? null"
           :min="1"
           :max="n.max"
-          :placeholder="String(ag.automation[n.key])"
+          :placeholder="n.inherits ? String(ag.automation[n.key]) : '—'"
           show-buttons
           input-class="num-input"
-          :aria-label="t('settings.automation.' + n.key)"
+          :aria-label="t('settings.automation.' + n.title)"
           @update:model-value="(v: number | null) => setNum(n.key, v)"
         />
       </SettingRow>
