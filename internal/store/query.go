@@ -156,6 +156,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 // update first, id breaks ties).
 type IssueFilter struct {
 	Platform string // source platform (github, ...), "" = all
+	Kind     string // item kind (issue | comment | bug), "" = all
 	RepoID   int64  // 0 = all
 	State    string // open | closed | "" (all)
 	Label    string // exact label name
@@ -173,6 +174,8 @@ type Issue struct {
 	RepoID    int64     `json:"repoId"`
 	Repo      string    `json:"repo"`
 	Number    int       `json:"number"`
+	Kind      string    `json:"kind"`     // issue | comment | bug
+	Platform  string    `json:"platform"` // the project's platform (github, nexus, curseforge, steam)
 	Title     string    `json:"title"`
 	URL       string    `json:"url"`
 	Author    string    `json:"author"`
@@ -199,7 +202,8 @@ type IssueChunk struct {
 // MaxIDs bounds IssueFilter.IDs.
 const MaxIDs = 500
 const issueColumns = `i.id, i.project_id, p.name, i.number, i.title, i.url, i.author, i.status, i.raw_status,
-	i.labels, (SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.unread, i.created_at, i.updated_at, i.closed_at`
+	i.labels, (SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.unread, i.created_at, i.updated_at, i.closed_at,
+	i.kind, (SELECT platform FROM sources WHERE id = p.source_id)`
 
 func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 	var (
@@ -207,7 +211,7 @@ func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 		labels string
 	)
 	err := sc.Scan(&is.ID, &is.RepoID, &is.Repo, &is.Number, &is.Title, &is.URL, &is.Author, &is.State,
-		&is.RawStatus, &labels, &is.Comments, &is.Unread, &is.CreatedAt, &is.UpdatedAt, &is.ClosedAt)
+		&is.RawStatus, &labels, &is.Comments, &is.Unread, &is.CreatedAt, &is.UpdatedAt, &is.ClosedAt, &is.Kind, &is.Platform)
 	if err != nil {
 		return is, err
 	}
@@ -227,6 +231,9 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	}
 	if f.Platform != "" {
 		where, args = append(where, "i.source_id IN (SELECT id FROM sources WHERE platform = ?)"), append(args, f.Platform)
+	}
+	if f.Kind != "" {
+		where, args = append(where, "i.kind = ?"), append(args, f.Kind)
 	}
 	if f.State == "open" || f.State == "closed" {
 		where, args = append(where, "i.status = ?"), append(args, f.State)

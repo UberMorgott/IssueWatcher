@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
@@ -16,7 +18,7 @@ import (
 // Data API (all JSON, session or bearer required; docs/ARCHITECTURE.md → HTTP API):
 //
 //	GET  /api/projects[?sort=&dir=&q=&cursor=&limit=]  all projects with counts; with limit a keyset chunk
-//	GET  /api/items?source=&project=&state=&label=&q=&unread=1&cursor=|after=|ids=&limit=
+//	GET  /api/items?source=&kind=&project=&state=&label=&q=&unread=1&cursor=|after=|ids=&limit=
 //	GET  /api/items/{id}                 item + body
 //	GET  /api/items/{id}/comments?cursor=&limit=  comments, oldest first, in chunks
 //	POST /api/items/{id}/read            clear unread (tray badge)
@@ -130,6 +132,13 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "bad state")
 		return
 	}
+	switch k := q.Get("kind"); k {
+	case "", store.KindIssue, store.KindComment, store.KindBug:
+		f.Kind = k
+	default:
+		errJSON(w, http.StatusBadRequest, "bad kind")
+		return
+	}
 	if v := q.Get("ids"); v != "" {
 		for part := range strings.SplitSeq(v, ",") {
 			id, err := strconv.ParseInt(part, 10, 64)
@@ -241,16 +250,28 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, c)
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, http.StatusNotFound, "not found")
+	case errors.Is(err, curseforge.ErrRelogin):
+		s.replyConflict(w, r, id, "relogin", "sign in to %s again")
 	case errors.Is(err, provider.ErrNotSignedIn):
-		errJSON(w, http.StatusConflict, "not signed in to GitHub")
+		s.replyConflict(w, r, id, "not_signed_in", "not signed in to %s")
 	case errors.Is(err, syncer.ErrNoSource):
-		errJSON(w, http.StatusConflict, "no connected account for this item")
+		s.replyConflict(w, r, id, "no_source", "no connected %s account for this item")
 	case errors.As(err, &rl):
 		errJSON(w, http.StatusTooManyRequests, err.Error())
 	default:
 		s.opts.Log.Error("api: reply", "item", id, "err", err)
 		errJSON(w, http.StatusBadGateway, "posting the comment failed: "+err.Error())
 	}
+}
+
+// replyConflict answers 409 with a machine code and the item's platform, so
+// the UI names the platform the reply needs (i18n replyErrors.<code>).
+func (s *Server) replyConflict(w http.ResponseWriter, r *http.Request, id int64, code, format string) {
+	platform := "github"
+	if ref, err := s.opts.Store.ItemRef(r.Context(), id); err == nil && ref.Platform != "" {
+		platform = ref.Platform
+	}
+	writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf(format, platform), "code": code, "platform": platform})
 }
 
 type statsResponse struct {

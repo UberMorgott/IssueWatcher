@@ -135,8 +135,20 @@ func TestReplyPostsToGitHub(t *testing.T) {
 	if err := e.auth.Logout(); err != nil {
 		t.Fatal(err)
 	}
-	if code := e.call(t, http.MethodPost, path, `{"body":"x"}`, nil); code != http.StatusConflict {
-		t.Fatalf("reply signed out: %d", code)
+	var refused struct{ Code, Platform, Error string }
+	if code := e.callAny(t, http.MethodPost, path, `{"body":"x"}`, &refused); code != http.StatusConflict ||
+		refused.Code != "not_signed_in" || refused.Platform != "github" || refused.Error != "not signed in to github" {
+		t.Fatalf("reply signed out: %d %+v", code, refused)
+	}
+	if code := e.call(t, http.MethodGet, "/api/items?kind=comment", "", &page); code != http.StatusOK || len(page.Items) != 0 {
+		t.Fatalf("kind=comment: %d %d items", code, len(page.Items))
+	}
+	if code := e.call(t, http.MethodGet, "/api/items?kind=issue", "", &page); code != http.StatusOK || len(page.Items) == 0 ||
+		page.Items[0].Kind != store.KindIssue || page.Items[0].Platform != "github" {
+		t.Fatalf("kind=issue: %d %+v", code, page.Items)
+	}
+	if code := e.call(t, http.MethodGet, "/api/items?kind=x", "", nil); code != http.StatusBadRequest {
+		t.Fatalf("bad kind: %d", code)
 	}
 }
 
