@@ -256,6 +256,8 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		s.replyConflict(w, r, id, "not_signed_in", "not signed in to %s")
 	case errors.Is(err, syncer.ErrNoSource):
 		s.replyConflict(w, r, id, "no_source", "no connected %s account for this item")
+	case errors.Is(err, syncer.ErrReplyOff):
+		s.replyConflict(w, r, id, "reply_off", "replying is off for %s")
 	case errors.As(err, &rl):
 		errJSON(w, http.StatusTooManyRequests, err.Error())
 	default:

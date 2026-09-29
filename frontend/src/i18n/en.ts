@@ -640,6 +640,7 @@ const en = {
     not_signed_in: 'Not signed in to {platform} — check Settings › Platforms.',
     relogin: '{platform}: the session expired — sign in again, then check it in Settings › Platforms.',
     no_source: 'No connected {platform} account serves this item.',
+    reply_off: 'Replying is not available for {platform} yet.',
   },  settings: {
     sub: 'Everything is stored next to the exe in {path} — portable; the registry is touched only for autostart, when enabled.',
     sections: {

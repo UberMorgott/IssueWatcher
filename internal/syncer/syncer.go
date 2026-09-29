@@ -398,7 +398,14 @@ func (s *Syncer) Reply(ctx context.Context, itemID int64, body string) (store.Co
 	return s.reply(ctx, ref, body)
 }
 
+// ErrReplyOff means the item's platform does not offer replies (yet): every
+// path (API, rule jobs, JobView send) ends here, not only the hidden UI button.
+var ErrReplyOff = errors.New("syncer: replies are off for this platform")
+
 func (s *Syncer) reply(ctx context.Context, ref store.ItemRef, body string) (store.Comment, error) {
+	if !s.opts.Provider.Capabilities().Reply {
+		return store.Comment{}, ErrReplyOff
+	}
 	itemID := ref.ID
 	c, err := s.opts.Provider.Reply(ctx, ref.ExternalID, body)
 	if err != nil {

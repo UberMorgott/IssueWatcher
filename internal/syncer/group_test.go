@@ -2,6 +2,7 @@ package syncer
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -16,6 +17,8 @@ import (
 type fakeProvider struct {
 	platform, account, item string
 
+	noReply bool // Capabilities().Reply = false (Steam until a live post is verified)
+
 	mu      sync.Mutex
 	err     error
 	replies []string
@@ -29,7 +32,7 @@ func (f *fakeProvider) fail() error {
 
 func (f *fakeProvider) Platform() string { return f.platform }
 func (f *fakeProvider) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Reply: true}
+	return provider.Capabilities{Reply: !f.noReply}
 }
 func (f *fakeProvider) Account(context.Context) (string, error) {
 	if err := f.fail(); err != nil {
@@ -162,5 +165,35 @@ func TestGroupAddRemoveWhileRunning(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// M1: a platform without reply support never posts, whatever the path
+// (Syncer.Reply for the API, Group.Reply for rule jobs and JobView send).
+func TestReplyOffPlatformRefused(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	p := &fakeProvider{platform: "steam", account: "s1", item: "c", noReply: true}
+	s := New(Options{Store: st, Provider: p, Log: slog.New(slog.DiscardHandler)})
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.Issues(t.Context(), store.IssueFilter{})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("items %+v %v", page, err)
+	}
+	id := page.Items[0].ID
+	if _, err := s.Reply(t.Context(), id, "hi"); !errors.Is(err, ErrReplyOff) {
+		t.Fatalf("Syncer.Reply: %v", err)
+	}
+	if _, err := NewGroup(s).Reply(t.Context(), id, "hi"); !errors.Is(err, ErrReplyOff) {
+		t.Fatalf("Group.Reply: %v", err)
+	}
+	if len(p.replies) != 0 {
+		t.Fatalf("posted %v", p.replies)
 	}
 }
