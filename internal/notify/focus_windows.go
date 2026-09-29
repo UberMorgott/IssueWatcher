@@ -84,6 +84,14 @@ func FocusDashboard() (title string, ok bool) {
 	return title, r != 0
 }
 
+// DashboardInFront reports whether the foreground window is a browser window
+// whose active tab is the dashboard: the user is looking at it, and its in-app
+// toast already tells what a popup card would.
+func DashboardInFront() bool {
+	fg := windows.GetForegroundWindow()
+	return fg != 0 && IsDashboardTitle(windowText(fg))
+}
+
 func windowText(hwnd windows.HWND) string {
 	buf := make([]uint16, 512)
 	n, _, _ := procGetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))

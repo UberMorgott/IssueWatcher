@@ -335,6 +335,10 @@ func (t *Tray) NotifyEvents(events []store.Event) int {
 	p := t.prefs
 	t.mu.Unlock()
 	cards := p.Pick(events, time.Now(), WindowsBusy)
+	if len(cards) > 0 && DashboardInFront() { // the focused dashboard shows its own toasts
+		t.opts.Log.Info("notifications: dashboard in front, cards left to its toasts", "events", len(events))
+		return 0
+	}
 	t.ShowCards(cards...)
 	if len(events) > 0 {
 		t.opts.Log.Info("notifications", "events", len(events), "shown", len(cards))
@@ -343,12 +347,13 @@ func (t *Tray) NotifyEvents(events []store.Event) int {
 }
 
 // NotifyCard shows one app card (agent job finished) unless notifications are
-// off, quiet hours run or Windows is busy (full screen) and that is respected.
+// off, quiet hours run, Windows is busy (full screen) and that is respected, or
+// the dashboard is the foreground window (its in-app toast says the same).
 func (t *Tray) NotifyCard(c Card) bool {
 	t.mu.Lock()
 	p := t.prefs
 	t.mu.Unlock()
-	if !p.Enabled || p.Quiet(time.Now()) || (p.RespectWindowsDnd && WindowsBusy()) {
+	if !p.Enabled || p.Quiet(time.Now()) || (p.RespectWindowsDnd && WindowsBusy()) || DashboardInFront() {
 		return false
 	}
 	t.ShowCards(c)

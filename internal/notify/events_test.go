@@ -8,6 +8,21 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
+func TestJobCard(t *testing.T) {
+	now := time.Now()
+	fail := JobCard(1, "o/app", 1, false, "ошибка", FailReason("no_folder", "no local folder is mapped to o/app; m…"), now)
+	if fail.Title != "Агент: ошибка" || fail.Ref != "o/app#1" || fail.Text != "Папка проекта не привязана" || fail.Kind != KindIssue {
+		t.Fatalf("failed: %+v", fail)
+	}
+	if c := JobCard(1, "o/app", 1, false, "", FailReason("weird", "boom"), now); c.Text != "boom" {
+		t.Fatalf("unknown code: %+v", c)
+	}
+	done := JobCard(1, "o/app", 1, true, "исправлено локально", "", now)
+	if done.Title != "Агент закончил" || done.Ref != "o/app#1 — исправлено локально" || done.Kind != KindClosed {
+		t.Fatalf("done: %+v", done)
+	}
+}
+
 func TestCards(t *testing.T) {
 	now := time.Date(2026, 9, 28, 14, 32, 0, 0, time.UTC)
 	evs := []store.Event{

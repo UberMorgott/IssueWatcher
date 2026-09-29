@@ -48,10 +48,10 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 				log.Info("agent job finished", "job", j.ID, "flow", j.Flow, "state", j.State)
 				return
 			}
-			ok :=j.State == store.JobNeedsReview || j.State == store.JobDone // done: a rule label job applied its labels
+			ok := j.State == store.JobNeedsReview || j.State == store.JobDone // done: a rule label job applied its labels
 			var res runner.Result
 			_ = json.Unmarshal(j.Result, &res)
-			text := j.Error
+			text := notify.FailReason(res.ErrorCode, j.Error)
 			if ok {
 				switch {
 				case j.Flow == "label":

@@ -72,21 +72,46 @@ func Cards(events []store.Event, now time.Time) []Card {
 	return out
 }
 
-// JobCard is the «Агент закончил: repo#N — outcome» card of a finished agent
-// job; a click opens the issue. ok = finished (✓ icon), otherwise it failed.
+// JobCard is the card of a finished agent job; a click opens the issue.
+// ok = finished: «Агент закончил», repo#N — outcome (✓ icon); otherwise
+// «Агент: ошибка», repo#N and the reason as text.
 func JobCard(itemID int64, repo string, number int, ok bool, outcome, text string, now time.Time) Card {
 	c := Card{Kind: KindClosed, Title: "Агент закончил", Ref: repo + "#" + strconv.Itoa(number), Time: now,
 		Text: clip(oneLine(text), 200), ItemID: strconv.FormatInt(itemID, 10)}
+	if !ok {
+		c.Kind, c.Title = KindIssue, "Агент: ошибка"
+		if c.Text == "" {
+			c.Text = "Задача не выполнена"
+		}
+		return c
+	}
 	if outcome != "" {
 		c.Ref += " — " + outcome
-	}
-	if !ok {
-		c.Kind = KindIssue
 	}
 	if c.Text == "" {
 		c.Text = "Результат готов к проверке"
 	}
 	return c
+}
+
+// failReasons are the Russian card texts of the runner's error codes.
+var failReasons = map[string]string{
+	"no_folder":    "Папка проекта не привязана",
+	"no_profile":   "Нет профиля агента для задачи",
+	"no_cli":       "CLI агента не найден",
+	"timeout":      "Агент не уложился в лимит времени",
+	"agent_failed": "Запуск агента завершился ошибкой",
+	"git":          "Ошибка на шаге git",
+	"interrupted":  "Задача прервана перезапуском",
+}
+
+// FailReason is the card text of a failed job: the Russian reason of a known
+// error code, else the raw error.
+func FailReason(code, err string) string {
+	if r, ok := failReasons[code]; ok {
+		return r
+	}
+	return err
 }
 
 // SampleCard is the tray «Тестовое уведомление» card: kinds rotate with n,
