@@ -136,11 +136,17 @@ async function saveProfile() {
     args: argsText.split('\n').map((a) => a.trim()).filter(Boolean),
     maxBudgetUsd: rest.cli === 'claude' ? rest.maxBudgetUsd || 0 : 0,
   }
-  const next = cur.profiles.slice()
-  if (editIndex.value >= 0) next[editIndex.value] = p
-  else next.push(p)
+  // A function of the latest saved list (by profile id): the store rebuilds it
+  // on a 409 retry, so a stale array never overwrites a newer save.
+  const oldId = editIndex.value >= 0 ? cur.profiles[editIndex.value]?.id : undefined
   saving.value = true
-  const ok = await save({ agents: { profiles: next } })
+  const ok = await save((s) => {
+    const next = s.agents.profiles.slice()
+    const k = oldId === undefined ? -1 : next.findIndex((x) => x.id === oldId)
+    if (k >= 0) next[k] = p
+    else next.push(p)
+    return { agents: { profiles: next } }
+  })
   saving.value = false
   if (ok) editing.value = null
 }
@@ -157,9 +163,11 @@ function removeProfile(i: number) {
     acceptProps: { label: t('settings.agents.delete'), severity: 'danger' },
     accept: () => {
       // Roles pointing at the profile are cleared in the same change (the server refuses dangling roles).
-      const roles: Partial<Agents['roles']> = {}
-      for (const k of ['coder', 'responder', 'verifier'] as const) if (cur.roles[k] === p.id) roles[k] = ''
-      void save({ agents: { profiles: cur.profiles.filter((_, j) => j !== i), roles } })
+      void save((s) => {
+        const roles: Partial<Agents['roles']> = {}
+        for (const k of ['coder', 'responder', 'verifier'] as const) if (s.agents.roles[k] === p.id) roles[k] = ''
+        return { agents: { profiles: s.agents.profiles.filter((x) => x.id !== p.id), roles } }
+      })
     },
   })
 }
