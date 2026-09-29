@@ -37,6 +37,12 @@ export const useJobsStore = defineStore('jobs', () => {
   /** Current step line of a job's attempt (from job.log, or the log tail on load). */
   const steps = shallowReactive(new Map<number, { attempt: number; text: string }>())
   const tailLoading = new Set<number>()
+  /** Unfinished jobs (queued / running / needs_review): the sidebar badge. */
+  const activeCount = computed(() => {
+    let n = 0
+    for (const j of byId.values()) if (j.state === 'queued' || j.state === 'running' || j.state === 'needs_review') n++
+    return n
+  })
 
   /**
    * Applies a job.changed payload. Returns the job when this event ends an
@@ -111,7 +117,7 @@ export const useJobsStore = defineStore('jobs', () => {
     return api.createJobs(itemIds, flow, profileId)
   }
 
-  return { jobListeners, logListeners, emitJob, emitLog, byId, stepOf, loadStep, seed, profiles, roleProfile, profileName, dispatch }
+  return { jobListeners, logListeners, emitJob, emitLog, byId, activeCount, stepOf, loadStep, seed, profiles, roleProfile, profileName, dispatch }
 })
 
 /** Subscribes the calling component to job.changed / job.log while it is mounted. */

@@ -2,18 +2,20 @@
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
+import { useJobsStore } from '../stores/jobs'
 
 defineProps<{ mobile?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const app = useAppStore()
+const jobs = useJobsStore()
 const route = useRoute()
 const { t } = useI18n()
 
-const items = [
+const items: { to: string; icon: string; label: string; match: string[]; badge?: () => number }[] = [
   { to: '/', icon: 'pi pi-objects-column', label: 'nav.overview', match: ['overview'] },
-  { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: true },
+  { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: () => app.unreadTotal },
   { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
-  { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'] },
+  { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'], badge: () => jobs.activeCount },
   { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },
   { to: '/settings', icon: 'pi pi-cog', label: 'nav.settings', match: ['settings'] },
 ]
@@ -52,9 +54,9 @@ const active = (match: string[]) => match.includes(String(route.name))
           <i :class="it.icon" />
           <span class="nav-label">{{ t(it.label) }}</span>
           <span
-            v-if="it.badge && app.unreadTotal > 0"
+            v-if="it.badge && it.badge() > 0"
             class="nav-badge mono"
-          >{{ app.unreadTotal > 99 ? '99+' : app.unreadTotal }}</span>
+          >{{ it.badge() > 99 ? '99+' : it.badge() }}</span>
         </RouterLink>
       </li>
     </ul>
