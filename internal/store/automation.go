@@ -80,17 +80,21 @@ type AutomationItem struct {
 	// NeedsLink: a mod page item whose page is not linked to a code project
 	// (a fix has no folder until the mod is linked to a project with one).
 	NeedsLink bool
+	// Mod: the item is on a mod page (not a code project): it has no labels.
+	Mod bool
 }
 
-// AutomationItemFacts returns item itemID's labels and the folder its fixes run
-// in (its project's, or a linked mod page's code project's).
+// AutomationItemFacts returns item itemID's labels, whether it is a mod page
+// item and the folder its fixes run in (its project's, or a linked mod page's
+// code project's).
 func (s *Store) AutomationItemFacts(ctx context.Context, itemID int64) (AutomationItem, error) {
 	var (
 		it     AutomationItem
 		labels string
 	)
-	err := s.rd.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+`, `+needsLinkCol+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
-		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL, &it.NeedsLink)
+	err := s.rd.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+`, `+needsLinkCol+`, s.platform <> '`+CodePlatform+`'
+		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = p.source_id`+linkJoin+`
+		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL, &it.NeedsLink, &it.Mod)
 	if errors.Is(err, sql.ErrNoRows) {
 		return it, ErrNotFound
 	}

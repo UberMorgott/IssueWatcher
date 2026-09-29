@@ -13,6 +13,31 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
+// modItem adds the nexus mod page skyrim/7 named name with one comment item
+// and returns the page's project id and the item id.
+func (e *env) modItem(name string) (page, item int64) {
+	e.t.Helper()
+	ctx := e.t.Context()
+	nx, err := e.st.UpsertSource(ctx, "nexus", "maintainer")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	mods, err := e.st.SyncProjects(ctx, nx, []provider.Project{{ExternalID: "skyrim/7", Name: name, URL: "https://www.nexusmods.com/skyrim/mods/7"}})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := e.st.ApplyItems(ctx, nx, mods[0].ID, []provider.Item{{ExternalID: "comment:55", Kind: store.KindComment, Number: 1,
+		Title: "Crashes on load", URL: "https://www.nexusmods.com/skyrim/mods/7?tab=posts#comment-55", Author: "player", Open: true, CreatedAt: now, UpdatedAt: now}}, "maintainer"); err != nil {
+		e.t.Fatal(err)
+	}
+	chunk, err := e.st.Issues(ctx, store.IssueFilter{Platform: "nexus"})
+	if err != nil || len(chunk.Items) != 1 {
+		e.t.Fatalf("mod item: %+v %v", chunk, err)
+	}
+	return mods[0].ID, chunk.Items[0].ID
+}
+
 // A fix of a mod-page item runs in the linked code project's folder, its
 // prompt never asks for "Fixes #N", and Push stays off unless agents.modPush
 // allows it for that mod page.

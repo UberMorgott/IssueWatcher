@@ -24,7 +24,9 @@ type Queued struct {
 	ItemID int64      `json:"itemId"`
 	Job    *store.Job `json:"job,omitempty"`
 	// Error: "exists" (an unfinished job of this flow; Job is that one),
-	// "not_found", "no_folder" (fix without a usable local folder; no job), or a message.
+	// "not_found", "no_folder" (fix without a usable local folder; no job),
+	// "no_labels" (label job of a mod page item: labels exist on code project
+	// items only; no job), or a message.
 	Error string `json:"error,omitempty"`
 	// Hint with no_folder: "link_mod" = a mod page item whose page is not linked
 	// to a code project (link the mod to a project with a folder).
@@ -33,6 +35,16 @@ type Queued struct {
 
 // HintLinkMod: link the mod page to a code project with a folder first.
 const HintLinkMod = "link_mod"
+
+// ErrorNoLabels (Queued.Error): a label job of a mod page item.
+const ErrorNoLabels = "no_labels"
+
+// errMod wraps err (ErrBadRequest / ErrNotAllowed): the label flow never
+// touches a mod page item; the shared labeler would write to a GitHub issue
+// named after the mod page.
+func errMod(err error) error {
+	return fmt.Errorf("%w: labels exist on code project (GitHub) issues only, not on mod page items", err)
+}
 
 // MaxBatch bounds one Enqueue call.
 const MaxBatch = 500
@@ -61,20 +73,25 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 	}
 	out := make([]Queued, 0, len(itemIDs))
 	seen := map[int64]bool{}
-	noFolder := 0
+	noFolder, noLabels := 0, 0
 	for _, id := range itemIDs {
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
 		q := Queued{ItemID: id}
-		if flow == flowFix { // a fix runs in the mapped folder: without one the job could only fail
+		if flow == flowFix || flow == flowLabel { // a fix runs in the mapped folder; labels exist on code project items only
 			it, err := r.opts.Store.AutomationItemFacts(ctx, id)
 			switch {
 			case errors.Is(err, store.ErrNotFound):
 				q.Error = "not_found"
 			case err != nil:
 				return out, err
+			case flow == flowLabel:
+				if it.Mod {
+					q.Error = ErrorNoLabels
+					noLabels++
+				}
 			case folderError("", it.LocalPath, it.ProjectURL) != nil:
 				q.Error = CodeNoFolder
 				if it.NeedsLink {
@@ -103,6 +120,9 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 	}
 	if noFolder > 0 && noFolder == len(out) {
 		return out, ErrNoFolder // nothing queued: every item lacks a usable folder
+	}
+	if noLabels > 0 && noLabels == len(out) {
+		return out, errMod(ErrBadRequest) // nothing queued: every item is on a mod page
 	}
 	r.kick()
 	return out, nil

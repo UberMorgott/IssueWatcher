@@ -67,6 +67,9 @@ func (r *Runner) addLabels(ctx context.Context, itemID int64, names []string) ([
 	if err != nil {
 		return nil, err
 	}
+	if in.Mod {
+		return nil, errMod(ErrNotAllowed)
+	}
 	repo, err := r.opts.Labels.ListLabels(ctx, in.ProjectName)
 	if err != nil {
 		return nil, err
@@ -104,6 +107,9 @@ func (r *Runner) runLabel(ctx context.Context, j *store.Job, res *Result, log *j
 	in, err := r.opts.Store.JobInput(ctx, j.ItemID)
 	if err != nil {
 		return "", err
+	}
+	if in.Mod {
+		return "", errMod(ErrNotAllowed)
 	}
 	if _, err := r.resolveExe(prof); err != nil {
 		return "", coded(CodeNoCLI, err)

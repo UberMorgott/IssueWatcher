@@ -17,7 +17,7 @@ const (
 	ReasonNoProfile   = "no_profile"   // the rule's profile (or the flow's role) does not exist
 	ReasonAutoFixOff  = "auto_fix_off" // fix rule where allowAutoFix is off
 	ReasonNoFolder    = "no_folder"    // fix rule without a working mapped folder
-	ReasonUnavailable = "unavailable"  // label rule without a label-capable provider
+	ReasonUnavailable = "unavailable"  // label rule without a label-capable provider, or for a mod page item
 )
 
 // Automate applies the automation rules to sync events (docs/ARCHITECTURE.md →
@@ -73,7 +73,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 		}
 		if _, ok := cfg.Profile(profile); !ok {
 			req.Skip = ReasonNoProfile
-		} else if rule.Flow == config.FlowLabel && r.opts.Labels == nil {
+		} else if rule.Flow == config.FlowLabel && (r.opts.Labels == nil || item.Mod) {
 			req.Skip = ReasonUnavailable
 		} else if rule.Flow == config.FlowFix && !pol.AllowAutoFix {
 			req.Skip = ReasonAutoFixOff

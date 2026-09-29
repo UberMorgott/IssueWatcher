@@ -80,6 +80,35 @@ func TestLabelFlowSuggestAndApply(t *testing.T) {
 	}
 }
 
+// The label flow never touches a mod page item, even one whose page is named
+// like the code repo: the shared GitHub labeler would label octo/demo#1.
+func TestLabelRefusesModItem(t *testing.T) {
+	mode(t, "ok")
+	t.Setenv("FAKECLI_LABELS", "bug")
+	threads := rule("mod-labels", "octo/demo", config.EventNewItem, config.FlowLabel)
+	threads.Kinds = []string{"comment"}
+	e := autoSetup(t, 1, func(s *config.Settings) { s.Agents.Automation.Rules = []config.Rule{threads} })
+	e.labelRepo()
+	page, item := e.modItem("octo/demo")
+	if err := e.st.SetProjectLinks(t.Context(), e.proj[0].ID, []int64{page}); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := e.r.Enqueue(t.Context(), []int64{item}, flowLabel, ""); !errors.Is(err, ErrBadRequest) || len(q) != 1 || q[0].Error != ErrorNoLabels || q[0].Job != nil {
+		t.Fatalf("enqueue: %+v %v", q, err)
+	}
+	x := store.Event{Kind: store.EventNewItem, ItemKind: store.KindComment, Project: "nexus:skyrim/7", CodeProject: "github:octo/demo", Repo: "octo/demo", ItemID: item}
+	wantDecisions(t, e.r.Automate(t.Context(), []store.Event{x}), decision{"mod-labels", "skipped", ReasonUnavailable})
+	if _, err := e.r.addLabels(t.Context(), item, []string{"bug"}); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("addLabels: %v", err)
+	}
+	if issue, _, adds := e.ghState(); adds != 0 || !slices.Equal(issue, []string{"wontfix"}) {
+		t.Fatalf("GitHub touched: issue %v adds %d", issue, adds)
+	}
+	if jobs, err := e.st.Jobs(t.Context(), store.JobFilter{}); err != nil || len(jobs.Items) != 0 {
+		t.Fatalf("jobs: %+v %v", jobs, err)
+	}
+}
+
 // A rule job adds its picks itself only where autoApplyLabels is on (project
 // override over the global default); a manual job never does.
 func TestLabelAutoApply(t *testing.T) {
