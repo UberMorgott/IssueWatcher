@@ -62,6 +62,60 @@ func TestLinkPlan(t *testing.T) {
 	}
 }
 
+// A single exact name match of another game is a suggestion, not a link; a
+// game extending the prefix's still links.
+func TestLinkPlanOtherGame(t *testing.T) {
+	repos := []Repo{
+		{ID: 1, Name: "me/Fallout4-Mod-FreeCamera", Platform: CodePlatform},
+		{ID: 2, Name: "me/Skyrim-Mod-Lanterns", Platform: CodePlatform},
+		{ID: 10, Name: "Free Camera", Platform: "nexus", URL: "https://www.nexusmods.com/skyrim/mods/9"},
+		{ID: 11, Name: "Free Camera", Platform: "nexus", URL: "https://www.nexusmods.com/fallout4/mods/9"},
+		{ID: 12, Name: "Lanterns", Platform: "nexus", URL: "https://www.nexusmods.com/skyrimspecialedition/mods/5"},
+	}
+	auto, suggest := linkPlan(repos, nil, nil)
+	if _, ok := auto[10]; ok || auto[11] != 1 || auto[12] != 2 || !slices.Equal(suggest[10], []int64{1}) {
+		t.Errorf("auto %v suggest %v", auto, suggest)
+	}
+}
+
+// An unlink made by hand after the linker read its plan wins over the plan.
+func TestAutoLinkUnlinkedMeanwhile(t *testing.T) {
+	ctx := t.Context()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := New(db)
+	gh, _ := s.UpsertSource(ctx, "github", "me")
+	code, err := s.SyncProjects(ctx, gh, []provider.Project{{ExternalID: "me/shareship", Name: "me/shareship"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nx, _ := s.UpsertSource(ctx, "nexus", "me")
+	mods, err := s.SyncProjects(ctx, nx, []provider.Project{{ExternalID: "windrose/147", Name: "ShareShip", URL: "https://www.nexusmods.com/windrose/mods/147"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repos, err := s.Repos(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auto, _, err := s.plan(ctx, repos)
+	if err != nil || auto[mods[0].ID] != code[0].ID {
+		t.Fatalf("plan %v %v", auto, err)
+	}
+	if err := s.UnlinkProject(ctx, mods[0].ID); err != nil { // the user decides between plan and write
+		t.Fatal(err)
+	}
+	if n, err := s.applyAutoLinks(ctx, auto); err != nil || n != 0 {
+		t.Fatalf("auto-linked %d %v", n, err)
+	}
+	if l, _ := s.Links(ctx, mods[0].ID); l.LinkedTo != nil {
+		t.Fatalf("unlink reverted: %+v", l)
+	}
+}
+
 func TestSplitWords(t *testing.T) {
 	for in, want := range map[string][]string{"PerkOracle": {"perk", "oracle"}, "PPCli_v2": {"pp", "cli", "v", "2"}, "wartales-mp": {"wartales", "mp"}} {
 		if got := splitWords(in); !slices.Equal(got, want) {

@@ -19,7 +19,8 @@ import (
 //  2. a name of the mod page (title, title before " - " / ":", page slug) is
 //     the name or core of exactly one repository — the core drops a
 //     "<Game>-Mod(s)-" prefix and a "-Fork" suffix — or of exactly one
-//     repository of the mod page's game;
+//     repository of the mod page's game — never one whose prefix names
+//     another game than the page URL's (Skyrim page ≠ Fallout4-Mod-…);
 //  3. exactly one repository of the mod page's game has the name as whole
 //     words of its core (Oracle → PhoenixPoint-Mod-PerkOracle).
 // The game comes from the page URL (CurseForge, Nexus: /<game>/mods/…) or,
@@ -202,6 +203,19 @@ func matchCode(names []string, codes []codeRepo) (exact, words, loose []int64) {
 	return exact, words, loose
 }
 
+// sameGame reports whether mod game key and repository prefix game name the
+// same game; one may extend the other ("skyrimspecialedition" / "skyrim").
+func sameGame(key, game string) bool {
+	return key == game || strings.HasPrefix(key, game) || strings.HasPrefix(game, key)
+}
+
+// otherGame reports whether a repository of prefix game is certainly for
+// another game than mod game key: both known and different. A Steam key
+// ("steam:<appid>") is no game name and only learns its game, so it never is.
+func otherGame(key, game string) bool {
+	return key != "" && game != "" && !strings.Contains(key, ":") && !sameGame(key, game)
+}
+
 // linkPlan splits the undecided, unlinked mod pages of repos into automatic
 // links (mod → code) and suggestions (mod → code candidates).
 func linkPlan(repos []Repo, decided map[int64]bool, hints map[int64]linkHint) (auto map[int64]int64, suggest map[int64][]int64) {
@@ -251,7 +265,7 @@ func linkPlan(repos []Repo, decided map[int64]bool, hints map[int64]linkHint) (a
 			}
 		}
 		exact, words, loose := matchCode(modNames(r), codes)
-		if len(exact) == 1 {
+		if len(exact) == 1 && !otherGame(key, byID[exact[0]].game) {
 			auto[r.ID] = exact[0]
 			learn(key, exact[0])
 			continue
@@ -265,13 +279,13 @@ func linkPlan(repos []Repo, decided map[int64]bool, hints map[int64]linkHint) (a
 				if g == "" || o.key == "" {
 					continue
 				}
-				if g == o.key || (len(learned[o.key]) == 1 && learned[o.key][g]) {
+				if sameGame(o.key, g) || (len(learned[o.key]) == 1 && learned[o.key][g]) {
 					out = append(out, id)
 				}
 			}
 			return out
 		}
-		if len(o.exact) > 1 {
+		if len(o.exact) > 0 { // one exact match reaches here only when of another game
 			if g := inGame(o.exact); len(g) == 1 {
 				auto[o.mod] = g[0]
 			} else {
@@ -352,22 +366,45 @@ func (s *Store) AutoLink(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return s.applyAutoLinks(ctx, auto)
+}
+
+// applyAutoLinks writes planned links (mod → code) and records each decision.
+// A decision made meanwhile by hand (link, or unlink after the plan was read)
+// wins: the link is inserted only while the mod page is still undecided, in
+// the same transaction that records the decision.
+func (s *Store) applyAutoLinks(ctx context.Context, auto map[int64]int64) (int, error) {
 	n := 0
 	for mod, code := range auto {
-		// A link made meanwhile by hand wins (DO NOTHING); the decision is recorded either way.
-		res, err := s.db.ExecContext(ctx, `INSERT INTO project_links (mod_project_id, code_project_id) VALUES (?, ?)
-			ON CONFLICT (mod_project_id) DO NOTHING`, mod, code)
+		k, err := s.autoLinkOne(ctx, mod, code)
 		if err != nil {
-			return n, fmt.Errorf("store: auto-link %d: %w", mod, err)
-		}
-		if k, _ := res.RowsAffected(); k > 0 {
-			n++
-		}
-		if err := s.decideLink(ctx, s.db, mod); err != nil {
 			return n, err
 		}
+		n += k
 	}
 	return n, nil
+}
+
+func (s *Store) autoLinkOne(ctx context.Context, mod, code int64) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `INSERT INTO project_links (mod_project_id, code_project_id)
+		SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM project_link_decisions WHERE mod_project_id = ?1)
+		ON CONFLICT (mod_project_id) DO NOTHING`, mod, code)
+	if err != nil {
+		return 0, fmt.Errorf("store: auto-link %d: %w", mod, err)
+	}
+	k, _ := res.RowsAffected()
+	if err := s.decideLink(ctx, tx, mod); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit auto-link %d: %w", mod, err)
+	}
+	return int(k), nil
 }
 
 // decideLink records that mod page id's link was decided (q: the db or a tx).
