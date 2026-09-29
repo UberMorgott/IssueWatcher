@@ -99,6 +99,7 @@ type Syncer struct {
 	reconciledOnce bool
 	forceReconcile bool
 	warmed         bool // warmStart ran (first Step)
+	bootRetry      int  // failed reconciles in a row with no targets (retry backoff)
 	verifyAccount  bool // resumed from the store: the first check confirms the account
 	pausedUntil    time.Time
 	backoff        time.Duration
@@ -165,7 +166,7 @@ func (s *Syncer) SetPlan(p Plan) {
 	s.status.Interval, s.status.Mode = p.Active.String(), p.Mode
 	s.status.ActiveEvery, s.status.IdleEvery, s.status.ReconcileEvery = p.Active.String(), p.Idle.String(), p.Reconcile.String()
 	s.status.Budget = p.Budget
-	if s.reconciledOnce && old.Reconcile != p.Reconcile {
+	if s.reconciledOnce && s.bootRetry == 0 && old.Reconcile != p.Reconcile {
 		s.nextReconcile = now.Add(jitter(p.Reconcile, 0, now.Unix()/60))
 	}
 	for _, t := range s.targets { // shorter intervals take effect now, longer ones after the pending check
@@ -280,10 +281,19 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	})
 	s.mu.Lock()
 	s.reconciledOnce = true
-	s.nextReconcile = now.Add(jitter(s.plan_.Reconcile, 0, now.Unix()/60))
-	if errors.Is(err, provider.ErrNotSignedIn) {
+	switch {
+	case errors.Is(err, provider.ErrNotSignedIn):
 		// Signed out: look again soon (sign-in also triggers a sync).
+		s.bootRetry = 0
 		s.nextReconcile = now.Add(s.plan_.Active)
+	case err != nil && !complete && len(s.targets) == 0:
+		// Nothing to check yet (the first reconcile failed): retry at 1, 2, 4 … 15
+		// minutes instead of waiting for the next hourly reconcile.
+		s.bootRetry++
+		s.nextReconcile = now.Add(min(time.Minute<<min(s.bootRetry-1, 4), 15*time.Minute))
+	default:
+		s.bootRetry = 0
+		s.nextReconcile = now.Add(jitter(s.plan_.Reconcile, 0, now.Unix()/60))
 	}
 	s.mu.Unlock()
 	if errors.Is(err, provider.ErrNotSignedIn) {

@@ -217,3 +217,38 @@ func TestFailedStoreKeepsPollState(t *testing.T) {
 		t.Fatalf("comment stored %d %v", n, err)
 	}
 }
+// A failed first reconcile (nothing to check yet) is retried at 1, 2 … minutes,
+// not after the hourly reconcile period.
+func TestFailedBootstrapRetriesWithBackoff(t *testing.T) {
+	st := openStore(t)
+	clk := &clock{t: t0}
+	fp := &fakeProvider{platform: "nexus", account: "me", item: "x", err: errors.New("server down")}
+	s := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Now: clk.Now, Plan: plan5()})
+	next := func() time.Duration {
+		nr, _ := time.Parse(time.RFC3339, s.Status().NextReconcile)
+		return nr.Sub(clk.Now())
+	}
+	s.Step(t.Context())
+	if d := next(); d != time.Minute {
+		t.Fatalf("first retry in %v, want 1m", d)
+	}
+	if w := s.Step(t.Context()); w > time.Minute {
+		t.Fatalf("wait %v", w)
+	}
+	clk.Add(time.Minute)
+	s.Step(t.Context())
+	if d := next(); d != 2*time.Minute {
+		t.Fatalf("second retry in %v, want 2m", d)
+	}
+	fp.mu.Lock()
+	fp.err = nil
+	fp.mu.Unlock()
+	clk.Add(2 * time.Minute)
+	s.Step(t.Context())
+	if st := s.Status(); st.LastSync == "" || st.LastError != "" {
+		t.Fatalf("no reconcile at +3m: %+v", st)
+	}
+	if d := next(); d < 50*time.Minute {
+		t.Fatalf("after success next reconcile in %v, want the hourly period", d)
+	}
+}
