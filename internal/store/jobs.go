@@ -95,20 +95,37 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 // or OriginRule with ruleID. An unfinished job of the same flow for that item
 // → ErrJobExists (with that job).
 func (s *Store) CreateJob(ctx context.Context, itemID int64, flow, profileID, origin, ruleID string) (Job, error) {
+	return s.createJob(ctx, itemID, flow, profileID, origin, ruleID, false)
+}
+
+// ErrNotOpen means the item is no longer open.
+var ErrNotOpen = errors.New("store: item is not open")
+
+// CreateOpenJob is CreateJob for an item that must still be open when the job
+// is inserted (checked in the same statement): a closed item → ErrNotOpen.
+func (s *Store) CreateOpenJob(ctx context.Context, itemID int64, flow, profileID, origin, ruleID string) (Job, error) {
+	return s.createJob(ctx, itemID, flow, profileID, origin, ruleID, true)
+}
+
+func (s *Store) createJob(ctx context.Context, itemID int64, flow, profileID, origin, ruleID string, openOnly bool) (Job, error) {
 	if origin == "" {
 		origin = OriginManual
 	}
 	var id int64
 	err := s.db.QueryRowContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, profile_id, origin, rule_id)
-		SELECT id, project_id, ?, ?, ?, ? FROM items WHERE id = ?
-		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, itemID).Scan(&id)
+		SELECT id, project_id, ?, ?, ?, ? FROM items WHERE id = ? AND (? = 0 OR status = 'open')
+		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, itemID, openOnly).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		var n int
-		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE id = ?`, itemID).Scan(&n); err != nil {
+		var status string
+		err := s.db.QueryRowContext(ctx, `SELECT status FROM items WHERE id = ?`, itemID).Scan(&status)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Job{}, ErrNotFound
+		}
+		if err != nil {
 			return Job{}, fmt.Errorf("store: create job: %w", err)
 		}
-		if n == 0 {
-			return Job{}, ErrNotFound
+		if openOnly && status != "open" {
+			return Job{}, ErrNotOpen
 		}
 		existing, err := s.activeJob(ctx, itemID, flow)
 		if err != nil {
@@ -172,6 +189,30 @@ type TriageInput struct {
 	LocalPath   string
 	Issues      []TriageIssue
 	More        bool // more open issues than the limit
+}
+
+// OpenIssues returns the project's issues that are open now among numbers, by
+// number (ItemID, Number and Title set).
+func (s *Store) OpenIssues(ctx context.Context, projectID int64, numbers []int) (map[int]TriageIssue, error) {
+	nums, err := json.Marshal(numbers)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, number, title FROM items
+		WHERE project_id = ? AND status = 'open' AND number IN (SELECT value FROM json_each(?))`, projectID, string(nums))
+	if err != nil {
+		return nil, fmt.Errorf("store: open issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	open := map[int]TriageIssue{}
+	for rows.Next() {
+		var t TriageIssue
+		if err := rows.Scan(&t.ItemID, &t.Number, &t.Title); err != nil {
+			return nil, fmt.Errorf("store: scan open issue: %w", err)
+		}
+		open[t.Number] = t
+	}
+	return open, rows.Err()
 }
 
 // TriageInput loads project projectID with up to limit open issues, bodies

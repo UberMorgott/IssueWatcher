@@ -19,10 +19,12 @@ import (
 
 // Triage input bounds: the agent's context is the budget.
 const (
-	triageMaxIssues = 200
 	triageBodyRunes = 400
 	triageMaxPicks  = 20
 )
+
+// triageMaxIssues is how many open issues the prompt lists (a var: tests lower it).
+var triageMaxIssues = 200
 
 // Severities, most critical first.
 var severities = []string{"critical", "high", "medium", "low"}
@@ -48,11 +50,7 @@ type TriageResult struct {
 
 // checkPicks keeps the picks that name one of the open issues (first mention
 // wins), severity normalized ("" when unknown), stably ordered by severity.
-func checkPicks(open []store.TriageIssue, picks []TriagePick) (kept, dropped []TriagePick) {
-	byNumber := make(map[int]store.TriageIssue, len(open))
-	for _, is := range open {
-		byNumber[is.Number] = is
-	}
+func checkPicks(byNumber map[int]store.TriageIssue, picks []TriagePick) (kept, dropped []TriagePick) {
 	seen := map[int]bool{}
 	for _, p := range picks {
 		is, ok := byNumber[p.Number]
@@ -142,7 +140,17 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 		return "", coded(CodeAgent, errors.New("the agent returned no structured ranking"))
 	}
 	tr.Summary = agent.Summary
-	tr.Picks, tr.Dropped = checkPicks(t.Issues, agent.Picks)
+	// Checked against the issues open now: the agent may have paged past the
+	// prompt's list through its MCP server, and sync may have closed some.
+	nums := make([]int, len(agent.Picks))
+	for i, p := range agent.Picks {
+		nums[i] = p.Number
+	}
+	open, err := r.opts.Store.OpenIssues(ctx, j.ProjectID, nums)
+	if err != nil {
+		return "", err
+	}
+	tr.Picks, tr.Dropped = checkPicks(open, agent.Picks)
 	if tr.Picks == nil {
 		tr.Picks = []TriagePick{}
 	}
@@ -167,7 +175,7 @@ func (r *Runner) queueFixes(ctx context.Context, j store.Job, coder config.Agent
 		if queued >= tr.TopN {
 			break
 		}
-		fj, err := r.opts.Store.CreateJob(ctx, p.ItemID, flowFix, coder.ID, j.Origin, j.RuleID)
+		fj, err := r.opts.Store.CreateOpenJob(ctx, p.ItemID, flowFix, coder.ID, j.Origin, j.RuleID)
 		switch {
 		case err == nil:
 			p.Queue, p.JobID = "queued", fj.ID
@@ -177,6 +185,9 @@ func (r *Runner) queueFixes(ctx context.Context, j store.Job, coder config.Agent
 		case errors.Is(err, store.ErrJobExists):
 			p.Queue, p.JobID = "exists", fj.ID
 			log.addf(StepInfo, "#%d: skipped, fix job %d is unfinished", p.Number, fj.ID)
+		case errors.Is(err, store.ErrNotOpen):
+			p.Queue = "closed meanwhile"
+			log.addf(StepInfo, "#%d: skipped, closed meanwhile", p.Number)
 		default:
 			p.Queue = err.Error()
 			log.add(StepError, fmt.Sprintf("#%d: queue fix job: %v", p.Number, err))

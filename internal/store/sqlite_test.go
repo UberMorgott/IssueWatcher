@@ -196,6 +196,29 @@ func TestMigration008TriageJobs(t *testing.T) {
 	if _, err := s.TriageInput(ctx, 9999, 10, 5); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("triage input of no project: %v", err)
 	}
+
+	// Triage picks are checked against the issues open now; a fix job for a
+	// pick is only created while its issue is still open.
+	open, err := s.OpenIssues(ctx, pid, []int{1, 2, 7})
+	if err != nil || len(open) != 1 || open[1].ItemID != a || open[1].Number != 1 {
+		t.Fatalf("open issues: %+v %v", open, err)
+	}
+	if open, err := s.OpenIssues(ctx, projects[1].ID, []int{1}); err != nil || len(open) != 0 {
+		t.Fatalf("open issues of another project: %+v %v", open, err)
+	}
+	var b int64
+	if err := db.QueryRowContext(ctx, `SELECT id FROM items WHERE external_id = 'b'`).Scan(&b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOpenJob(ctx, b, "fix", "claude", "", ""); !errors.Is(err, ErrNotOpen) {
+		t.Fatalf("fix job for a closed issue: %v", err)
+	}
+	if _, err := s.CreateOpenJob(ctx, a, "fix", "claude", "", ""); !errors.Is(err, ErrJobExists) {
+		t.Fatalf("second fix job: %v", err)
+	}
+	if _, err := s.CreateOpenJob(ctx, 9999, "fix", "claude", "", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("fix job for no item: %v", err)
+	}
 }
 
 func TestForeignKeysEnforced(t *testing.T) {

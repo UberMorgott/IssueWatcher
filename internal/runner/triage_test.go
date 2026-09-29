@@ -16,7 +16,7 @@ import (
 )
 
 func TestCheckPicks(t *testing.T) {
-	open := []store.TriageIssue{{ItemID: 11, Number: 1, Title: "a"}, {ItemID: 12, Number: 2, Title: "b"}, {ItemID: 13, Number: 3, Title: "c"}}
+	open := map[int]store.TriageIssue{1: {ItemID: 11, Number: 1, Title: "a"}, 2: {ItemID: 12, Number: 2, Title: "b"}, 3: {ItemID: 13, Number: 3, Title: "c"}}
 	kept, dropped := checkPicks(open, []TriagePick{
 		{Number: 3, Severity: "low", Reason: " r3 "}, {Number: 7, Severity: "critical"}, {Number: 1, Severity: "CRITICAL"},
 		{Number: 3, Severity: "high"}, {Number: 2, Severity: "urgent", Queue: "queued", JobID: 5},
@@ -110,6 +110,27 @@ func TestTriageQueuesTopFreePicks(t *testing.T) {
 	}
 	if exists(e.local + "/fixed.txt") {
 		t.Fatal("triage changed files")
+	}
+}
+
+// A pick outside the issues listed in the prompt (the agent can page further
+// through its MCP server) is checked against the project's open issues now.
+func TestTriageAcceptsOpenIssueBeyondPromptList(t *testing.T) {
+	mode(t, "ok")
+	old := triageMaxIssues
+	triageMaxIssues = 2
+	t.Cleanup(func() { triageMaxIssues = old })
+	t.Setenv("FAKECLI_PICKS", "1:critical")
+	e := setup(t, 4, func(s *config.Settings) { s.Agents.Profiles[0].Path = `C:\nope\claude.exe` })
+	j, err := e.r.Triage(t.Context(), e.proj[0].ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j = e.wait(j.ID, store.JobDone, store.JobFailed)
+	tr := result(t, j).Triage
+	if j.State != store.JobDone || tr == nil || tr.Open != 2 || !tr.More || len(tr.Picks) != 1 || len(tr.Dropped) != 0 ||
+		tr.Picks[0].Queue != "queued" || tr.Picks[0].ItemID != e.items[0] {
+		t.Fatalf("triage: %+v %+v", j, tr)
 	}
 }
 
