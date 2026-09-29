@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/api"
@@ -21,7 +22,7 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 	srv func() *api.Server, tray func() *notify.Tray,
 ) *runner.Runner {
 	return runner.New(runner.Options{
-		Store: st, Settings: cfgs.Get, DataDir: dataDir, Publisher: gh, Reply: sy.Reply, Log: log,
+		Store: st, Settings: cfgs.Get, DataDir: dataDir, Publisher: gh, Reply: sy.Reply, Labels: gh, Log: log,
 		OnJob: func(j store.Job) {
 			s := srv()
 			if s == nil {
@@ -38,12 +39,14 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 			}
 		},
 		OnFinished: func(j store.Job) {
-			ok := j.State == store.JobNeedsReview
+			ok := j.State == store.JobNeedsReview || j.State == store.JobDone // done: a rule label job applied its labels
 			var res runner.Result
 			_ = json.Unmarshal(j.Result, &res)
 			text := j.Error
 			if ok {
 				switch {
+				case j.Flow == "label":
+					text = strings.Join(res.Labels, ", ")
 				case res.Agent != nil && res.Agent.Summary != "":
 					text = res.Agent.Summary
 				case res.Draft != "":
@@ -59,8 +62,14 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 
 // outcomeLabel is the short Russian outcome on the «Агент закончил» card.
 func outcomeLabel(j store.Job, res runner.Result) string {
+	if j.Flow == "label" && j.State == store.JobDone {
+		return "метки добавлены"
+	}
 	if j.State != store.JobNeedsReview {
 		return "ошибка"
+	}
+	if j.Flow == "label" {
+		return "метки предложены"
 	}
 	if res.Local != nil {
 		return map[string]string{

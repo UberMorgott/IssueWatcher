@@ -84,7 +84,7 @@ type ProjectAgent struct {
 }
 
 // Default prompt texts. Variables: {repo} {issue.number} {issue.title}
-// {issue.url} {issue.body} {comments} {localPath} {branch} {diff} (review); issue text arrives
+// {issue.url} {issue.body} {comments} {localPath} {branch} {diff} (review) {labels} (label); issue text arrives
 // wrapped in <untrusted-issue-content> blocks.
 const (
 	DefaultSystemPrompt = `You are working for the maintainer of {repo} through IssueWatcher.

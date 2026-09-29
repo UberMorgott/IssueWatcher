@@ -12,6 +12,7 @@
 //	hang  start a child that sleeps, write its pid to FAKECLI_RECORD.pid, sleep
 //	sleep sleep (the child of hang)
 //
+// The label flow answers the comma-separated FAKECLI_LABELS as its picks.
 // FAKECLI_RECORD (a file) receives {args, stdin, ghToken} for assertions.
 package main
 
@@ -52,6 +53,8 @@ func main() {
 		schema = string(b)
 	}
 	switch {
+	case strings.Contains(schema, `"labels"`):
+		flow = "label"
 	case strings.Contains(schema, `"reply"`):
 		flow = "reply"
 	case strings.Contains(schema, `"verdict"`):
@@ -101,6 +104,12 @@ func main() {
 		result = map[string]any{"reply": "Thanks for the report! Fixed in the next release.", "notes": ""}
 	case "review":
 		result = map[string]any{"verdict": "ok", "summary": "looks right"}
+	case "label":
+		picks := []string{}
+		if v := os.Getenv("FAKECLI_LABELS"); v != "" {
+			picks = strings.Split(v, ",")
+		}
+		result = map[string]any{"labels": picks, "summary": "picked from the list"}
 	case "fix-direct":
 		result = directFix(mode, args, string(stdin))
 	default:

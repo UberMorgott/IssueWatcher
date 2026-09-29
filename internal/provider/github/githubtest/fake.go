@@ -62,6 +62,10 @@ type Server struct {
 	PollInterval  int      // X-Poll-Interval seconds on change checks; 0 = none
 	DefaultBranch string   // GET /repos/{o}/{r} default_branch; "" = main
 	Pulls         []*Pull  // pull requests opened through the REST API
+	// Labels are the repository labels by owner/name (GET /repos/{o}/{r}/labels).
+	Labels map[string][]string
+	// LabelAdds counts POST /repos/{o}/{r}/issues/{n}/labels calls.
+	LabelAdds int
 
 	hits Hits
 	fail *failure
@@ -91,6 +95,8 @@ func New(t *testing.T) *Server {
 	mux.HandleFunc("GET /repos/{owner}/{repo}", s.authed(s.repo))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", s.authed(s.listPulls))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", s.authed(s.createPull))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/labels", s.authed(s.listLabels))
+	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/labels", s.authed(s.addLabels))
 	s.Server = httptest.NewServer(mux)
 	t.Cleanup(s.Close)
 	return s

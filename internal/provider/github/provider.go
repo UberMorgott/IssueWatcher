@@ -29,7 +29,7 @@ func (p *Provider) Platform() string { return "github" }
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
-		ListProjects: true, SyncItems: true, ListComments: true, Reply: true, CreatePR: true,
+		ListProjects: true, SyncItems: true, ListComments: true, Reply: true, SetLabels: true, CreatePR: true,
 		Auth: provider.AuthOAuthLoopback,
 	}
 }

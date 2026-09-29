@@ -426,21 +426,46 @@ type JobInput struct {
 	ProjectName    string // owner/repo
 	ProjectURL     string
 	LocalPath      string
+	Labels         []string
 	Comments       []Comment
+}
+
+// SetItemLabels stores item itemID's labels as the platform reported them
+// after labels were added (the next sync writes the same list).
+func (s *Store) SetItemLabels(ctx context.Context, itemID int64, labels []string) error {
+	if labels == nil {
+		labels = []string{}
+	}
+	lj, err := json.Marshal(labels)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE items SET labels = ? WHERE id = ?`, string(lj), itemID)
+	if err != nil {
+		return fmt.Errorf("store: set labels: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // JobInput loads item itemID with its project and every comment.
 func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 	var in JobInput
-	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author,
+	var labels string
+	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
 		p.name, p.url, p.local_path FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id
-		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author,
+		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author, &labels,
 		&in.ProjectName, &in.ProjectURL, &in.LocalPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}
 	if err != nil {
 		return in, fmt.Errorf("store: job input: %w", err)
+	}
+	if err := json.Unmarshal([]byte(labels), &in.Labels); err != nil || in.Labels == nil {
+		in.Labels = []string{}
 	}
 	cursor := ""
 	for {

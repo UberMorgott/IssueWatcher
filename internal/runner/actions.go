@@ -30,11 +30,14 @@ type Queued struct {
 // MaxBatch bounds one Enqueue call.
 const MaxBatch = 500
 
-// Enqueue queues one job per item for flow ("fix" | "reply") with profileID
-// ("" = the flow's role: coder / responder).
+// Enqueue queues one job per item for flow ("fix" | "reply" | "label") with
+// profileID ("" = the flow's role: coder / responder; label uses the responder).
 func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID string) ([]Queued, error) {
-	if flow != flowFix && flow != flowReply {
-		return nil, fmt.Errorf("%w: flow must be fix or reply", ErrBadRequest)
+	if flow != flowFix && flow != flowReply && flow != flowLabel {
+		return nil, fmt.Errorf("%w: flow must be fix, reply or label", ErrBadRequest)
+	}
+	if flow == flowLabel && r.opts.Labels == nil {
+		return nil, ErrUnavailable
 	}
 	if len(itemIDs) == 0 || len(itemIDs) > MaxBatch {
 		return nil, fmt.Errorf("%w: 1–%d items", ErrBadRequest, MaxBatch)
@@ -42,7 +45,7 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 	cfg := r.opts.Settings().Agents
 	if profileID == "" {
 		profileID = cfg.Roles.Coder
-		if flow == flowReply {
+		if flow == flowReply || flow == flowLabel {
 			profileID = cfg.Roles.Responder
 		}
 	}

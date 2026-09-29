@@ -21,6 +21,8 @@ import (
 //	GET  /api/jobs/{id}/attempts         {attempts:[{attempt, state, error, errorCode, result, startedAt, finishedAt}]} earlier snapshots + current
 //	POST /api/jobs/{id}/cancel|retry|dismiss|pr|push   job (push: direct fix commits → the platform)
 //	POST /api/jobs/{id}/reply {body}     post the (edited) reply draft
+//	POST /api/jobs/{id}/labels {labels[]} add labels to the label job's issue (checked, add only) → done
+//	GET  /api/projects/{id}/labels       [{name, color, description}] the project's labels
 //	GET  /api/agents/detect              [{cli, path, version}] CLIs on PATH
 //
 // SSE: job.changed (job), job.log {id, attempt, steps}.
@@ -46,6 +48,8 @@ func (s *Server) registerJobs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/jobs/{id}/diff", s.handleJobDiff)
 	mux.HandleFunc("GET /api/jobs/{id}/attempts", s.handleJobAttempts)
 	mux.HandleFunc("POST /api/jobs/{id}/reply", s.handleJobReply)
+	mux.HandleFunc("POST /api/jobs/{id}/labels", s.handleJobLabels)
+	mux.HandleFunc("GET /api/projects/{id}/labels", s.handleProjectLabels)
 	for action, f := range map[string]func(context.Context, int64) (store.Job, error){
 		"cancel": s.opts.Runner.Cancel, "retry": s.opts.Runner.Retry, "dismiss": s.opts.Runner.Dismiss, "pr": s.opts.Runner.CreatePR,
 		"push": s.opts.Runner.Push,
@@ -90,6 +94,10 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 	out, err := s.opts.Runner.Enqueue(r.Context(), req.ItemIDs, req.Flow, req.ProfileID)
 	if errors.Is(err, runner.ErrBadRequest) {
 		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, runner.ErrUnavailable) {
+		errJSON(w, http.StatusConflict, err.Error())
 		return
 	}
 	if err != nil {
@@ -204,6 +212,49 @@ func (s *Server) handleJobReply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.dataChanged("reply", j.ItemID)
 	writeJSON(w, http.StatusOK, j)
+}
+
+func (s *Server) handleJobLabels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Labels []string `json:"labels"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	j, err := s.opts.Runner.ApplyLabels(r.Context(), id, req.Labels)
+	if s.jobError(w, err) {
+		return
+	}
+	s.dataChanged("labels", j.ItemID)
+	writeJSON(w, http.StatusOK, j)
+}
+
+func (s *Server) handleProjectLabels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	repos, err := s.opts.Store.Repos(r.Context())
+	if err != nil {
+		s.internalError(w, "list projects", err)
+		return
+	}
+	for _, p := range repos {
+		if p.ID == id {
+			labels, err := s.opts.Runner.RepoLabels(r.Context(), p.Name)
+			if s.jobError(w, err) {
+				return
+			}
+			writeJSON(w, http.StatusOK, labels)
+			return
+		}
+	}
+	errJSON(w, http.StatusNotFound, "not found")
 }
 
 // jobError writes the HTTP error for a runner/store error; false when err is nil.

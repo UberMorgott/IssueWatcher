@@ -24,6 +24,7 @@ const (
 	flowFix    = "fix"
 	flowReply  = "reply"
 	flowReview = "review"
+	flowLabel  = "label"
 )
 
 // Structured results asked from the agent (claude --json-schema, codex
@@ -46,6 +47,9 @@ var schemas = map[string]string{
 	flowReview: `{"type":"object","additionalProperties":false,"required":["verdict","summary"],"properties":{` +
 		`"verdict":{"type":"string","enum":["ok","concerns"]},` +
 		`"summary":{"type":"string","description":"Findings: does it fix the issue, bugs, risks, missing tests"}}}`,
+	flowLabel: `{"type":"object","additionalProperties":false,"required":["labels","summary"],"properties":{` +
+		`"labels":{"type":"array","items":{"type":"string"},"description":"Exact names from the repository's label list; empty if none applies"},` +
+		`"summary":{"type":"string","description":"One short sentence: why these labels"}}}`,
 }
 
 // AgentResult is what the agent reported (Result.Agent / Result.Review).
@@ -58,6 +62,8 @@ type AgentResult struct {
 	Summary string `json:"summary,omitempty"`
 	Notes   string `json:"notes,omitempty"`
 	Reply   string `json:"reply,omitempty"` // reply flow draft
+	// Labels the label flow's agent picked, as it wrote them (Result.Labels holds the checked ones).
+	Labels []string `json:"labels,omitempty"`
 	// Direct fix: the commits the agent says it made and its own verify note
 	// (claims; Result.Local holds the facts).
 	Commits    []string `json:"commits,omitempty"`
@@ -297,13 +303,14 @@ func applyStructured(text string, res *AgentResult) {
 		Reply   string   `json:"reply"`
 		Commits []string `json:"commits"`
 		Verify  string   `json:"verify"`
+		Labels  []string `json:"labels"`
 	}
-	if json.Unmarshal([]byte(text), &v) != nil || (v.Status == "" && v.Verdict == "" && v.Summary == "" && v.Reply == "") {
+	if json.Unmarshal([]byte(text), &v) != nil || (v.Status == "" && v.Verdict == "" && v.Summary == "" && v.Reply == "" && v.Labels == nil) {
 		res.Final = text
 		return
 	}
 	res.Status, res.Verdict, res.Summary, res.Notes, res.Reply = v.Status, v.Verdict, v.Summary, v.Notes, v.Reply
-	res.Commits, res.VerifyNote = v.Commits, v.Verify
+	res.Commits, res.VerifyNote, res.Labels = v.Commits, v.Verify, v.Labels
 }
 
 // toolSummary picks the most telling argument of a tool call.

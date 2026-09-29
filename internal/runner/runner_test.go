@@ -162,7 +162,7 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 	t.Setenv("FAKECLI_RECORD", e.record)
 	t.Setenv("GH_TOKEN", "must-not-reach-the-agent")
 	e.r = New(Options{
-		Store: e.st, DataDir: e.data, Publisher: github.NewProvider(a), Log: slog.New(slog.DiscardHandler),
+		Store: e.st, DataDir: e.data, Publisher: github.NewProvider(a), Labels: github.NewProvider(a), Log: slog.New(slog.DiscardHandler),
 		Settings: func() config.Settings { e.mu.Lock(); defer e.mu.Unlock(); return e.cfg },
 		GitURL:   func(string) string { return e.bare },
 		Reply: func(_ context.Context, itemID int64, body string) (store.Comment, error) {
@@ -642,7 +642,7 @@ func TestEnqueueRules(t *testing.T) {
 	if err != nil || len(q) != 2 || q[0].Error != "exists" || q[0].Job.ID != first.ID || q[1].Error != "not_found" {
 		t.Fatalf("second enqueue: %+v %v", q, err)
 	}
-	if _, err := e.r.Enqueue(t.Context(), []int64{e.items[0]}, "label", ""); !errors.Is(err, ErrBadRequest) {
+	if _, err := e.r.Enqueue(t.Context(), []int64{e.items[0]}, "verify", ""); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("bad flow: %v", err)
 	}
 	if _, err := e.r.Enqueue(t.Context(), []int64{e.items[0]}, "reply", "ghost"); !errors.Is(err, ErrBadRequest) {

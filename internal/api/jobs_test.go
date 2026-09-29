@@ -32,7 +32,8 @@ func TestJobsAPI(t *testing.T) {
 	id := strconv.FormatInt(items.Items[0].ID, 10)
 
 	for body, want := range map[string]int{
-		`{"itemIds":[` + id + `],"flow":"label"}`:                    http.StatusBadRequest,
+		`{"itemIds":[` + id + `],"flow":"label"}`:                    http.StatusConflict, // no label adapter configured
+		`{"itemIds":[` + id + `],"flow":"verify"}`:                   http.StatusBadRequest,
 		`{"itemIds":[],"flow":"fix"}`:                                http.StatusBadRequest,
 		`{"itemIds":[` + id + `],"flow":"fix","profileId":"nobody"}`: http.StatusBadRequest,
 		`nope`: http.StatusBadRequest,

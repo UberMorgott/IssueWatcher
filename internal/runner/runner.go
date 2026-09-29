@@ -57,6 +57,8 @@ type Options struct {
 	Publisher Publisher
 	// Reply posts an approved reply draft (syncer.Reply); nil disables «Отправить».
 	Reply func(ctx context.Context, itemID int64, body string) (store.Comment, error)
+	// Labels lists repository labels and adds labels to issues; nil disables the label flow.
+	Labels provider.Labeler
 	// OnJob runs after every change of a job row (SSE job.changed).
 	OnJob func(store.Job)
 	// OnSteps streams new log steps of a running attempt (SSE job.log), batched.
@@ -254,6 +256,12 @@ type Result struct {
 	// worktree job of an older build); Local holds the facts of a direct run.
 	Mode  string       `json:"mode,omitempty"`
 	Local *LocalResult `json:"local,omitempty"`
+	// Label flow: Labels = the agent's picks that exist in the repository
+	// (canonical names), DroppedLabels = picks that do not, AppliedLabels = the
+	// names actually added to the issue (not already on it).
+	Labels        []string `json:"labels,omitempty"`
+	DroppedLabels []string `json:"droppedLabels,omitempty"`
+	AppliedLabels []string `json:"appliedLabels,omitempty"`
 }
 
 // PRResult is the published draft PR.
@@ -311,6 +319,8 @@ func (r *Runner) run(ctx context.Context, j store.Job) {
 		state, err = r.runFix(ctx, &j, &res, log)
 	case flowReply:
 		state, err = r.runReply(ctx, &j, &res, log)
+	case flowLabel:
+		state, err = r.runLabel(ctx, &j, &res, log)
 	default:
 		err = fmt.Errorf("unknown flow %q", j.Flow)
 	}
@@ -534,17 +544,9 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	if _, err := r.resolveExe(prof); err != nil {
 		return "", coded(CodeNoCLI, err)
 	}
-	files, err := r.jobFiles(*j)
+	files, dir, err := r.readOnlyDir(*j, in, log)
 	if err != nil {
 		return "", err
-	}
-	dir := in.LocalPath
-	if folders.Check(in.LocalPath, in.ProjectURL) != folders.StatusOK {
-		dir = filepath.Join(files, "empty")
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return "", err
-		}
-		log.add(StepInfo, "no local folder mapped: the agent answers from the issue text only")
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowReply, promptInput{in: in})
@@ -564,6 +566,23 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 		return "", coded(CodeAgent, errors.New("the agent returned no reply text"))
 	}
 	return store.JobNeedsReview, nil
+}
+
+// readOnlyDir returns the job files folder and where a read-only agent runs:
+// the mapped folder, or an empty scratch folder without one.
+func (r *Runner) readOnlyDir(j store.Job, in store.JobInput, log *jobLog) (files, dir string, err error) {
+	if files, err = r.jobFiles(j); err != nil {
+		return "", "", err
+	}
+	dir = in.LocalPath
+	if folders.Check(in.LocalPath, in.ProjectURL) != folders.StatusOK {
+		dir = filepath.Join(files, "empty")
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return "", "", err
+		}
+		log.add(StepInfo, "no local folder mapped: the agent answers from the issue text only")
+	}
+	return files, dir, nil
 }
 
 // cleanup removes a fix job's worktree and local branch.

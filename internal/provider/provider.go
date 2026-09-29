@@ -97,6 +97,23 @@ type NewPullRequest struct {
 	Draft bool
 }
 
+// Label is one of a project's labels.
+type Label struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"` // hex without '#', "" when unknown
+	Description string `json:"description"`
+}
+
+// Labeler is a provider with Capabilities.SetLabels: it lists a project's
+// labels and adds labels to an item. Labels are never removed.
+type Labeler interface {
+	// ListLabels returns every label of project (owner/repo).
+	ListLabels(ctx context.Context, project string) ([]Label, error)
+	// AddLabels adds names to item number of project and returns the item's
+	// labels afterwards (existing ones kept).
+	AddLabels(ctx context.Context, project string, number int, names []string) ([]string, error)
+}
+
 // Provider is one platform adapter.
 type Provider interface {
 	Platform() string

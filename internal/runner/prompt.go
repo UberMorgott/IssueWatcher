@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -70,6 +71,23 @@ type promptInput struct {
 	in     store.JobInput
 	branch string
 	diff   string
+	labels []provider.Label // label flow: the repository's labels
+}
+
+// labelsText lists the repository's labels, one per line, for {labels}.
+func labelsText(ls []provider.Label) string {
+	if len(ls) == 0 {
+		return "(no labels)"
+	}
+	var b strings.Builder
+	for _, l := range ls {
+		b.WriteString("- " + oneLineTitle(l.Name))
+		if d := oneLineTitle(l.Description); d != "" {
+			b.WriteString(" — " + d)
+		}
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func commentsText(cs []store.Comment) string {
@@ -104,6 +122,7 @@ func render(tmpl string, p promptInput) string {
 		"{localPath}", p.in.LocalPath,
 		"{branch}", p.branch,
 		"{diff}", untrusted("diff", clipHead(p.diff, maxDiffBytes, "(diff truncated)")),
+		"{labels}", labelsText(p.labels),
 	).Replace(tmpl)
 }
 
@@ -118,6 +137,11 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 		task = render(cfg.Prompts.Reply, p)
 	case flowFixDirect:
 		task = render(cfg.Prompts.FixDir, p)
+	case flowLabel:
+		task = render(cfg.Prompts.Label, p)
+		if !strings.Contains(cfg.Prompts.Label, "{labels}") {
+			task += "\n\nLabels that exist in the repository (pick only from this list):\n" + labelsText(p.labels)
+		}
 	case flowReview:
 		task = render(cfg.Prompts.Review, p)
 		if !strings.Contains(cfg.Prompts.Review, "{diff}") {
