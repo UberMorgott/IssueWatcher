@@ -17,8 +17,9 @@ import (
 // Projects & folders (Settings):
 //
 //	GET  /api/folders                   every project with its mapped folder and its status
-//	PUT  /api/projects/{id}/path {path} map a folder ("" = unmap); a folder that is not a clone of
-//	                                    the project → 422 {error, code: missing|notGit|mismatch}, nothing saved
+//	PUT  /api/projects/{id}/path {path} map any existing folder ("" = unmap) → the row; status notGit|mismatch
+//	                                    = saved with a warning (fixes run without git); a missing folder
+//	                                    → 422 {error, code: missing}, nothing saved
 //	POST /api/folders/discover          scan settings.projects.roots for matching clones (suggestions only)
 
 // FolderRow is one project in GET /api/folders.
@@ -85,8 +86,10 @@ func (s *Server) handleSetPath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rp := repos[i]
-	// Only a git clone of this very project is mapped (a fix job runs there).
-	if st := folders.Check(p, rp.URL); p != "" && st != folders.StatusOK {
+	// Any existing folder is mapped (a fix job runs there); the returned status
+	// tells whether it is a clone of this project (git flow) or not (notGit /
+	// mismatch: an in-place run without commit or push — a UI warning).
+	if st := folders.Check(p, rp.URL); p != "" && !st.Exists() {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "folder not usable for " + rp.Name + ": " + string(st), "code": string(st)})
 		return
 	}

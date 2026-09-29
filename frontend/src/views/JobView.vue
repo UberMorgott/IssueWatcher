@@ -20,7 +20,7 @@ import LabelTag from '../components/LabelTag.vue'
 import { api } from '../api/client'
 import type { AgentResult, Job, JobAttempt, RepoLabel } from '../api/types'
 import { absTime, elapsed, num, relTime, usd } from '../lib/format'
-import { canPush, FLOW_ICON, isActive, isDirect, jobCost, jobDuration, jobOutcome, jobRef, usePush } from '../lib/jobs'
+import { canPush, FLOW_ICON, isActive, isDirect, isFolderRun, jobCost, jobDuration, jobOutcome, jobRef, usePush } from '../lib/jobs'
 import { useCrumbs } from '../lib/crumbs'
 import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
@@ -157,7 +157,7 @@ const labelOptions = computed(() => {
 const diffFiles = computed(() => res.value.diff?.files?.length ?? 0)
 /** Re-fetch the diff when the attempt's result changes. */
 const diffVersion = computed(() => `${job.value?.state}:${res.value.diff?.bytes ?? 0}:${res.value.diff?.files?.length ?? 0}`)
-const showDiff = computed(() => job.value?.flow === 'fix' && (!current.value || !!res.value.diff || !isActive(job.value.state)))
+const showDiff = computed(() => job.value?.flow === 'fix' && !isFolderRun(job.value) && (!current.value || !!res.value.diff || !isActive(job.value.state)))
 
 const can = computed(() => {
   const j = job.value
@@ -309,7 +309,7 @@ function agentStats(a: AgentResult): string[] {
                 v-if="job.phase && isActive(job.state) && job.state !== 'running'"
                 class="phase"
               ><i class="pi pi-spin pi-cog" /> {{ t('jobs.phase.' + job.phase) }}</span>
-              <span class="flow"><i :class="FLOW_ICON[job.flow]" /> {{ t('jobs.flow.' + job.flow) }}<template v-if="direct"> · {{ t('jobs.directMode') }}</template></span>
+              <span class="flow"><i :class="FLOW_ICON[job.flow]" /> {{ t('jobs.flow.' + job.flow) }}<template v-if="direct"> · {{ t(isFolderRun(job) ? 'jobs.folderMode' : 'jobs.directMode') }}</template></span>
               <span
                 v-if="job.origin === 'rule'"
                 class="flow"

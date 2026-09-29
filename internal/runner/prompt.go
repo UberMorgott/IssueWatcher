@@ -72,7 +72,7 @@ type promptInput struct {
 	in     store.JobInput
 	branch string
 	diff   string
-	labels []provider.Label // label flow: the repository's labels
+	labels []provider.Label   // label flow: the repository's labels
 	triage *store.TriageInput // triage flow: the project's open issues
 	topN   int                // triage flow: picks that get a fix job
 }
@@ -183,6 +183,8 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 		task = render(cfg.Prompts.Reply, p)
 	case flowFixDirect:
 		task = render(modTemplate(cfg.Prompts.FixDir, p.in), p) + modNote(p.in)
+	case flowFixFolder:
+		task = render(folderFixPrompt, p) + modNote(p.in)
 	case flowLabel:
 		task = render(cfg.Prompts.Label, p)
 		if !strings.Contains(cfg.Prompts.Label, "{labels}") {

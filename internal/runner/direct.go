@@ -46,6 +46,9 @@ type LocalResult struct {
 	Pushed      bool          `json:"pushed"`
 	PushedAt    string        `json:"pushedAt,omitempty"`
 	Closed      bool          `json:"closed"`
+	// Changed (folder mode, ModeFolder): files the run changed in the folder,
+	// "A|M|D path" relative to Dir (a file snapshot, not git).
+	Changed []string `json:"changed,omitempty"`
 }
 
 // LocalCommit is one commit the run added.

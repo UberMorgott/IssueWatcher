@@ -67,6 +67,10 @@ async function setPath(id: number, path: string) {
   }
   rows.value = rows.value.map((x) => (x.projectId === id ? r.data : x))
   delete edits.value[id]
+  if (r.data.status === 'notGit' || r.data.status === 'mismatch') {
+    // Mapped anyway: a fix edits the folder in place, without commit, push or PR.
+    toast.add({ severity: 'warn', summary: r.data.name, detail: t('folder.warn.' + r.data.status, { name: r.data.name }), life: 8000 })
+  }
   return true
 }
 const mapped = computed(() => rows.value.filter((r) => r.localPath).length)
@@ -279,6 +283,7 @@ async function acceptAll() {
         <div class="map-name">
           <span class="name">{{ r.name }}</span>
           <Tag
+            v-tooltip.top="r.status === 'notGit' || r.status === 'mismatch' ? t('folder.warn.' + r.status, { name: r.name }) : undefined"
             :severity="STATUS[r.status]"
             :value="t('settings.folders.status.' + r.status)"
             class="status"

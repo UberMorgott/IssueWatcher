@@ -77,7 +77,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 			req.Skip = ReasonUnavailable
 		} else if rule.Flow == config.FlowFix && !pol.AllowAutoFix {
 			req.Skip = ReasonAutoFixOff
-		} else if rule.Flow == config.FlowFix && folders.Check(item.LocalPath, item.ProjectURL) != folders.StatusOK {
+		} else if rule.Flow == config.FlowFix && !folders.Check(item.LocalPath, item.ProjectURL).Exists() {
 			req.Skip = ReasonNoFolder
 		}
 		e, j, err := r.opts.Store.Automate(ctx, req)

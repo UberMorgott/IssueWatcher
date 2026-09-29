@@ -153,14 +153,20 @@ func TestFoldersMapAndDiscover(t *testing.T) {
 		row.Status != folders.StatusOK || row.LocalPath != clone {
 		t.Fatalf("map: %d %+v", code, row)
 	}
-	// A folder that is not a clone of this project is refused; the mapping stays.
+	// Any existing folder is mapped; the status warns that it is not a clone.
 	notClone, _ := json.Marshal(map[string]string{"path": root})
-	var refused struct{ Error, Code string }
-	if code := e.callAny(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", string(notClone), &refused); code != http.StatusUnprocessableEntity ||
-		refused.Code != string(folders.StatusNotGit) {
-		t.Fatalf("not a clone: %d %+v", code, refused)
+	if code := e.call(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", string(notClone), &row); code != http.StatusOK ||
+		row.Status != folders.StatusNotGit || row.LocalPath != root {
+		t.Fatalf("not a clone: %d %+v", code, row)
 	}
-	if e.call(t, http.MethodGet, "/api/folders", "", &rows); rows[0].LocalPath != clone {
+	// A missing folder is refused; the mapping stays.
+	missing, _ := json.Marshal(map[string]string{"path": filepath.Join(root, "gone")})
+	var refused struct{ Error, Code string }
+	if code := e.callAny(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", string(missing), &refused); code != http.StatusUnprocessableEntity ||
+		refused.Code != string(folders.StatusMissing) {
+		t.Fatalf("missing: %d %+v", code, refused)
+	}
+	if e.call(t, http.MethodGet, "/api/folders", "", &rows); rows[0].LocalPath != root || rows[0].Status != folders.StatusNotGit {
 		t.Fatalf("refused path saved: %+v", rows)
 	}
 	if code := e.call(t, http.MethodPut, "/api/projects/"+jsonInt(id)+"/path", `{"path":""}`, &row); code != http.StatusOK || row.Status != folders.StatusNone || row.LocalPath != "" {

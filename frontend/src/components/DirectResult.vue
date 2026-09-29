@@ -4,19 +4,22 @@ import Message from 'primevue/message'
 import { useI18n } from 'vue-i18n'
 import type { Job } from '../api/types'
 import { absTime, relTime } from '../lib/format'
-import { jobOutcome } from '../lib/jobs'
+import { isFolderRun, jobOutcome } from '../lib/jobs'
 
 // Result of a direct fix job: outcome, the agent's commits in the mapped folder
 // and warnings about the folder state (uncommitted changes, missing "Fixes #N").
+// Folder mode (not the project's git clone): the files changed in place.
 const props = defineProps<{ job: Job }>()
 const { t } = useI18n()
 
 const local = computed(() => props.job.result.local)
 const outcome = computed(() => jobOutcome(props.job))
 const commits = computed(() => local.value?.commits ?? [])
+const folder = computed(() => isFolderRun(props.job))
+const changed = computed(() => local.value?.changed ?? [])
 const tone = computed(() => {
   const o = outcome.value
-  return o === 'closed' || o === 'pushed' ? 'ok' : o === 'failed' ? 'bad' : 'warn'
+  return o === 'closed' || o === 'pushed' || o === 'changed_folder' ? 'ok' : o === 'failed' ? 'bad' : 'warn'
 })
 </script>
 
@@ -36,6 +39,27 @@ const tone = computed(() => {
     >
       {{ t('job.direct.pushedAt', { time: relTime(local.pushedAt) }) }}
     </div>
+    <Message
+      v-if="folder"
+      severity="info"
+      size="small"
+    >
+      {{ t('job.direct.noGit') }}
+    </Message>
+    <details
+      v-if="changed.length"
+      open
+    >
+      <summary>{{ t('job.direct.changed', { n: changed.length }) }}</summary>
+      <ul class="files mono">
+        <li
+          v-for="f in changed"
+          :key="f"
+        >
+          {{ f }}
+        </li>
+      </ul>
+    </details>
     <ul
       v-if="commits.length"
       class="commits"

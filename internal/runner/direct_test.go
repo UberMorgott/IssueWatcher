@@ -272,16 +272,12 @@ func TestDirectOneJobPerFolder(t *testing.T) {
 	if err := e.st.SetLocalPath(t.Context(), e.proj[1].ID, e.local+string(filepath.Separator)); err != nil {
 		t.Fatal(err)
 	}
-	// octo/other's folder is octo/demo's clone: Enqueue refuses it, so its job
-	// goes straight into the store (as if the mapping changed after queueing).
+	// octo/other's folder is octo/demo's clone (another remote): its fix runs
+	// there in folder mode, but only after octo/demo's job left the folder.
 	jobs := e.enqueue("fix", e.items[0])
-	second, err := e.st.CreateJob(t.Context(), e.items[1], "fix", "claude", store.OriginManual, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	jobs = append(jobs, second)
-	e.r.Refresh()
 	e.waitRunning(1)
+	jobs = append(jobs, e.enqueue("fix", e.items[1])...)
+	e.r.Refresh()
 	if j, _ := e.st.Job(t.Context(), jobs[1].ID); j.State != store.JobQueued {
 		t.Fatalf("second job in the same folder started: %+v", j)
 	}
@@ -289,10 +285,24 @@ func TestDirectOneJobPerFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.wait(jobs[0].ID, store.JobCancelled)
-	// Now it runs (and fails: the folder's remote is octo/demo, not octo/other).
-	if j := e.wait(jobs[1].ID, store.JobFailed); result(t, j).ErrorCode != CodeNoFolder {
-		t.Fatalf("second job: %+v", j)
+	// Now it runs, in folder mode (the folder's remote is octo/demo, not octo/other).
+	e.waitRunning(1)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		j, _ := e.st.Job(t.Context(), jobs[1].ID)
+		if j.State == store.JobRunning && j.Phase == "agent" {
+			if res := result(t, j); res.Mode != ModeFolder {
+				t.Fatalf("second job mode: %+v", res)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second job did not start: %+v", j)
+		}
 	}
+	if _, err := e.r.Cancel(t.Context(), jobs[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(jobs[1].ID, store.JobCancelled)
 }
 
 // A CLI that exits normally but leaves a child running (an MCP server holding

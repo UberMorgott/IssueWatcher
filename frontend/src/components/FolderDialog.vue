@@ -12,9 +12,11 @@ import { useAppStore } from '../stores/app'
 // Whether this instance can show the native folder dialog (null = not asked yet).
 const pickerAvailable = ref<boolean | null>(null)
 
-// «Привязать папку»: map (change, unmap) a project's local git clone.
-// PUT /api/projects/{id}/path refuses a folder that is not a clone of the
-// project (422 {code: missing|notGit|mismatch}); the error shows inline.
+// «Привязать папку»: map (change, unmap) a project's local folder.
+// PUT /api/projects/{id}/path maps any existing folder and refuses only a
+// missing one (422 {code: missing}, shown inline). A folder that is not a clone
+// of the project (status notGit|mismatch) is saved with a warning toast: fixes
+// there edit the folder in place, without commit, push or PR.
 const props = defineProps<{ project: { id: number; name: string; localPath?: string } | null }>()
 const visible = defineModel<boolean>('visible', { required: true })
 const emit = defineEmits<{ saved: [path: string] }>()
@@ -66,7 +68,12 @@ async function save(next: string) {
     error.value = code && te('folder.error.' + code) ? t('folder.error.' + code, { name: p.name }) : r.error
     return
   }
-  toast.add({ severity: 'success', summary: next.trim() ? t('folder.saved') : t('folder.unmapped'), detail: p.name, life: 3000 })
+  const st = r.data.status
+  if (next.trim() && (st === 'notGit' || st === 'mismatch')) {
+    toast.add({ severity: 'warn', summary: t('folder.saved'), detail: t('folder.warn.' + st, { name: p.name }), life: 8000 })
+  } else {
+    toast.add({ severity: 'success', summary: next.trim() ? t('folder.saved') : t('folder.unmapped'), detail: p.name, life: 3000 })
+  }
   void app.loadRepos()
   emit('saved', r.data.localPath)
   visible.value = false

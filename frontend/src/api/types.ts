@@ -33,8 +33,10 @@ export interface FixTarget {
   fixProjectId: number
   /** That project's mapped folder; "" = none. */
   fixFolder: string
-  /** fixFolder is a git clone of that project: a fix can run. */
+  /** fixFolder exists: a fix can run (in place when it is not a clone, see fixGit). */
   fixable: boolean
+  /** fixFolder is a git clone of that project: the fix commits, push / PR available. */
+  fixGit?: boolean
   /** A mod page not linked to a code project yet. */
   needsLink?: boolean
 }
@@ -479,7 +481,16 @@ export interface LocalCommit {
   fixes: boolean
 }
 
-export type LocalOutcome = 'fixed_local' | 'pushed' | 'closed' | 'not_reproduced' | 'needs_info' | 'no_commit' | 'failed'
+export type LocalOutcome =
+  | 'fixed_local'
+  | 'pushed'
+  | 'closed'
+  | 'not_reproduced'
+  | 'needs_info'
+  | 'no_commit'
+  | 'changed_folder'
+  | 'no_changes'
+  | 'failed'
 
 /** Git facts of a direct fix job, checked after the agent (phase check). */
 export interface LocalResult {
@@ -495,11 +506,13 @@ export interface LocalResult {
   pushed: boolean
   pushedAt?: string
   closed: boolean
+  /** Folder mode: files changed in place, "A|M|D path" (a file snapshot, not git). */
+  changed?: string[]
 }
 
 export interface JobResult {
-  /** Absent = an older worktree-pr job. */
-  mode?: RunMode
+  /** Absent = an older worktree-pr job; 'folder' = ran in a folder that is not the project's git clone. */
+  mode?: RunMode | 'folder'
   local?: LocalResult
   errorCode?: JobErrorCode | string
   agent?: AgentResult

@@ -248,6 +248,8 @@ func (r *Runner) CreatePR(ctx context.Context, id int64) (store.Job, error) {
 	}
 	if j, err := r.opts.Store.Job(ctx, id); err != nil {
 		return j, err
+	} else if parseResult(j).Mode == ModeFolder {
+		return j, ErrNotAllowed // folder mode: no git, nothing to push
 	} else if err := r.modPushAllowed(j); err != nil {
 		return j, err
 	}

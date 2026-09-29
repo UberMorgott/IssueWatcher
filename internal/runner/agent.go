@@ -43,6 +43,12 @@ var schemas = map[string]string{
 		`"commits":{"type":"array","items":{"type":"string"},"description":"SHA of every commit you made; empty if none"},` +
 		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
 		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
+	flowFixFolder: `{"type":"object","additionalProperties":false,"required":["status","summary","files","verify","notes"],"properties":{` +
+		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","failed"]},` +
+		`"summary":{"type":"string","description":"What was wrong, what changed, how it was verified"},` +
+		`"files":{"type":"array","items":{"type":"string"},"description":"Paths (relative to the folder) of every file you changed; empty if none"},` +
+		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
+		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
 	flowReply: `{"type":"object","additionalProperties":false,"required":["reply","notes"],"properties":{` +
 		`"reply":{"type":"string","description":"The reply text in Markdown, ready to post"},` +
 		`"notes":{"type":"string","description":"Private notes for the maintainer; empty if nothing"}}}`,
@@ -93,6 +99,8 @@ type AgentResult struct {
 	// (claims; Result.Local holds the facts).
 	Commits    []string `json:"commits,omitempty"`
 	VerifyNote string   `json:"verify,omitempty"`
+	// Folder fix: the files the agent says it changed (Result.Local.Changed holds the facts).
+	Files      []string `json:"files,omitempty"`
 	Final      string   `json:"final,omitempty"` // last message when no structured output came
 	CostUSD    float64  `json:"costUsd,omitempty"`
 	Turns      int      `json:"turns,omitempty"`
@@ -271,6 +279,9 @@ func cliArgs(s agentSpec) (args []string, stdin string, lastMsg string, err erro
 			// auto: edits and ordinary commands run, risky ones are refused (no one answers prompts).
 			args = append(args, "--permission-mode", "auto",
 				"--disallowedTools", "Bash(git push:*)", "Bash(gh:*)", "PowerShell(git push*)", "PowerShell(gh *)")
+			if s.flow == flowFixFolder { // not the project's clone: no commits there
+				args = append(args, "Bash(git commit:*)", "PowerShell(git commit*)")
+			}
 		}
 		if p.Model != "" {
 			args = append(args, "--model", p.Model)
@@ -299,7 +310,7 @@ func cliArgs(s agentSpec) (args []string, stdin string, lastMsg string, err erro
 		switch {
 		case s.readOnly:
 			args = append(args, "-s", "read-only", "--skip-git-repo-check")
-		case s.flow == flowFixDirect:
+		case s.flow == flowFixDirect || s.flow == flowFixFolder:
 			// Direct mode commits in the user's own clone: workspace-write keeps .git
 			// read-only (index.lock: Permission denied) and, on Windows, runs as a
 			// sandbox user git rejects ("dubious ownership"), with no network or Go/npm
@@ -437,13 +448,14 @@ func applyStructured(text string, res *AgentResult) {
 		return
 	}
 	var v struct {
-		Status  string   `json:"status"`
-		Verdict string   `json:"verdict"`
-		Summary string   `json:"summary"`
-		Notes   string   `json:"notes"`
-		Reply   string   `json:"reply"`
-		Commits []string `json:"commits"`
-		Verify  string   `json:"verify"`
+		Status  string       `json:"status"`
+		Verdict string       `json:"verdict"`
+		Summary string       `json:"summary"`
+		Notes   string       `json:"notes"`
+		Reply   string       `json:"reply"`
+		Commits []string     `json:"commits"`
+		Verify  string       `json:"verify"`
+		Files   []string     `json:"files"`
 		Labels  []string     `json:"labels"`
 		Picks   []TriagePick `json:"picks"`
 	}
@@ -452,7 +464,7 @@ func applyStructured(text string, res *AgentResult) {
 		return
 	}
 	res.Status, res.Verdict, res.Summary, res.Notes, res.Reply = v.Status, v.Verdict, v.Summary, v.Notes, v.Reply
-	res.Commits, res.VerifyNote, res.Labels, res.Picks = v.Commits, v.Verify, v.Labels, v.Picks
+	res.Commits, res.VerifyNote, res.Labels, res.Picks, res.Files = v.Commits, v.Verify, v.Labels, v.Picks, v.Files
 }
 
 // toolSummary picks the most telling argument of a tool call.

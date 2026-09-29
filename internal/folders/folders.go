@@ -1,7 +1,7 @@
-// Package folders links projects to local git clones: it reads a clone's
-// remotes from .git/config, checks a mapped folder (status) and scans root
-// folders for clones whose remote matches a synced project (discovery). It only
-// reads the file system; the user confirms every mapping.
+// Package folders links projects to local folders (usually git clones): it
+// reads a clone's remotes from .git/config, checks a mapped folder (status) and
+// scans root folders for clones whose remote matches a synced project
+// (discovery). It only reads the file system; the user confirms every mapping.
 package folders
 
 import (
@@ -26,6 +26,13 @@ const (
 	StatusNotGit   Status = "notGit"   // exists, no .git
 	StatusMismatch Status = "mismatch" // git clone of something else
 )
+
+// Exists reports a mapped folder that is there: any folder can be mapped and a
+// fix runs in it. Only StatusOK gets the git flow (commit, push, PR); notGit and
+// mismatch folders get a plain in-place run without git.
+func (s Status) Exists() bool {
+	return s == StatusOK || s == StatusNotGit || s == StatusMismatch
+}
 
 // RepoKey normalises a git remote or web URL to host/owner/repo (lower case):
 // https://github.com/O/R(.git), git@github.com:O/R.git, ssh://git@github.com/O/R.

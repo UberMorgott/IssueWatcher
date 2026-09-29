@@ -51,9 +51,14 @@ export function jobDuration(j: Job, now = Date.now()): number | undefined {
   return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : undefined
 }
 
-/** A fix job that ran in the mapped folder itself (no worktree, no PR). */
+/** A fix job that ran in the mapped folder itself (no worktree, no PR); also folder mode. */
 export function isDirect(j: Job): boolean {
-  return j.flow === 'fix' && j.result.mode === 'direct'
+  return j.flow === 'fix' && (j.result.mode === 'direct' || j.result.mode === 'folder')
+}
+
+/** A fix job that ran in a folder that is not the project's git clone: no commit, push or PR. */
+export function isFolderRun(j: Job): boolean {
+  return j.flow === 'fix' && j.result.mode === 'folder'
 }
 
 /** Outcome of a direct fix job; "" = not a direct job or no outcome yet. */
@@ -73,12 +78,14 @@ export const OUTCOME_TONE: Record<LocalOutcome, string> = {
   not_reproduced: 'cancelled',
   needs_info: 'needs-review',
   no_commit: 'needs-review',
+  changed_folder: 'done',
+  no_changes: 'needs-review',
   failed: 'failed',
 }
 
 /** Push is offered for a direct fix job under review that made commits. */
 export function canPush(j: Job): boolean {
-  return isDirect(j) && j.state === 'needs_review' && !!j.result.local?.commits?.length
+  return isDirect(j) && !isFolderRun(j) && j.state === 'needs_review' && !!j.result.local?.commits?.length
 }
 
 /** A ticking clock (1 s) shared by every running-job view while one is mounted. */

@@ -430,12 +430,13 @@ func (r *Runner) worktreePath(j store.Job) string {
 	return filepath.Join(r.opts.DataDir, "worktrees", dirSlug(j.Repo), strconv.FormatInt(j.ID, 10))
 }
 
-// folderError is the CodeNoFolder error of a fix job whose project has no usable
-// local folder (folders.Check), nil when the folder is usable. Enqueue rejects
-// such items up front; runFix checks again (the mapping may change meanwhile).
+// folderError is the CodeNoFolder error of a fix job whose project has no
+// mapped folder or whose folder is gone, nil when the folder exists (a git
+// clone of the project or any other folder: folders.Status.Exists). Enqueue
+// rejects such items up front; runFix checks again (the mapping may change meanwhile).
 func folderError(project, localPath, projectURL string) error {
 	st := folders.Check(localPath, projectURL)
-	if st == folders.StatusOK {
+	if st.Exists() {
 		return nil
 	}
 	msg := "no local folder is mapped to " + project
@@ -467,6 +468,11 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	files, err := r.jobFiles(*j)
 	if err != nil {
 		return "", coded(CodeGit, err)
+	}
+	if st := folders.Check(in.LocalPath, in.ProjectURL); st != folders.StatusOK {
+		// Not a clone of the project (no .git, or another remote): the agent edits
+		// the folder in place; no worktree, commit, push or PR.
+		return r.runFolder(ctx, j, res, log, prof, cfg, in, files, st)
 	}
 	if cfg.ModeFor(in.ProjectKey) == config.ModeDirect {
 		return r.runDirect(ctx, j, res, log, prof, cfg, in, files)
@@ -613,7 +619,7 @@ func (r *Runner) readOnlyDir(j store.Job, in store.JobInput, log *jobLog) (files
 		return "", "", err
 	}
 	dir = in.LocalPath
-	if folders.Check(in.LocalPath, in.ProjectURL) != folders.StatusOK {
+	if !folders.Check(in.LocalPath, in.ProjectURL).Exists() {
 		dir = filepath.Join(files, "empty")
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return "", "", err

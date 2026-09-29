@@ -3,7 +3,8 @@
 // stdin and acts by FAKECLI_MODE:
 //
 //	ok    edit fixed.txt (write flows), report a structured result, exit 0;
-//	      the direct fix flow also commits it with "Fixes #N"
+//	      the direct fix flow also commits it with "Fixes #N"; the folder fix
+//	      flow (no git) also deletes obsolete.txt
 //	nofixes  direct fix: commit without "Fixes #N"
 //	spawn like ok, but first start a child that sleeps holding stdout (its pid
 //	      goes to FAKECLI_RECORD.pid) and leave it running
@@ -68,6 +69,8 @@ func main() {
 		flow = "reply"
 	case strings.Contains(schema, `"verdict"`):
 		flow = "review"
+	case strings.Contains(schema, `"files"`):
+		flow = "fix-folder"
 	case strings.Contains(schema, `not_reproduced`):
 		flow = "fix-direct"
 	}
@@ -123,6 +126,17 @@ func main() {
 		result = map[string]any{"picks": triagePicks(string(stdin)), "summary": "ranked the open issues"}
 	case "fix-direct":
 		result = directFix(mode, args, string(stdin))
+	case "fix-folder": // edit in place, no git
+		if mode == "noop" {
+			result = map[string]any{"status": "not_reproduced", "summary": "cannot reproduce", "files": []string{}, "verify": "", "notes": ""}
+			break
+		}
+		if err := os.WriteFile("fixed.txt", []byte("fixed\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		_ = os.Remove("obsolete.txt")
+		result = map[string]any{"status": "fixed", "summary": "wrote fixed.txt", "files": []string{"fixed.txt"}, "verify": "none", "notes": ""}
 	default:
 		if mode == "noop" {
 			result = map[string]any{"status": "cannot_fix", "summary": "not reproducible", "notes": ""}

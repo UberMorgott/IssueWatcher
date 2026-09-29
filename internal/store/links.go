@@ -38,8 +38,12 @@ type Fix struct {
 	ProjectID int64 `json:"fixProjectId"`
 	// Folder is that project's mapped folder ("" = none).
 	Folder string `json:"fixFolder"`
-	// Fixable: Folder is a git clone of that project (folders.StatusOK).
+	// Fixable: Folder exists (folders.Status.Exists); a fix runs there.
 	Fixable bool `json:"fixable"`
+	// Git: Folder is a git clone of that project (folders.StatusOK): the fix
+	// commits and can be pushed / opened as a PR. Fixable without Git = the
+	// agent edits the folder in place, no commit, no push.
+	Git bool `json:"fixGit"`
 	// NeedsLink: a mod page without a linked code project.
 	NeedsLink bool   `json:"needsLink,omitempty"`
 	url       string // remote URL the folder must match
@@ -62,7 +66,7 @@ func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, err
 		return nil, fmt.Errorf("store: fix targets: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	checked := map[[2]string]bool{}
+	checked := map[[2]string]folders.Status{}
 	for rows.Next() {
 		var (
 			id int64
@@ -72,12 +76,12 @@ func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, err
 			return nil, fmt.Errorf("store: scan fix target: %w", err)
 		}
 		k := [2]string{f.Folder, f.url}
-		ok, seen := checked[k]
+		st, seen := checked[k]
 		if !seen {
-			ok = folders.Check(f.Folder, f.url) == folders.StatusOK
-			checked[k] = ok
+			st = folders.Check(f.Folder, f.url)
+			checked[k] = st
 		}
-		f.Fixable = ok
+		f.Fixable, f.Git = st.Exists(), st == folders.StatusOK
 		out[id] = f
 	}
 	return out, rows.Err()
