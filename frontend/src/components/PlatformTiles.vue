@@ -21,7 +21,7 @@ const tiles = computed(() =>
       open: repos.reduce((n, r) => n + r.open, 0),
       unread: repos.reduce((n, r) => n + r.unread, 0),
       state: st?.state ?? 'disabled',
-      account: st?.account,
+      readOnly: st?.state === 'connected' && st.session === 'none',
       on: !!st?.enabled || repos.length > 0,
     }
   }),
@@ -50,9 +50,9 @@ const tiles = computed(() =>
           v-if="p.on"
           class="t-facts"
         >
-          <span><b class="mono">{{ p.open }}</b> {{ t('platforms.items') }}</span>
-          <span v-if="p.unread"><span class="unread-dot" /> <b class="mono">{{ p.unread }}</b> {{ t('platforms.unread') }}</span>
-          <span class="muted"><b class="mono">{{ p.projects }}</b> {{ t('platforms.projects') }}</span>
+          <span><b class="mono">{{ p.open }}</b> {{ t('platforms.items', p.open) }}</span>
+          <span v-if="p.unread"><span class="unread-dot" /> <b class="mono">{{ p.unread }}</b> {{ t('platforms.unread', p.unread) }}</span>
+          <span class="muted"><b class="mono">{{ p.projects }}</b> {{ t('platforms.projects', p.projects) }}</span>
         </div>
         <div
           v-else
@@ -63,8 +63,8 @@ const tiles = computed(() =>
       </div>
       <span
         class="t-state"
-        :class="{ ok: p.on && p.state === 'connected', bad: p.on && ['relogin', 'error', 'unavailable', 'signed_out'].includes(p.state) }"
-      >{{ p.on ? t('platforms.state.' + p.state) : t('platforms.setUp') }}</span>
+        :class="{ ok: p.on && p.state === 'connected' && !p.readOnly, bad: p.on && ['relogin', 'error', 'unavailable', 'signed_out'].includes(p.state) }"
+      >{{ !p.on ? t('platforms.setUp') : p.readOnly ? t('platforms.readOnlyShort') : t('platforms.state.' + p.state) }}</span>
     </RouterLink>
   </div>
 </template>

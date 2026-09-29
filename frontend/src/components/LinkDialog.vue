@@ -167,7 +167,7 @@ async function save() {
       <span
         v-if="!modMode"
         class="muted count"
-      >{{ picked.length }} {{ t('platforms.mods').toLowerCase() }}</span>
+      >{{ picked.length }} {{ t('platforms.projects', picked.length) }}</span>
       <Button
         :label="t('common.cancel')"
         severity="secondary"

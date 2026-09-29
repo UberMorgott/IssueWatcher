@@ -53,6 +53,27 @@ type Login struct {
 	Window     bool   `json:"window"`     // this call opened it
 	Account    string `json:"account,omitempty"`
 	Detail     string `json:"detail,omitempty"`
+	// Source is where the session came from: "browser" (imported from an
+	// installed browser, Browser names it), "window" (the server's sign-in
+	// window), "manual" (pasted cookies); "" = unknown (older server).
+	Source  string `json:"source,omitempty"`
+	Browser string `json:"browser,omitempty"`
+	// Via is how a sign-in in progress waits: "default-browser" (the login page
+	// opened in the user's default browser, ViaBrowser; the session is picked up
+	// from it) or "window" (the server's own sign-in window).
+	Via        string `json:"via,omitempty"`
+	ViaBrowser string `json:"viaBrowser,omitempty"`
+}
+
+// LoginCanceller is a Loginer whose waiting sign-in can be stopped.
+type LoginCanceller interface {
+	CancelLogin(ctx context.Context) error
+}
+
+// Logouter is a provider whose stored session can be dropped («Выйти»);
+// reads that need no session keep working.
+type Logouter interface {
+	Logout(ctx context.Context) error
 }
 
 // Loginer is a provider whose session comes from an interactive sign-in:

@@ -184,6 +184,95 @@ func TestLoginNexusZeroSetup(t *testing.T) {
 	t.Fatalf("card %+v", platformState(t, m, "nexus"))
 }
 
+// The card says where the session came from; «Выйти» drops it (read-only,
+// signed out), «Отключить» also forgets the account and switches the platform
+// off — through the server's cf_logout, even when the platform is already off.
+func TestLogoutCurseForge(t *testing.T) {
+	fake := mcptest.New()
+	var mu sync.Mutex
+	loggedIn, logouts := true, 0
+	fake.Handle("cf_session_status", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !loggedIn {
+			return map[string]any{"loggedIn": false, "cookiesStored": false, "detail": "no cookies", "user": nil,
+				"loginInProgress": false, "sessionSource": nil, "sessionBrowser": nil}, nil
+		}
+		return map[string]any{"loggedIn": true, "cookiesStored": true, "detail": "ok", "loginInProgress": false,
+			"user": map[string]any{"id": 1, "displayName": "Morgott"}, "sessionSource": "browser", "sessionBrowser": "Chrome"}, nil
+	})
+	fake.Handle("cf_logout", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		loggedIn = false
+		logouts++
+		return map[string]any{"loggedOut": true, "cookiesStored": false}, nil
+	})
+	m, cfgs, _, _ := newTestPlatforms(t, map[string]*mcptest.Server{"curseforge": fake})
+	if err := m.enable("curseforge"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := m.Check(t.Context(), "curseforge")
+	if err != nil || p.State != api.PlatformConnected || p.Session != api.SessionBrowser || p.Browser != "Chrome" {
+		t.Fatalf("check %+v %v", p, err)
+	}
+	if p, err = m.Logout(t.Context(), "curseforge", false); err != nil || p.State != api.PlatformSignedOut {
+		t.Fatalf("logout %+v %v", p, err)
+	}
+	if !cfgs.Get().Providers.CurseForge.Enabled {
+		t.Fatal("«Выйти» switched the platform off")
+	}
+	if p, err = m.Logout(t.Context(), "curseforge", true); err != nil || p.State != api.PlatformDisabled {
+		t.Fatalf("forget %+v %v", p, err)
+	}
+	if c := cfgs.Get().Providers.CurseForge; c.Enabled || c.Author != "" {
+		t.Fatalf("forget left %+v", c)
+	}
+	if _, err = m.Logout(t.Context(), "curseforge", true); err != nil { // off: a short-lived server runs cf_logout
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if logouts != 3 {
+		t.Fatalf("cf_logout ran %d times, want 3", logouts)
+	}
+}
+
+// No browser session: the server opens the login page in the default browser;
+// the card says which, and «Отмена» stops the server's polling.
+func TestLoginDefaultBrowserCancel(t *testing.T) {
+	fake := mcptest.New()
+	var mu sync.Mutex
+	cancels := 0
+	fake.Handle("cf_session_status", func(map[string]any) (any, error) {
+		return map[string]any{"loggedIn": false, "cookiesStored": false, "detail": "no cookies", "user": nil,
+			"loginInProgress": true, "loginVia": "default-browser", "loginBrowser": "firefox"}, nil
+	})
+	fake.Handle("cf_auto_extract_cookies", func(map[string]any) (any, error) {
+		return map[string]any{"result": "opened", "loggedIn": false, "loginInProgress": true, "loginWindowOpened": true,
+			"loginVia": "default-browser", "loginBrowser": "firefox"}, nil
+	})
+	fake.Handle("cf_login_cancel", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		cancels++
+		return map[string]any{"cancelled": true}, nil
+	})
+	m, _, _, _ := newTestPlatforms(t, map[string]*mcptest.Server{"curseforge": fake})
+	l, err := m.Login(t.Context(), "curseforge")
+	if err != nil || l.State != api.LoginWindow || l.Via != "default-browser" || l.Browser != "firefox" {
+		t.Fatalf("login %+v %v", l, err)
+	}
+	if err := m.CancelLogin("curseforge"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if cancels != 1 {
+		t.Fatalf("cf_login_cancel ran %d times", cancels)
+	}
+}
+
 // An expired session shows «войдите снова» once, and again only after the
 // platform was connected in between.
 func TestReloginCardOnce(t *testing.T) {

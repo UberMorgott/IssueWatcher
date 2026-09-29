@@ -19,6 +19,16 @@ const (
 	PlatformError       = "error"
 )
 
+// Where a platform's web session came from (PlatformStatus.Session).
+const (
+	SessionNone    = "none"    // no session: public reads only
+	SessionBrowser = "browser" // imported from an installed browser
+	SessionWindow  = "window"  // signed in in the server's sign-in window
+	SessionManual  = "manual"  // cookies pasted by hand
+	SessionQR      = "qr"      // Steam QR sign-in (renews itself)
+	SessionStored  = "stored"  // a session of unknown origin
+)
+
 // ErrUnknownPlatform: Check of a platform that has no account check.
 var ErrUnknownPlatform = errors.New("api: unknown platform")
 
@@ -29,6 +39,9 @@ type PlatformStatus struct {
 	Enabled      bool                  `json:"enabled"`
 	State        string                `json:"state"`
 	Account      string                `json:"account,omitempty"`
+	AccountName  string                `json:"accountName,omitempty"` // display name (Steam persona) when Account is an id
+	Session      string                `json:"session,omitempty"`     // Session* below; "" = not known yet
+	Browser      string                `json:"browser,omitempty"`     // SessionBrowser: which browser
 	Error        string                `json:"error,omitempty"`
 	Running      bool                  `json:"running"` // MCP server child alive
 	Projects     int                   `json:"projects"`
@@ -55,6 +68,10 @@ type LoginStatus struct {
 	ChallengeURL string `json:"challengeUrl,omitempty"`
 	Account      string `json:"account,omitempty"`
 	Error        string `json:"error,omitempty"`
+	// Via (state window): "default-browser" = the login page opened in the
+	// user's default browser (Browser names it), "window" = the server's own.
+	Via     string `json:"via,omitempty"`
+	Browser string `json:"browser,omitempty"`
 }
 
 // Platforms reports, checks and signs in the platform accounts (cmd/issuewatcher mods.go).
@@ -64,6 +81,10 @@ type Platforms interface {
 	Login(ctx context.Context, id string) (LoginStatus, error)
 	LoginStatus(ctx context.Context, id string) (LoginStatus, error)
 	CancelLogin(id string) error
+	// Logout drops the platform's web session («Выйти»); forget also clears the
+	// detected identity (SteamID, uploader account) and switches the platform
+	// off («Отключить» → «Не подключено»).
+	Logout(ctx context.Context, id string, forget bool) (PlatformStatus, error)
 }
 
 // Platform endpoints:
@@ -73,12 +94,27 @@ type Platforms interface {
 //	POST /api/platforms/{id}/login  «Подключить»: Steam QR / Nexus, CurseForge sign-in window (switches the platform on)
 //	GET  /api/platforms/{id}/login  sign-in progress (polled by the dashboard)
 //	DELETE /api/platforms/{id}/login  cancel a Steam QR sign-in
+//	POST /api/platforms/{id}/logout  «Выйти»: drop the session (?forget=1 «Отключить»: also the identity)
 func (s *Server) registerPlatforms(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/platforms", s.handlePlatforms)
 	mux.HandleFunc("POST /api/platforms/{id}/check", s.handlePlatformCheck)
 	mux.HandleFunc("POST /api/platforms/{id}/login", s.handlePlatformLogin)
 	mux.HandleFunc("GET /api/platforms/{id}/login", s.handlePlatformLogin)
 	mux.HandleFunc("DELETE /api/platforms/{id}/login", s.handlePlatformLogin)
+	mux.HandleFunc("POST /api/platforms/{id}/logout", s.handlePlatformLogout)
+}
+
+func (s *Server) handlePlatformLogout(w http.ResponseWriter, r *http.Request) {
+	forget := r.URL.Query().Get("forget") == "1"
+	st, err := s.opts.Platforms.Logout(r.Context(), r.PathValue("id"), forget)
+	switch {
+	case errors.Is(err, ErrUnknownPlatform):
+		errJSON(w, http.StatusNotFound, "unknown platform")
+	case err != nil:
+		errJSON(w, http.StatusBadGateway, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, st)
+	}
 }
 
 func (s *Server) handlePlatformLogin(w http.ResponseWriter, r *http.Request) {

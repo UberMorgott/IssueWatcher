@@ -118,6 +118,10 @@ func (f *fakeSteam) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(f.profilePage))
+	case "/profiles/" + ownerID + "/":
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><profile><steamID64>` + ownerID +
+			`</steamID64><steamID><![CDATA[Morgott]]></steamID><onlineState>offline</onlineState></profile>`))
 	case "/ISteamRemoteStorage/GetPublishedFileDetails/v1/":
 		n, _ := strconv.Atoi(r.Form.Get("itemcount"))
 		var ds []map[string]any

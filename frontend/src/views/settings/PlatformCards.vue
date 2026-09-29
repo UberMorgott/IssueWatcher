@@ -41,9 +41,36 @@ const cards: { id: CardId; text: string }[] = [
 
 const status = (id: string): PlatformStatus | undefined => app.platforms.find((p) => p.id === id)
 const cfg = (id: ModId): ModPlatform | undefined => settings.doc?.settings.providers?.[id]
+// Connected without a web session = public reads only: never «Подключено как».
+const readOnly = (s?: PlatformStatus) => s?.state === 'connected' && s.session === 'none'
 const tone = (s?: PlatformStatus) =>
-  !s || s.state === 'disabled' ? 'off' : s.state === 'connected' ? 'ok' : s.state === 'unknown' ? 'busy' : 'error'
+  !s || s.state === 'disabled'
+    ? 'off'
+    : readOnly(s)
+      ? 'ro'
+      : s.state === 'connected'
+        ? 'ok'
+        : s.state === 'unknown'
+          ? 'busy'
+          : 'error'
 const platformName = (id: string) => status(id)?.name ?? id
+function statusText(id: string) {
+  const s = status(id)
+  if (readOnly(s)) return t('platforms.readOnly')
+  const text = t('platforms.state.' + (s?.state ?? 'disabled'))
+  const who = s?.accountName || s?.account
+  return s?.state === 'connected' && who ? `${text} ${t('platforms.as', { account: who })}` : text
+}
+// Where the session came from («сессия из браузера», «вход в окне», «вход по QR»);
+// read-only Steam shows the public profile name instead.
+function statusHint(id: string) {
+  const s = status(id)
+  if (!s || s.state !== 'connected') return ''
+  if (readOnly(s)) return s.accountName ? t('platforms.profile', { name: s.accountName }) : ''
+  if (!s.session) return ''
+  if (s.session === 'browser' && s.browser) return t('platforms.source.browserNamed', { browser: s.browser })
+  return t('platforms.source.' + s.session)
+}
 
 // --- «Подключить»: start, then poll the sign-in until connected / closed.
 const login = reactive<Record<string, LoginStatus | null>>({})
@@ -55,8 +82,12 @@ const showConnect = (id: CardId) => {
   const s = status(id)
   if (!s || active(id)) return false
   if (id === 'steam') return s.state !== 'connected' || !steam.value?.signedIn || steam.value.session === 'expired'
-  return s.state !== 'connected'
+  return s.state !== 'connected' || s.session === 'none'
 }
+// «Выйти» while a session is stored; «Отключить» while an account is set up.
+const canLogout = (id: CardId) =>
+  id === 'steam' ? !!steam.value?.hasCookies : !!cfg(id)?.enabled && (status(id)?.session ?? 'none') !== 'none'
+const canDisconnect = (id: CardId) => (id === 'steam' ? !!steam.value?.configured : !!cfg(id)?.enabled)
 
 async function connect(id: CardId) {
   errors[id] = ''
@@ -240,21 +271,32 @@ async function saveSteam(extra: Record<string, string> = {}) {
   if (r.data.configured) void check('steam')
   return true
 }
-function forgetCookies() {
-  void saveSteam({ steamLoginSecure: '', sessionid: '' })
-}
-function clearSteam() {
+// «Выйти» drops the session (public reads go on); «Отключить» (forget) also
+// the detected account, and the platform stops syncing («Не подключено»).
+function logout(id: CardId, forget: boolean) {
+  const platform = platformName(id)
   confirm.require({
-    header: t('platforms.steamClearTitle'),
-    message: t('platforms.steamClearText'),
+    header: t(forget ? 'platforms.disconnectTitle' : 'platforms.logoutTitle', { platform }),
+    message: t(forget ? 'platforms.disconnectText' : 'platforms.logoutText'),
     icon: 'pi pi-exclamation-triangle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', outlined: true },
-    acceptProps: { label: t('platforms.steamClear'), severity: 'danger' },
-    accept: () => {
-      steamDraft.steamId = ''
-      void saveSteam({ steamId: '', apiKey: '', steamLoginSecure: '', sessionid: '' })
-    },
+    acceptProps: { label: t(forget ? 'platforms.disconnect' : 'platforms.logout'), severity: 'danger' },
+    accept: () => void doLogout(id, forget, platform),
   })
+}
+async function doLogout(id: CardId, forget: boolean, platform: string) {
+  if (active(id)) cancelLogin(id)
+  busy[id] = true
+  errors[id] = ''
+  const r = await api.logoutPlatform(id, forget)
+  busy[id] = false
+  if (!r.ok) {
+    errors[id] = r.error
+    return
+  }
+  app.setPlatform(r.data)
+  toast.add({ severity: 'success', summary: t(forget ? 'platforms.disconnectedToast' : 'platforms.loggedOut', { platform }), life: 2500 })
+  await Promise.all([settings.load(), app.loadPlatforms(), id === 'steam' ? loadSteam() : Promise.resolve()])
 }
 </script>
 
@@ -279,10 +321,13 @@ function clearSteam() {
           class="status"
           :class="tone(status(c.id))"
         >
-          <span class="dot" /> {{ t('platforms.state.' + (status(c.id)?.state ?? 'disabled')) }}
-          <template v-if="status(c.id)?.account && status(c.id)?.state === 'connected'">
-            {{ t('platforms.as', { account: status(c.id)?.account }) }}
-          </template>
+          <span class="dot" /> {{ statusText(c.id) }}
+        </div>
+        <div
+          v-if="statusHint(c.id)"
+          class="status-hint"
+        >
+          {{ statusHint(c.id) }}
         </div>
       </div>
       <ToggleSwitch
@@ -304,13 +349,12 @@ function clearSteam() {
       v-if="status(c.id)?.enabled"
       class="facts"
     >
-      <span><b class="mono">{{ status(c.id)?.projects ?? 0 }}</b> {{ t('platforms.projects') }}</span>
+      <span><b class="mono">{{ status(c.id)?.projects ?? 0 }}</b> {{ t('platforms.projects', status(c.id)?.projects ?? 0) }}</span>
       <span
         v-if="status(c.id)?.lastSync"
         v-tooltip.top="absTime(status(c.id)?.lastSync ?? '')"
       >{{ t('platforms.lastSync', { time: relTime(status(c.id)?.lastSync ?? '') }) }}</span>
       <span v-if="status(c.id)?.running"><i class="pi pi-server" /> {{ t('platforms.serverRunning') }}</span>
-      <span v-if="c.id === 'steam' && steam?.signedIn && steam.session !== 'expired'"><i class="pi pi-qrcode" /> {{ t('platforms.signedInQr') }}</span>
     </div>
 
     <p
@@ -358,12 +402,25 @@ function clearSteam() {
     >
       {{ t('platforms.qrExpired') }}
     </Message>
+    <!-- Nexus / CurseForge: browser session first, then a sign-in page -->
+    <Message
+      v-if="c.id !== 'steam' && starting[c.id]"
+      severity="info"
+      size="small"
+    >
+      <i class="pi pi-spin pi-spinner" /> {{ t('platforms.extracting') }}
+    </Message>
     <Message
       v-if="c.id !== 'steam' && login[c.id]?.state === 'window'"
       severity="info"
       size="small"
     >
-      <i class="pi pi-spin pi-spinner" /> {{ t('platforms.windowOpen', { platform: platformName(c.id) }) }}
+      <i class="pi pi-spin pi-spinner" />
+      {{
+        login[c.id]?.via === 'default-browser'
+          ? t('platforms.browserTabOpen', { platform: platformName(c.id), browser: login[c.id]?.browser || t('platforms.defaultBrowser') })
+          : t('platforms.windowOpen', { platform: platformName(c.id) })
+      }}
     </Message>
 
     <!-- Nexus / CurseForge: author + MCP server (all optional) -->
@@ -420,7 +477,7 @@ function clearSteam() {
         {{ t('platforms.sessionExpired') }}
       </Message>
       <small
-        v-if="status('steam') && !status('steam')?.capabilities.reply"
+        v-if="steam?.hasCookies && steam.session !== 'expired' && !status('steam')?.capabilities.reply"
         class="muted"
       ><i class="pi pi-info-circle" /> {{ t('platforms.steamReplyOff') }}</small>
       <button
@@ -534,22 +591,22 @@ function clearSteam() {
         @click="check(c.id)"
       />
       <Button
-        v-if="c.id === 'steam' && steam?.hasCookies"
-        :label="t('platforms.clearCookies')"
-        icon="pi pi-eraser"
+        v-if="canLogout(c.id)"
+        :label="t('platforms.logout')"
+        icon="pi pi-sign-out"
         severity="secondary"
         text
-        :disabled="busy.steam"
-        @click="forgetCookies"
+        :disabled="busy[c.id]"
+        @click="logout(c.id, false)"
       />
       <Button
-        v-if="c.id === 'steam' && steam?.configured"
-        :label="t('platforms.steamClear')"
+        v-if="canDisconnect(c.id)"
+        :label="t('platforms.disconnect')"
         icon="pi pi-times"
         severity="secondary"
         text
-        :disabled="busy.steam"
-        @click="clearSteam"
+        :disabled="busy[c.id]"
+        @click="logout(c.id, true)"
       />
       <span
         v-if="status(c.id)?.checkedAt"
@@ -607,6 +664,21 @@ function clearSteam() {
 .status.ok .dot {
   background: var(--iw-success);
   box-shadow: 0 0 0 3px var(--iw-success-soft);
+}
+
+.status.ro {
+  color: var(--iw-warn);
+}
+
+.status.ro .dot {
+  background: var(--iw-warn);
+  box-shadow: 0 0 0 3px var(--iw-warn-soft);
+}
+
+.status-hint {
+  margin-top: 2px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
+  color: var(--iw-muted);
 }
 
 .status.busy .dot {

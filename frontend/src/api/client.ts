@@ -8,6 +8,7 @@ import type {
   Provider,
   Repo,
   RepoChunk,
+  ProjectSyncResult,
   SettingsDoc,
   SettingsPatch,
   FolderRow,
@@ -132,12 +133,16 @@ export const api = {
   authDevice: () => call<{ userCode?: string; verificationUri?: string }>('POST', '/api/auth/github/device'),
 
   repos: () => call<Repo[]>('GET', '/api/projects'),
-  reposChunk(sort: string, desc: boolean, text: string, cursor: string, limit = 50) {
+  /** group: one row per project (linked mod pages folded into Repo.integrations). */
+  reposChunk(sort: string, desc: boolean, text: string, cursor: string, limit = 50, group = false) {
     const p = new URLSearchParams({ sort, dir: desc ? 'desc' : 'asc', limit: String(limit) })
     if (text) p.set('q', text)
     if (cursor) p.set('cursor', cursor)
+    if (group) p.set('group', '1')
     return call<RepoChunk>('GET', '/api/projects?' + p.toString())
   },
+  /** Sync a project and its linked mod pages now, each through its source. */
+  syncProject: (id: number) => call<ProjectSyncResult>('POST', `/api/projects/${id}/sync`),
 
   issues(q: IssueQuery) {
     const p = new URLSearchParams()
@@ -235,6 +240,9 @@ export const api = {
   login: (id: string) => call<LoginStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/login`),
   loginStatus: (id: string) => call<LoginStatus>('GET', `/api/platforms/${encodeURIComponent(id)}/login`),
   cancelLogin: (id: string) => call<LoginStatus>('DELETE', `/api/platforms/${encodeURIComponent(id)}/login`),
+  /** «Выйти»: drop the session; forget = «Отключить»: also the account (platform off). */
+  logoutPlatform: (id: string, forget = false) =>
+    call<PlatformStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/logout${forget ? '?forget=1' : ''}`),
   steam: () => call<SteamStatus>('GET', '/api/providers/steam'),
   saveSteam: (u: SteamUpdate) => call<SteamStatus>('PUT', '/api/providers/steam', u),
   links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),

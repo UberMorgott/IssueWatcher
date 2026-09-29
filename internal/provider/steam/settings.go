@@ -18,7 +18,9 @@ const settingsFile = "steam.json"
 
 // Settings is what the user enters in Settings › Платформы › Steam.
 type Settings struct {
-	SteamID string `json:"steamId"`         // SteamID64 of the workshop owner
+	SteamID string `json:"steamId"` // SteamID64 of the workshop owner
+	// Persona is the profile's public display name (cached from the profile XML).
+	Persona string `json:"persona,omitempty"`
 	AppID   int    `json:"appId,omitempty"` // limit the owner's items to one game (0 = all)
 	APIKey  string `json:"apiKey,omitempty"`
 	// Web session cookies for posting (steamcommunity.com).
@@ -47,6 +49,7 @@ const (
 type Status struct {
 	Configured bool   `json:"configured"`
 	SteamID    string `json:"steamId"`
+	Persona    string `json:"persona,omitempty"` // public display name, when known
 	AppID      int    `json:"appId"`
 	HasAPIKey  bool   `json:"hasApiKey"`
 	HasCookies bool   `json:"hasCookies"`
@@ -57,7 +60,7 @@ type Status struct {
 
 func (s Settings) status() Status {
 	st := Status{
-		Configured: s.SteamID != "", SteamID: s.SteamID, AppID: s.AppID,
+		Configured: s.SteamID != "", SteamID: s.SteamID, Persona: s.Persona, AppID: s.AppID,
 		HasAPIKey: s.APIKey != "", HasCookies: s.LoginSecure != "" && s.SessionID != "",
 		Session: SessionNone, SignedIn: s.RefreshToken != "",
 	}
@@ -109,11 +112,14 @@ func NormalizeSteamID(s string) (string, bool) {
 func (s Settings) apply(u Update) (Settings, error) {
 	if u.SteamID != nil {
 		if *u.SteamID == "" {
-			s.SteamID = ""
+			s.SteamID, s.Persona = "", ""
 		} else {
 			id, ok := NormalizeSteamID(*u.SteamID)
 			if !ok {
 				return s, fmt.Errorf("%w: steamId must be a SteamID64 (7656119…) or a steamcommunity.com/profiles/<id> URL", ErrBadSettings)
+			}
+			if id != s.SteamID {
+				s.Persona = "" // another profile
 			}
 			s.SteamID = id
 		}

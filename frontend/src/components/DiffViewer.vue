@@ -159,7 +159,7 @@ const STATUS_ICON: Record<DiffFile['status'], string> = { A: 'pi pi-plus-circle'
           <span
             v-if="!open.has(f.path) && f.size > BIG_FILE"
             class="muted big"
-          >{{ t('job.diff.bigFile', { n: num(f.size) }) }}</span>
+          >{{ t('job.diff.bigFile', { n: num(f.size) }, f.size) }}</span>
         </button>
         <div
           v-if="open.has(f.path)"

@@ -54,10 +54,11 @@ type modPlatforms struct {
 	// dial replaces the server command (tests: in-memory MCP servers).
 	dial func(id string) func(ctx context.Context) (mcp.Transport, error)
 
-	mu       sync.Mutex
-	live     map[string]*modPlatform
-	checks   map[string]api.PlatformStatus // last «Проверить» result per platform
-	notified map[string]bool               // relogin card shown since the platform was last connected
+	mu        sync.Mutex
+	live      map[string]*modPlatform
+	checks    map[string]api.PlatformStatus // last «Проверить» result per platform
+	notified  map[string]bool               // relogin card shown since the platform was last connected
+	lastLogin map[string]string             // last logged sign-in state per platform
 }
 
 func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, group *syncer.Group,
@@ -191,6 +192,7 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 			st, err := m.steam.Status()
 			ps.Enabled = err == nil && st.Configured
 			steamExpired = err == nil && st.Session == steam.SessionExpired
+			ps.Session, ps.AccountName = steamSession(st), st.Persona
 		default:
 			ps.Enabled = modConfig(cfg, id).Enabled
 			if p := m.live[id]; p != nil {
@@ -216,6 +218,9 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 		case m.checks[id].State != "":
 			c := m.checks[id]
 			ps.State, ps.Account, ps.Error, ps.CheckedAt = c.State, c.Account, c.Error, c.CheckedAt
+			if id != steam.Platform {
+				ps.Session, ps.Browser = c.Session, c.Browser
+			}
 		case synced && src.Account != "" && src.LastError == "":
 			ps.State, ps.Account = api.PlatformConnected, src.Account
 		case synced && src.LastError != "":
@@ -264,8 +269,14 @@ func (m *modPlatforms) Check(ctx context.Context, id string) (api.PlatformStatus
 		if st, serr := m.steam.Status(); err == nil && serr == nil && st.HasCookies {
 			err = m.steam.CheckSession(ctx)
 		}
+		if err == nil {
+			if _, perr := m.steam.RefreshPersona(ctx); perr != nil {
+				m.log.Debug("steam: profile name lookup failed", "err", perr)
+			}
+		}
 	} else {
 		res.Account, err = p.Account(ctx)
+		res.Session, res.Browser = sessionOf(ctx, p)
 	}
 	res.State, res.Error = checkState(err)
 	if err == nil {
@@ -327,13 +338,19 @@ const loginTimeout = 90 * time.Second
 // Nexus / CurseForge are switched on if needed, then their server imports a
 // browser session or opens its sign-in window.
 func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, error) {
+	m.mu.Lock()
+	delete(m.lastLogin, id) // a new attempt logs its states afresh
+	m.mu.Unlock()
+	m.log.Info("platform sign-in started", "platform", id)
 	switch id {
 	case steam.Platform:
 		st, err := m.steam.StartQR(ctx)
 		if err != nil {
 			return api.LoginStatus{}, err
 		}
-		return qrStatus(st), nil
+		out := qrStatus(st)
+		m.logLogin(out, sourceName(api.SessionQR), "")
+		return out, nil
 	case nexus.Platform, curseforge.Platform:
 	default:
 		return api.LoginStatus{}, api.ErrUnknownPlatform
@@ -362,7 +379,9 @@ func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, e
 func (m *modPlatforms) LoginStatus(ctx context.Context, id string) (api.LoginStatus, error) {
 	switch id {
 	case steam.Platform:
-		return qrStatus(m.steam.QRLoginStatus()), nil
+		out := qrStatus(m.steam.QRLoginStatus())
+		m.logLogin(out, sourceName(api.SessionQR), "")
+		return out, nil
 	case nexus.Platform, curseforge.Platform:
 	default:
 		return api.LoginStatus{}, api.ErrUnknownPlatform
@@ -387,6 +406,22 @@ func (m *modPlatforms) CancelLogin(id string) error {
 		m.steam.CancelQR()
 		return nil
 	case nexus.Platform, curseforge.Platform:
+		// Stop a waiting sign-in (default-browser polling / the server's window).
+		l, err := m.loginer(id)
+		if err != nil {
+			return nil // switched off: nothing is waiting
+		}
+		c, ok := l.(provider.LoginCanceller)
+		if !ok {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := c.CancelLogin(ctx); err != nil {
+			m.log.Warn("platform sign-in cancel failed", "platform", id, "err", err) // older server: its window times out
+		} else {
+			m.log.Info("platform sign-in cancelled", "platform", id)
+		}
 		return nil
 	}
 	return api.ErrUnknownPlatform
@@ -418,11 +453,194 @@ func (m *modPlatforms) loginResult(ctx context.Context, id string, l provider.Lo
 		out.State = api.LoginConnected
 		m.connected(ctx, id)
 	case l.InProgress || l.Window:
-		out.State = api.LoginWindow
+		out.State, out.Via, out.Browser = api.LoginWindow, l.Via, l.ViaBrowser
 	default:
 		out.Error = l.Detail
 	}
+	source, browser := sourceName(l.Source), l.Browser
+	if out.State == api.LoginWindow {
+		source, browser = cmpStr(l.Via, "window"), l.ViaBrowser
+	}
+	m.logLogin(out, source, browser)
 	return out
+}
+
+// logLogin writes each sign-in state change once (the dashboard polls every
+// few seconds): the platform, how the session arrived and why it failed.
+func (m *modPlatforms) logLogin(st api.LoginStatus, source, browser string) {
+	m.mu.Lock()
+	if m.lastLogin == nil {
+		m.lastLogin = map[string]string{}
+	}
+	changed := m.lastLogin[st.Platform] != st.State
+	m.lastLogin[st.Platform] = st.State
+	m.mu.Unlock()
+	if !changed {
+		return
+	}
+	attrs := []any{"platform", st.Platform, "state", st.State}
+	if source != "" {
+		attrs = append(attrs, "source", source)
+	}
+	if browser != "" {
+		attrs = append(attrs, "browser", browser)
+	}
+	if st.Account != "" {
+		attrs = append(attrs, "account", st.Account)
+	}
+	switch st.State {
+	case api.LoginConnected:
+		m.log.Info("platform sign-in succeeded", attrs...)
+	case api.LoginFailed, api.LoginExpired:
+		m.log.Warn("platform sign-in failed", append(attrs, "reason", cmpStr(st.Error, st.State))...)
+	case api.LoginIdle:
+		if st.Error != "" {
+			m.log.Warn("platform sign-in ended without a session", append(attrs, "reason", st.Error)...)
+		}
+	default:
+		m.log.Info("platform sign-in waiting", attrs...)
+	}
+}
+
+func cmpStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// sourceName is the log word for a session source.
+func sourceName(s string) string {
+	switch s {
+	case api.SessionBrowser:
+		return "browser-session"
+	case api.SessionWindow:
+		return "login window"
+	case api.SessionQR:
+		return "QR"
+	}
+	return s
+}
+
+// sessionOf asks a Loginer where its session came from (none = public reads).
+func sessionOf(ctx context.Context, p provider.Provider) (string, string) {
+	l, ok := p.(provider.Loginer)
+	if !ok {
+		return "", ""
+	}
+	st, err := l.LoginStatus(ctx)
+	switch {
+	case err != nil:
+		return "", ""
+	case !st.LoggedIn:
+		return api.SessionNone, ""
+	case st.Source == api.SessionBrowser || st.Source == api.SessionWindow || st.Source == api.SessionManual:
+		return st.Source, st.Browser
+	default:
+		return api.SessionStored, ""
+	}
+}
+
+// steamSession maps the Steam settings view to PlatformStatus.Session.
+func steamSession(st steam.Status) string {
+	switch {
+	case !st.HasCookies:
+		return api.SessionNone
+	case st.SignedIn:
+		return api.SessionQR
+	default:
+		return api.SessionManual
+	}
+}
+
+// Logout implements api.Platforms: «Выйти» drops the web session (public
+// reads go on); forget («Отключить») also clears the detected identity —
+// Steam's SteamID and key, Nexus / CurseForge's uploader account — and
+// switches Nexus / CurseForge off, so the card reads «Не подключено».
+func (m *modPlatforms) Logout(ctx context.Context, id string, forget bool) (api.PlatformStatus, error) {
+	switch id {
+	case steam.Platform:
+		if err := m.steam.Logout(ctx); err != nil {
+			return api.PlatformStatus{}, err
+		}
+		if forget {
+			empty := ""
+			if _, err := m.steam.Save(steam.Update{SteamID: &empty, APIKey: &empty}); err != nil {
+				return api.PlatformStatus{}, err
+			}
+		}
+	case nexus.Platform, curseforge.Platform:
+		ctx, cancel := context.WithTimeout(ctx, loginTimeout)
+		defer cancel()
+		if err := m.serverLogout(ctx, id); err != nil {
+			return api.PlatformStatus{}, err
+		}
+		if forget {
+			if err := m.forget(id); err != nil {
+				return api.PlatformStatus{}, err
+			}
+		}
+	default:
+		return api.PlatformStatus{}, api.ErrUnknownPlatform
+	}
+	m.log.Info("platform signed out", "platform", id, "forget", forget)
+	m.mu.Lock()
+	delete(m.checks, id)
+	delete(m.lastLogin, id)
+	m.mu.Unlock()
+	if !forget {
+		return m.Check(ctx, id) // read-only state, freshly checked
+	}
+	states := all(m.Platforms(ctx))
+	return states[id], nil
+}
+
+// serverLogout runs the MCP server's logout tool; a switched-off platform
+// gets a short-lived server for it (the session file is the server's own).
+func (m *modPlatforms) serverLogout(ctx context.Context, id string) error {
+	m.mu.Lock()
+	mp := m.live[id]
+	m.mu.Unlock()
+	var p provider.Provider
+	if mp != nil {
+		p = mp.prov
+	} else {
+		opts := mcpbridge.Options{Name: id, Log: m.log, Command: func() (string, []string) {
+			s := modConfig(m.cfgs.Get().Providers, id).MCP
+			return os.ExpandEnv(s.Command), s.Args
+		}}
+		if m.dial != nil {
+			opts.Dial = m.dial(id)
+		}
+		b := mcpbridge.New(opts)
+		defer b.Close()
+		if id == nexus.Platform {
+			p = nexus.New(nexus.Options{Bridge: b, Log: m.log, Author: func() string { return "" }})
+		} else {
+			p = curseforge.New(curseforge.Options{Bridge: b, Log: m.log, Author: func() string { return "" }})
+		}
+	}
+	lo, ok := p.(provider.Logouter)
+	if !ok {
+		return api.ErrUnknownPlatform
+	}
+	return lo.Logout(ctx)
+}
+
+// forget clears the uploader account and switches the platform off.
+func (m *modPlatforms) forget(id string) error {
+	for range 3 { // a concurrent settings write bumps the revision: retry
+		cur := m.cfgs.Get()
+		next, err := m.cfgs.Patch(cur.Revision, []byte(`{"providers":{"`+id+`":{"enabled":false,"author":""}}}`), nil)
+		if err == nil {
+			m.apply(next)
+			return nil
+		}
+		if !errors.Is(err, config.ErrConflict) {
+			return err
+		}
+	}
+	return errors.New("settings keep changing; try again")
 }
 
 func (m *modPlatforms) loginer(id string) (provider.Loginer, error) {

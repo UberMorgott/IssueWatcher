@@ -281,6 +281,11 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 	if err := p.fillCreators(ctx, files); err != nil {
 		p.opts.Log.Warn("steam: item details lookup failed", "err", err)
 	}
+	if s.Persona == "" { // the card shows the profile name, not the raw SteamID
+		if _, err := p.RefreshPersona(ctx); err != nil {
+			p.opts.Log.Debug("steam: profile name lookup failed", "err", err)
+		}
+	}
 	out := make([]provider.Project, 0, len(files))
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -112,6 +112,10 @@ type sessionResult struct {
 		DisplayName *string `json:"displayName"`
 		Username    *string `json:"username"`
 	} `json:"user"`
+	Source     *string `json:"sessionSource"`
+	Browser    *string `json:"sessionBrowser"`
+	Via        *string `json:"loginVia"`
+	ViaBrowser *string `json:"loginBrowser"`
 }
 
 // Account implements provider.Provider: the session's display name (what
@@ -157,10 +161,12 @@ func (s sessionResult) name() string {
 // (captured by the server itself).
 func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
 	var r struct {
-		Result       string `json:"result"`
-		LoggedIn     bool   `json:"loggedIn"`
-		InProgress   bool   `json:"loginInProgress"`
-		WindowOpened bool   `json:"loginWindowOpened"`
+		Result       string  `json:"result"`
+		LoggedIn     bool    `json:"loggedIn"`
+		InProgress   bool    `json:"loginInProgress"`
+		WindowOpened bool    `json:"loginWindowOpened"`
+		Via          *string `json:"loginVia"`
+		ViaBrowser   *string `json:"loginBrowser"`
 	}
 	if err := p.opts.Bridge.Call(ctx, "cf_auto_extract_cookies", nil, &r, true); err != nil {
 		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
@@ -168,7 +174,20 @@ func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
 	if r.LoggedIn {
 		return p.LoginStatus(ctx)
 	}
-	return provider.Login{InProgress: r.InProgress || r.WindowOpened, Window: r.WindowOpened, Detail: r.Result}, nil
+	return provider.Login{InProgress: r.InProgress || r.WindowOpened, Window: r.WindowOpened, Detail: r.Result,
+		Via: deref(r.Via), ViaBrowser: deref(r.ViaBrowser)}, nil
+}
+
+// CancelLogin implements provider.LoginCanceller (cf_login_cancel).
+func (p *Provider) CancelLogin(ctx context.Context) error {
+	return mcpbridge.ProviderError(p.opts.Bridge.Call(ctx, "cf_login_cancel", nil, nil, false), p.opts.Now())
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // LoginStatus implements provider.Loginer (cf_session_status).
@@ -178,13 +197,29 @@ func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
 		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
 	}
 	l := provider.Login{LoggedIn: s.LoggedIn && s.name() != "", InProgress: s.InProgress, Detail: s.Detail}
+	if !l.LoggedIn && s.InProgress {
+		l.Via, l.ViaBrowser = deref(s.Via), deref(s.ViaBrowser)
+	}
 	if l.LoggedIn {
 		l.Account = s.name()
+		l.Source, l.Browser = deref(s.Source), deref(s.Browser)
 		p.mu.Lock()
 		p.account = l.Account
 		p.mu.Unlock()
 	}
 	return l, nil
+}
+
+// Logout implements provider.Logouter: cf_logout drops the stored session
+// (the server stops importing browser cookies until the next sign-in).
+func (p *Provider) Logout(ctx context.Context) error {
+	if err := p.opts.Bridge.Call(ctx, "cf_logout", nil, nil, false); err != nil {
+		return mcpbridge.ProviderError(err, p.opts.Now())
+	}
+	p.mu.Lock()
+	p.account = ""
+	p.mu.Unlock()
+	return nil
 }
 
 func (p *Provider) self(ctx context.Context) (string, error) {

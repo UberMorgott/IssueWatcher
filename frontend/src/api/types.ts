@@ -44,6 +44,30 @@ export interface Repo {
   lastSync?: string
   /** Legacy alias of lastSync. */
   syncedAt?: string
+  /**
+   * Grouped list only (GET /api/projects?group=1): the row's own project first,
+   * then its linked mod pages, each with its own counts. The row's open/closed/
+   * unread are the sums; lastSync is the stalest member's.
+   */
+  integrations?: Integration[]
+}
+
+/** One channel of a grouped project row; Issues filter: ?repo=<row id>&source=<platform>. */
+export interface Integration {
+  id: number
+  name: string
+  url: string
+  platform: string
+  open: number
+  closed: number
+  unread: number
+  lastSync: string
+}
+
+/** POST /api/projects/{id}/sync: platforms started, and those no connected account serves. */
+export interface ProjectSyncResult {
+  started: string[]
+  missing: string[]
 }
 
 export interface Issue {
@@ -137,6 +161,8 @@ export interface SyncStatus {
   signedIn: boolean
   lastSync: string
   lastError: string
+  /** The last cycle failed with a relogin error (session expired). */
+  relogin?: boolean
   rateLimitedUntil: string
   interval: string
   /** Tiered sync (internal/syncer Status). */
@@ -709,6 +735,9 @@ export interface Capabilities {
 
 export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'unavailable' | 'error'
 
+/** none = public reads only; qr = Steam QR sign-in; stored = origin unknown. */
+export type PlatformSession = 'none' | 'browser' | 'window' | 'manual' | 'qr' | 'stored'
+
 /** GET /api/platforms row (internal/api PlatformStatus). */
 export interface PlatformStatus {
   id: string
@@ -716,6 +745,12 @@ export interface PlatformStatus {
   enabled: boolean
   state: PlatformState
   account?: string
+  /** Display name when account is an id (Steam persona). */
+  accountName?: string
+  /** Where the web session came from; missing = not known yet. */
+  session?: PlatformSession
+  /** session 'browser': which browser. */
+  browser?: string
   error?: string
   /** The platform's MCP server child is running. */
   running: boolean
@@ -729,6 +764,8 @@ export interface PlatformStatus {
 export interface SteamStatus {
   configured: boolean
   steamId: string
+  /** Public profile name, when known. */
+  persona?: string
   appId: number
   hasApiKey: boolean
   hasCookies: boolean
@@ -745,6 +782,10 @@ export interface LoginStatus {
   challengeUrl?: string // Steam: the QR code's content
   account?: string
   error?: string
+  /** state window: the login page opened in the default browser, or the server's own window. */
+  via?: 'default-browser' | 'window'
+  /** via default-browser: which browser. */
+  browser?: string
 }
 
 export interface SteamUpdate {

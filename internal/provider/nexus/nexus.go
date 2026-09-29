@@ -547,11 +547,20 @@ type sessionResult struct {
 		MemberID int    `json:"memberId"`
 		Name     string `json:"name"`
 	} `json:"account"`
-	AccountError string `json:"accountError"`
+	AccountError string  `json:"accountError"`
+	Source       *string `json:"sessionSource"`
+	Browser      *string `json:"sessionBrowser"`
+	Via          *string `json:"loginVia"`
+	ViaBrowser   *string `json:"loginBrowser"`
 }
 
 func (p *Provider) session(s sessionResult) provider.Login {
 	l := provider.Login{LoggedIn: s.LoggedIn, InProgress: s.InProgress, Window: s.WindowOpened, Detail: cmpName(s.AccountError, s.Detail)}
+	if s.LoggedIn {
+		l.Source, l.Browser = deref(s.Source), deref(s.Browser)
+	} else if s.InProgress || s.WindowOpened {
+		l.Via, l.ViaBrowser = deref(s.Via), deref(s.ViaBrowser)
+	}
 	if s.LoggedIn && s.Account != nil && s.Account.MemberID > 0 {
 		p.mu.Lock()
 		p.member = &uploader{id: s.Account.MemberID, name: s.Account.Name}
@@ -582,6 +591,30 @@ func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
 		return provider.Login{}, err
 	}
 	return p.session(s), nil
+}
+
+// Logout implements provider.Logouter: web_logout drops the stored session
+// (the server stops importing browser cookies until the next web_login).
+func (p *Provider) Logout(ctx context.Context) error {
+	if err := p.opts.Bridge.Call(ctx, "web_logout", nil, nil, false); err != nil {
+		return mcpbridge.ProviderError(err, p.opts.Now())
+	}
+	p.mu.Lock()
+	p.member = nil
+	p.mu.Unlock()
+	return nil
+}
+
+// CancelLogin implements provider.LoginCanceller (web_login_cancel).
+func (p *Provider) CancelLogin(ctx context.Context) error {
+	return mcpbridge.ProviderError(p.opts.Bridge.Call(ctx, "web_login_cancel", nil, nil, false), p.opts.Now())
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // Member is the signed-in member id (0 = unknown), for storing it as the account.

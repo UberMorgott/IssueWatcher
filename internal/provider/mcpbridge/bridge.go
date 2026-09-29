@@ -250,6 +250,7 @@ func (c *Client) commandTransport() (mcp.Transport, func(), error) {
 	// restricted one. The child starts suspended and joins a kill-on-close job.
 	cmd := exec.Command(path, args...) //nolint:gosec,noctx // G204: the user's configured server; lifetime = the session, not a request
 	prepareChild(cmd)
+	cmd.Stderr = &stderrLog{log: c.opts.Log, server: c.opts.Name}
 	j := &jobTransport{inner: &mcp.CommandTransport{Command: cmd, TerminateDuration: 3 * time.Second}}
 	return j, j.kill, nil
 }
