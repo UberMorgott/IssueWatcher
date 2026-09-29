@@ -87,8 +87,8 @@ func TestSyncDetectsNewIssueCommentAndClose(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{"issue_closed#2", "new_comment#1", "new_issue#3"}
-	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || u.unread != 3 {
-		t.Fatalf("events %v unread %d, want %v / 3", got, u.unread, want)
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || u.unread != 2 { // the closed #2 is read
+		t.Fatalf("events %v unread %d, want %v / 2", got, u.unread, want)
 	}
 
 	// Reply goes to GitHub, lands in the store, and the next sync stays quiet.

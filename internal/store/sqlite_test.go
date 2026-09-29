@@ -22,8 +22,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Fatalf("user_version = %d, want 11", version)
+	if version != 12 {
+		t.Fatalf("user_version = %d, want 12", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
@@ -110,6 +110,50 @@ func TestMigration006FreshJobs(t *testing.T) {
 	chunk, err := s.Jobs(ctx, JobFilter{Origin: OriginRule})
 	if err != nil || len(chunk.Items) != 1 || chunk.Items[0].ID != j.ID {
 		t.Fatalf("origin filter: %+v %v", chunk, err)
+	}
+}
+
+// Migration 012 marks every item closed before the rule read (open ones keep
+// their flag).
+func TestMigration012ClosedRead(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateTo(ctx, db, 11); err != nil {
+		t.Fatal(err)
+	}
+	s := New(db)
+	src, err := s.UpsertSource(ctx, "github", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := seedProjects(ctx, db, src, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "u"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyItems(ctx, src, projects[0].ID, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE items SET unread = 1`); err != nil { // the old rule left closed items unread
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var open, closed int
+	if err := db.QueryRowContext(ctx, `SELECT sum(unread) FILTER (WHERE status = 'open'), sum(unread) FILTER (WHERE status = 'closed') FROM items`).Scan(&open, &closed); err != nil {
+		t.Fatal(err)
+	}
+	if open != 1 || closed != 0 {
+		t.Fatalf("unread open %d closed %d", open, closed)
 	}
 }
 

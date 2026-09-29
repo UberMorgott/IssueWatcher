@@ -97,8 +97,8 @@ func TestApplyItemsBaselineThenDiffEvents(t *testing.T) {
 	if evs[0].Actor != "carol" || evs[0].Repo != "o/app" || evs[0].Number != 1 || evs[2].Actor != "alice" {
 		t.Fatalf("event fields %+v", evs)
 	}
-	if n, _ := s.UnreadCount(ctx); n != 3 {
-		t.Fatalf("unread %d, want 3", n)
+	if n, _ := s.UnreadCount(ctx); n != 2 { // I1 (comment), I3 (new); the closed I2 is read
+		t.Fatalf("unread %d, want 2", n)
 	}
 
 	// Re-applying the same batch (inclusive since cursor) is idempotent.
@@ -118,12 +118,83 @@ func TestApplyItemsBaselineThenDiffEvents(t *testing.T) {
 	if err := s.MarkRead(ctx, itemID(t, s, "I1")); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.UnreadCount(ctx); n != 2 {
+	if n, _ := s.UnreadCount(ctx); n != 1 {
 		t.Fatalf("unread after read %d", n)
 	}
 	if err := s.MarkRead(ctx, 9999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("mark missing: %v", err)
 	}
+}
+
+// A closed item never counts as unread: closing an unread item (a sync close,
+// or our own push/Fixes seen on sync) marks it read, a comment on a closed item
+// keeps it read, and every counter and the unread filter skip it. Reopening
+// with news makes it unread again.
+func TestClosedItemsNeverUnread(t *testing.T) {
+	s, src, p := setup(t)
+	ctx := t.Context()
+	if _, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{item("A", 1, true, t0), item("B", 2, true, t0)}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	// News on both: unread.
+	evs, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{
+		item("A", 1, true, t0.Add(time.Hour), comment("C1", "bob")),
+		item("B", 2, true, t0.Add(time.Hour), comment("C2", "bob")),
+	}, "me")
+	if err != nil || len(evs) != 2 {
+		t.Fatalf("events %v %v", kinds(evs), err)
+	}
+	if n, _ := s.UnreadCount(ctx); n != 2 {
+		t.Fatalf("unread before close %d", n)
+	}
+	// B closed (with a new comment in the same sync): read, but the events still come.
+	evs, err = s.ApplyItems(ctx, src, p.ID, []provider.Item{
+		item("B", 2, false, t0.Add(2*time.Hour), comment("C2", "bob"), comment("C3", "carol")),
+	}, "me")
+	if err != nil || len(evs) != 2 {
+		t.Fatalf("close events %v %v", kinds(evs), err)
+	}
+	// A comment on the closed B later: still read.
+	if evs, err = s.ApplyItems(ctx, src, p.ID, []provider.Item{
+		item("B", 2, false, t0.Add(3*time.Hour), comment("C2", "bob"), comment("C3", "carol"), comment("C4", "dave")),
+	}, "me"); err != nil || len(evs) != 1 {
+		t.Fatalf("comment on closed %v %v", kinds(evs), err)
+	}
+	wantUnread := func(n int, why string) {
+		t.Helper()
+		if got, _ := s.UnreadCount(ctx); got != n {
+			t.Fatalf("%s: tray unread %d, want %d", why, got, n)
+		}
+		repos, err := s.Repos(ctx)
+		if err != nil || len(repos) != 1 || repos[0].Unread != n {
+			t.Fatalf("%s: project unread %+v %v", why, repos, err)
+		}
+		chunk, err := s.ReposChunk(ctx, RepoQuery{})
+		if err != nil || len(chunk.Items) != 1 || chunk.Items[0].Unread != n {
+			t.Fatalf("%s: sidebar unread %+v %v", why, chunk.Items, err)
+		}
+		all, err := s.Issues(ctx, IssueFilter{Limit: 50})
+		if err != nil || all.Counts == nil || all.Counts.Unread != n {
+			t.Fatalf("%s: header counts %+v %v", why, all.Counts, err)
+		}
+		un, err := s.Issues(ctx, IssueFilter{Unread: true, Limit: 50})
+		if err != nil || len(un.Items) != n {
+			t.Fatalf("%s: unread filter %d %v", why, len(un.Items), err)
+		}
+		for _, it := range append(all.Items, un.Items...) {
+			if it.State == "closed" && it.Unread {
+				t.Fatalf("%s: closed item %d unread", why, it.Number)
+			}
+		}
+	}
+	wantUnread(1, "after close")
+	// Reopened with a new comment: unread again.
+	if _, err := s.ApplyItems(ctx, src, p.ID, []provider.Item{
+		item("B", 2, true, t0.Add(4*time.Hour), comment("C2", "bob"), comment("C3", "carol"), comment("C4", "dave"), comment("C5", "erin")),
+	}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	wantUnread(2, "after reopen")
 }
 
 func itemID(t *testing.T, s *Store, ext string) int64 {

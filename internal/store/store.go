@@ -303,7 +303,15 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 			events = append(events, e)
 		}
 	}
-	if len(events) > 0 {
+	// A closed item is never unread (counters, badges, the unread filter and the
+	// tray all read the flag): closing it, here or by our own push/Fixes seen on
+	// sync, marks it read; its events still notify.
+	switch {
+	case status == "closed" && existed:
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET unread = 0 WHERE id = ? AND unread = 1`, id); err != nil {
+			return nil, false, fmt.Errorf("store: mark read: %w", err)
+		}
+	case status != "closed" && len(events) > 0:
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET unread = 1 WHERE id = ?`, id); err != nil {
 			return nil, false, fmt.Errorf("store: mark unread: %w", err)
 		}
