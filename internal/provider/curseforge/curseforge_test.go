@@ -1,6 +1,7 @@
 package curseforge_test
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -106,7 +107,8 @@ func setup(t *testing.T) *env {
 	e.site.install(e.fake)
 	b := mcpbridge.New(mcpbridge.Options{Name: "curseforge", Dial: e.fake.Dial, CallTimeout: 5 * time.Second})
 	t.Cleanup(b.Close)
-	e.prov = curseforge.New(curseforge.Options{Bridge: b, ReadBackWaits: []time.Duration{time.Millisecond}})
+	e.prov = curseforge.New(curseforge.Options{Bridge: b, ReadBackWaits: []time.Duration{time.Millisecond},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }})
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -235,5 +237,68 @@ func TestReply(t *testing.T) {
 	}
 	if n := e.fake.Count("post_comment"); n != 4 {
 		t.Fatalf("posts = %d (never retried)", n)
+	}
+}
+
+// L6: the plain-text body is sent as escaped HTML with its line breaks.
+func TestReplyBodyEscaped(t *testing.T) {
+	e := setup(t)
+	e.fake.Handle("post_comment", func(args map[string]any) (any, error) {
+		if got := args["comment_text"]; got != "List&lt;String&gt; &amp; co<br>line 2" {
+			t.Errorf("comment_text %q", got)
+		}
+		return map[string]any{"posted": true, "id": "40", "parentId": "20", "verified": true}, nil
+	})
+	if cm, err := e.prov.Reply(t.Context(), "comment:1443010/20", "List<String> & co\r\nline 2"); err != nil || cm.Body != "List<String> & co\r\nline 2" {
+		t.Fatalf("%+v %v", cm, err)
+	}
+}
+
+// H1: a write that failed after the send (outcome_unknown, unclassified) is
+// read back; found → success, not found → unknown, never a plain failure.
+// M4: an older identical reply is not taken for it.
+func TestReplyUnsureWriteReadBack(t *testing.T) {
+	e := setup(t)
+	e.fake.Handle("post_comment", func(map[string]any) (any, error) {
+		e.site.mu.Lock()
+		p1 := e.site.pages[1]
+		p1[0]["replies"] = append(p1[0]["replies"].([]map[string]any), rep("32", "20", "Morgott", "In reply to bob: line 1\nline <2>", 59, 1)) //nolint:forcetypeassert // fixture
+		e.site.mu.Unlock()
+		return nil, &mcptest.CodeError{Code: mcpbridge.CodeOutcomeUnknown, Message: "HTTP 502"}
+	})
+	if cm, err := e.prov.Reply(t.Context(), "comment:1443010/20", "line 1\nline <2>"); err != nil || cm.ExternalID != "32" {
+		t.Fatalf("saved despite 502: %+v %v", cm, err)
+	}
+	for _, code := range []string{mcpbridge.CodeOutcomeUnknown, mcpbridge.CodeError} {
+		e.fake.Handle("post_comment", func(map[string]any) (any, error) {
+			return nil, &mcptest.CodeError{Code: code, Message: "HTTP 500"}
+		})
+		// "which folder?" already exists (id 21, before the post): not this reply.
+		if _, err := e.prov.Reply(t.Context(), "comment:1443010/20", "which folder?"); !errors.Is(err, curseforge.ErrUnknownOutcome) {
+			t.Fatalf("%s: %v", code, err)
+		}
+	}
+	e.fake.Handle("post_comment", func(map[string]any) (any, error) {
+		return nil, &mcptest.CodeError{Code: mcpbridge.CodeInvalid, Message: "bad"}
+	})
+	if _, err := e.prov.Reply(t.Context(), "comment:1443010/20", "x"); err == nil || errors.Is(err, curseforge.ErrUnknownOutcome) {
+		t.Fatalf("refusal: %v", err)
+	}
+}
+
+// L7: a cancelled request still reads the reply back.
+func TestReplyReadBackSurvivesCancel(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	e.fake.Handle("post_comment", func(map[string]any) (any, error) {
+		e.site.mu.Lock()
+		p1 := e.site.pages[1]
+		p1[0]["replies"] = append(p1[0]["replies"].([]map[string]any), rep("33", "20", "Morgott", "bye", 59, 1)) //nolint:forcetypeassert // fixture
+		e.site.mu.Unlock()
+		cancel()
+		return nil, mcptest.ErrCrash
+	})
+	if cm, err := e.prov.Reply(ctx, "comment:1443010/20", "bye"); err != nil || cm.ExternalID != "33" {
+		t.Fatalf("%+v %v", cm, err)
 	}
 }

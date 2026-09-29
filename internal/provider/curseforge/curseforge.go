@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -347,9 +348,25 @@ func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, 
 // on their thread's page; the server itself reads back the first 3).
 const readBackPages = 10
 
+// readBackTimeout bounds the read-back of a reply whose outcome is unknown; it
+// runs even when the request that posted it was cancelled.
+const readBackTimeout = 2 * time.Minute
+
+// readBackSkew is how much older than the send time a found reply may look
+// (clock differences) and still count as the one just posted.
+const readBackSkew = 5 * time.Minute
+
+// htmlBody turns a plain-text reply into the RawHtml the site stores: markup
+// characters escaped, line breaks kept.
+func htmlBody(text string) string {
+	s := html.EscapeString(strings.ReplaceAll(text, "\r\n", "\n"))
+	return strings.ReplaceAll(s, "\n", "<br>")
+}
+
 // Reply implements provider.Provider: post_comment{reply_to_id} on the root
-// comment (the body is sent as HTML). Never retried; a lost answer is
-// resolved by reading the thread back.
+// comment (the plain-text body is sent as escaped HTML). Never retried; a lost
+// or failed-after-send answer is resolved by reading the thread back,
+// ignoring the replies that existed before the post.
 func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (provider.Comment, error) {
 	rest, ok := strings.CutPrefix(itemExternalID, "comment:")
 	ms, root, ok2 := strings.Cut(rest, "/")
@@ -361,11 +378,18 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if err != nil {
 		return provider.Comment{}, err
 	}
+	// The replies already there: an older reply with the same text is never
+	// taken for this one. A failed read sends nothing.
+	before := map[string]bool{}
+	if err := p.eachReply(ctx, mod, root, func(c comment) bool { before[c.ID] = true; return false }); err != nil {
+		return provider.Comment{}, fmt.Errorf("curseforge: read thread before reply: %w", err)
+	}
+	sent := p.opts.Now()
 	var r struct {
 		Posted bool    `json:"posted"`
 		ID     *string `json:"id"`
 	}
-	err = p.opts.Bridge.Call(ctx, "post_comment", map[string]any{"mod_id": mod, "comment_text": body, "reply_to_id": mcpbridge.Number(root)}, &r, false)
+	err = p.opts.Bridge.Call(ctx, "post_comment", map[string]any{"mod_id": mod, "comment_text": htmlBody(body), "reply_to_id": mcpbridge.Number(root)}, &r, false)
 	switch {
 	case err == nil && r.Posted && r.ID != nil && *r.ID != "":
 		return p.posted(*r.ID, account, body), nil
@@ -373,16 +397,18 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 		return provider.Comment{}, errors.New("curseforge: post_comment: not posted")
 	case mcpbridge.IsCode(err, mcpbridge.CodeNotLoggedIn), mcpbridge.IsCode(err, mcpbridge.CodeCloudflare):
 		return provider.Comment{}, fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
-	case err != nil && !errors.Is(err, mcpbridge.ErrOutcomeUnknown):
+	case err != nil && !mcpbridge.WriteUnsure(err):
 		return provider.Comment{}, mcpbridge.ProviderError(err, p.opts.Now())
 	}
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
+	defer cancel()
 	var id string
 	var ferr error
 	for _, wait := range append([]time.Duration{0}, p.opts.ReadBackWaits...) {
-		if !sleep(ctx, wait) {
+		if !sleep(rctx, wait) {
 			break
 		}
-		if id, ferr = p.findReply(ctx, mod, root, account, body); ferr == nil && id != "" {
+		if id, ferr = p.findReply(rctx, mod, root, account, body, before, sent); ferr == nil && id != "" {
 			return p.posted(id, account, body), nil
 		}
 	}
@@ -395,54 +421,81 @@ func (p *Provider) posted(id, account, body string) provider.Comment {
 	return provider.Comment{ExternalID: id, Author: account, Body: body, CreatedAt: now, UpdatedAt: now}
 }
 
-// findReply looks for the newest own reply with the same text under root.
-// The site may prefix replies with "In reply to X:" and renders the HTML.
-func (p *Provider) findReply(ctx context.Context, mod int, root, account, body string) (string, error) {
-	want := plain(body)
-	best, bestN := "", -1
+// eachReply calls fn with every reply under root on the first readBackPages
+// pages that list it, until fn returns true.
+func (p *Provider) eachReply(ctx context.Context, mod int, root string, fn func(comment) bool) error {
 	for n := 1; n <= readBackPages; n++ {
 		r, err := p.page(ctx, mod, n)
 		if err != nil {
-			return "", err
+			return err
 		}
+		found := false
 		for _, t := range r.Comments {
 			if t.ID != root {
 				continue
 			}
+			found = true
 			for _, c := range t.Replies {
-				if c.Author == account && mcpbridge.SameText(plain(c.Body), want) && mcpbridge.Number(c.ID) > bestN {
-					best, bestN = c.ID, mcpbridge.Number(c.ID)
+				if fn(c) {
+					return nil
 				}
 			}
 		}
-		if best != "" || len(r.Comments) == 0 || (r.Pages != nil && n >= *r.Pages) {
-			break
+		if found || len(r.Comments) == 0 || (r.Pages != nil && n >= *r.Pages) {
+			return nil
 		}
 	}
-	return best, nil
+	return nil
 }
 
-// plain drops tags and a leading "In reply to X:".
-func plain(s string) string {
-	var b strings.Builder
-	in := false
-	for _, r := range s {
-		switch {
-		case r == '<':
-			in = true
-		case r == '>':
-			in = false
-		case !in:
-			b.WriteRune(r)
+// findReply looks for the newest own reply with the same text under root that
+// was not there before the post and is not older than the send.
+func (p *Provider) findReply(ctx context.Context, mod int, root, account, body string, before map[string]bool, sent time.Time) (string, error) {
+	best, bestN := "", -1
+	err := p.eachReply(ctx, mod, root, func(c comment) bool {
+		created := mcpbridge.Time(c.CreatedAt)
+		if !before[c.ID] && c.Author == account && sameReply(c.Body, body) && mcpbridge.Number(c.ID) > bestN &&
+			(created.IsZero() || !created.Before(sent.Add(-readBackSkew))) {
+			best, bestN = c.ID, mcpbridge.Number(c.ID)
 		}
-	}
-	t := strings.TrimSpace(b.String())
+		return false
+	})
+	return best, err
+}
+
+// sameReply compares the site's text of a reply with the plain text sent. The
+// site may prefix replies with "In reply to X:" and may return markup.
+func sameReply(got, sent string) bool {
+	g := dropReplyPrefix(got)
+	return mcpbridge.SameText(g, sent) || mcpbridge.SameText(html.UnescapeString(stripTags(g)), sent)
+}
+
+func dropReplyPrefix(s string) string {
+	t := strings.TrimSpace(s)
 	if strings.HasPrefix(strings.ToLower(t), "in reply to ") {
 		if _, after, ok := strings.Cut(t, ":"); ok {
 			t = after
 		}
 	}
 	return strings.TrimSpace(t)
+}
+
+// stripTags replaces tags with spaces (<br>, <p> separate words).
+func stripTags(s string) string {
+	var b strings.Builder
+	in := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			in = true
+			b.WriteByte(' ')
+		case r == '>':
+			in = false
+		case !in:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {
