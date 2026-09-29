@@ -238,6 +238,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}), syncer.New(syncer.Options{
 		Store: st, Provider: stm, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
 	}))
+	mods := newModPlatforms(cfgs, st, log, syncPlan(cfg.Sync), onUpdate) // Nexus / CurseForge over MCP
+	defer mods.Close()
+	sy.Add(mods.syncers...)
 	// Settings apply live: popups, toasts, poll interval.
 	cfgs.Subscribe(func(_, cur config.Settings) {
 		lp := liveFilter(cur.Notifications)

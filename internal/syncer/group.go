@@ -41,6 +41,9 @@ type Group struct {
 // reported at the top level of GroupStatus (the GitHub syncer).
 func NewGroup(syncers ...*Syncer) *Group { return &Group{syncers: syncers} }
 
+// Add appends syncers (before Run).
+func (g *Group) Add(syncers ...*Syncer) { g.syncers = append(g.syncers, syncers...) }
+
 // Syncers returns the grouped syncers.
 func (g *Group) Syncers() []*Syncer { return g.syncers }
 
