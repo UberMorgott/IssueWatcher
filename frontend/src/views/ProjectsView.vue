@@ -171,9 +171,9 @@ async function syncProject(r: Repo) {
   if (res.data.missing.length) toast.add({ severity: 'warn', summary: t('projects.syncMissing', { list: names(res.data.missing) }), life: 4000 })
 }
 
-/** Patches a loaded row's folder (the dialog or the inline unmap). */
+/** Patches a loaded row's folder (the dialog or the inline unmap; the API saves only a clone of the project). */
 function setRowFolder(id: number, localPath: string) {
-  rows.value = rows.value.map((x) => (x.id === id ? { ...x, localPath } : x))
+  rows.value = rows.value.map((x) => (x.id === id ? { ...x, localPath, ...(x.fixProjectId === id ? { fixFolder: localPath, fixable: !!localPath } : {}) } : x))
 }
 async function unmapFolder(r: Repo) {
   const res = await api.setFolder(r.id, '')
@@ -423,7 +423,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               />
               <span
                 v-if="!isModPlatform(data.platform)"
-                v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
+                v-tooltip.top="data.fixable ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
               >
                 <Button
                   :label="t('jobs.triage.run')"
@@ -433,7 +433,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   text
                   class="nowrap"
                   :loading="triage.busy.value"
-                  :disabled="!data.open || !data.localPath"
+                  :disabled="!data.open || !data.fixable"
                   @click.stop="triage.run(data.id, data.name)"
                 />
               </span>

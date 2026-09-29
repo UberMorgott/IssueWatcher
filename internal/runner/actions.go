@@ -25,7 +25,13 @@ type Queued struct {
 	// Error: "exists" (an unfinished job of this flow; Job is that one),
 	// "not_found", "no_folder" (fix without a usable local folder; no job), or a message.
 	Error string `json:"error,omitempty"`
+	// Hint with no_folder: "link_mod" = a mod page item whose page is not linked
+	// to a code project (link the mod to a project with a folder).
+	Hint string `json:"hint,omitempty"`
 }
+
+// HintLinkMod: link the mod page to a code project with a folder first.
+const HintLinkMod = "link_mod"
 
 // MaxBatch bounds one Enqueue call.
 const MaxBatch = 500
@@ -70,6 +76,9 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 				return out, err
 			case folderError("", it.LocalPath, it.ProjectURL) != nil:
 				q.Error = CodeNoFolder
+				if it.NeedsLink {
+					q.Hint = HintLinkMod
+				}
 				noFolder++
 			}
 			if q.Error != "" {

@@ -33,6 +33,7 @@ type Repo struct {
 	// Integrations (grouped list only): the row's own project first, then its
 	// linked mod pages, each with its own counts.
 	Integrations []Integration `json:"integrations,omitempty"`
+	Fix                        // where fixes of the project's items run (fixProjectId, fixFolder, fixable, needsLink)
 }
 
 // Repos lists active projects with counts, by name.
@@ -65,6 +66,9 @@ func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
 		return nil, fmt.Errorf("store: repos: %w", err)
 	}
 	if err := s.fillSuggestions(ctx, out); err != nil {
+		return nil, err
+	}
+	if err := s.fillRepoFix(ctx, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -166,6 +170,9 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		return chunk, fmt.Errorf("store: repos: %w", err)
 	}
 	_ = rows.Close() // before the next query (the loop may stop early)
+	if err := s.fillRepoFix(ctx, chunk.Items); err != nil {
+		return chunk, err
+	}
 	if q.Group {
 		if err := s.fillIntegrations(ctx, chunk.Items); err != nil {
 			return chunk, err
@@ -210,6 +217,7 @@ type Issue struct {
 	UpdatedAt string    `json:"updatedAt"`
 	ClosedAt  string    `json:"closedAt"`
 	Job       *JobBadge `json:"job,omitempty"` // newest agent job of the item
+	Fix                 // where a fix of the item runs (its project's Fix)
 }
 
 // IssueChunk is one slice of the issue list.
@@ -331,6 +339,9 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	if err := s.attachJobs(ctx, chunk.Items); err != nil {
 		return chunk, err
 	}
+	if err := s.fillIssueFix(ctx, chunk.Items); err != nil {
+		return chunk, err
+	}
 	if n := len(chunk.Items); n > 0 {
 		first, last := chunk.Items[0], chunk.Items[n-1]
 		chunk.HeadCursor = encodeCursor(first.UpdatedAt, first.ID)
@@ -370,6 +381,9 @@ func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 	d.Issue, d.Body = is, body
 	one := []Issue{d.Issue}
 	if err := s.attachJobs(ctx, one); err != nil {
+		return d, err
+	}
+	if err := s.fillIssueFix(ctx, one); err != nil {
 		return d, err
 	}
 	d.Issue = one[0]

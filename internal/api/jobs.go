@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
@@ -16,7 +17,7 @@ import (
 //	GET  /api/jobs?state=&flow=&origin=&project=&item=&cursor=&limit=  keyset chunk, newest first
 //	POST /api/jobs {itemIds[], flow: fix|reply, profileId?}    one job per item → 201 {jobs:[{itemId, job?, error?}]};
 //	                                     fix items without a usable local folder get error "no_folder" (no job);
-//	                                     when that is every item → 409 {error, code: "no_folder", jobs}
+//	                                     when that is every item → 409 {error, code: "no_folder", jobs[, hint: "link_mod"]}
 //	GET  /api/jobs/{id}                  job
 //	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
 //	GET  /api/jobs/{id}/diff?attempt=    unified diff (text/plain)
@@ -125,7 +126,12 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, runner.ErrNoFolder) { // fix for items without a usable folder: nothing was queued
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": runner.CodeNoFolder, "jobs": out})
+		body := map[string]any{"error": err.Error(), "code": runner.CodeNoFolder, "jobs": out}
+		if !slices.ContainsFunc(out, func(q runner.Queued) bool { return q.Hint != runner.HintLinkMod }) {
+			body["hint"] = runner.HintLinkMod // every item is a mod page not linked to a code project
+			body["error"] = "the mod page is not linked to a code project; link the mod to a project with a local folder (Projects)"
+		}
+		writeJSON(w, http.StatusConflict, body)
 		return
 	}
 	if err != nil {

@@ -103,15 +103,19 @@ const pname = computed(() => platformName(platform.value))
 /** The account replies go out as: the GitHub login, or the platform's checked account. */
 const account = computed(() => (mod.value ? (app.platforms.find((p) => p.id === platform.value)?.account ?? '') : (app.github?.login ?? '')))
 const canReply = computed(() => (mod.value ? caps.value.reply : app.githubConnected))
-/** A mod page's linked code project (its folder runs the mod's fixes). */
+/** A mod page's linked code project (shown in the meta list). */
 const codeRepo = computed(() => (mod.value && repo.value?.linkedTo ? app.repos.find((r) => r.id === repo.value?.linkedTo) : undefined))
-/** The folder a fix runs in: the project's own, or for a mod page the linked code project's. */
-const fixRepo = computed(() => (mod.value ? codeRepo.value : repo.value))
-/** A fix without a folder is disabled (the API refuses it too). */
-const noFolder = computed(() => (mod.value ? !codeRepo.value?.localPath : !!repo.value && !repo.value.localPath))
+/**
+ * The project whose folder a fix runs in (server-side fixProjectId: the
+ * project's own, or for a linked mod page the code project's).
+ */
+const fixRepo = computed(() => (item.value?.needsLink ? undefined : app.repos.find((r) => r.id === item.value?.fixProjectId)))
+/** A fix without a usable folder is disabled (the API refuses it too). */
+const noFolder = computed(() => !!item.value && !item.value.fixable)
 const fixHint = computed(() => {
-  if (!mod.value) return t('folder.needed')
-  return codeRepo.value ? t('platforms.fixNeedsCodeFolder', { name: codeRepo.value.name }) : t('platforms.fixNeedsLink')
+  if (item.value?.needsLink) return t('platforms.fixNeedsLink')
+  if (mod.value && fixRepo.value) return t('platforms.fixNeedsCodeFolder', { name: fixRepo.value.name })
+  return t('folder.needed')
 })
 const folderOpen = ref(false)
 /** Issue flows (a triage is per project: Projects › «Запустить проект»). */
@@ -193,7 +197,7 @@ async function dispatch(flow: JobFlow, profileId?: string) {
   dispatching.value = false
   report(r)
   if (r.ok) void loadJobs()
-  else if (r.status === 409 && (r.body as { code?: string } | undefined)?.code === 'no_folder') void app.loadRepos() // mapping changed meanwhile
+  else if (r.status === 409 && (r.body as { code?: string } | undefined)?.code === 'no_folder') void load(true) // mapping changed meanwhile: fresh fixable
 }
 function profileMenu(flow: JobFlow) {
   const role = jobsStore.roleProfile(flow)
@@ -469,10 +473,10 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
             </template>
             <dt>{{ t('item.metaFolder') }}</dt>
             <dd
-              v-if="fixRepo?.localPath"
+              v-if="item.fixFolder"
               class="mono small"
             >
-              {{ fixRepo.localPath }}
+              {{ item.fixFolder }}
             </dd>
             <dd
               v-else
@@ -608,6 +612,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
             <FolderDialog
               v-model:visible="folderOpen"
               :project="fixRepo ?? null"
+              @saved="load(true)"
             />
           </div>
         </aside>

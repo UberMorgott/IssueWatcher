@@ -24,7 +24,22 @@ export interface DeviceState {
   error?: string
 }
 
-export interface Repo {
+/**
+ * Where a fix of a project's items runs (server-side, follows project_links):
+ * the project's own folder, or a linked mod page's code project's.
+ */
+export interface FixTarget {
+  /** The project whose folder is used (a linked mod page's code project). */
+  fixProjectId: number
+  /** That project's mapped folder; "" = none. */
+  fixFolder: string
+  /** fixFolder is a git clone of that project: a fix can run. */
+  fixable: boolean
+  /** A mod page not linked to a code project yet. */
+  needsLink?: boolean
+}
+
+export interface Repo extends FixTarget {
   id: number
   name: string
   url: string
@@ -70,7 +85,7 @@ export interface ProjectSyncResult {
   missing: string[]
 }
 
-export interface Issue {
+export interface Issue extends FixTarget {
   id: number
   repoId: number
   repo: string

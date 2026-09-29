@@ -455,7 +455,10 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	if err != nil {
 		return "", err
 	}
-	if err := folderError(in.ProjectName, in.LocalPath, in.ProjectURL); err != nil {
+	if in.Mod && in.CodeProject == "" {
+		return "", coded(CodeNoFolder, errors.New("the mod page "+in.ProjectName+" is not linked to a code project; link the mod to a project with a local folder (Projects)"))
+	}
+	if err := folderError(in.CodeRepo(), in.LocalPath, in.ProjectURL); err != nil {
 		return "", err
 	}
 	if _, err := r.resolveExe(prof); err != nil {

@@ -255,6 +255,8 @@ const en = {
   },
   folder: {
     needed: 'Link a local project folder first',
+    neededMod: 'Link the mod to a project with a folder',
+    linkMod: 'Projects',
     link: 'Link folder',
     title: 'Local folder · {name}',
     text: 'Path of this repository’s git clone on disk. The agent fixes issues right there.',

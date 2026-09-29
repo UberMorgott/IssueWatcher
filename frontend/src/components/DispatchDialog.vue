@@ -5,14 +5,14 @@ import Button from 'primevue/button'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import { useI18n } from 'vue-i18n'
-import type { JobFlow } from '../api/types'
+import type { FixTarget, JobFlow } from '../api/types'
 import { useJobsStore } from '../stores/jobs'
 import { FLOW_ICON, useDispatchToast } from '../lib/jobs'
 import { useAppStore } from '../stores/app'
 import FolderDialog from './FolderDialog.vue'
 
 // «Отправить агенту»: flow + profile for the selected issues, then POST /api/jobs.
-const props = defineProps<{ items: { id: number; repo: string; number: number; title: string }[] }>()
+const props = defineProps<{ items: ({ id: number; repo: string; number: number; title: string } & FixTarget)[] }>()
 const visible = defineModel<boolean>('visible', { required: true })
 const emit = defineEmits<{ done: [] }>()
 const { t } = useI18n()
@@ -28,15 +28,24 @@ const flowOptions = computed(() => [
   { label: t('jobs.flow.reply'), value: 'reply', icon: FLOW_ICON.reply },
   { label: t('jobs.flow.label'), value: 'label', icon: FLOW_ICON.label },
 ])
-// A fix runs in the project's mapped folder: items without one are skipped
+// A fix runs in the folder the server reports per item (fixable: the project's
+// own, or a linked mod page's code project's): items without one are skipped
 // (the API refuses them); with none left the fix is disabled.
 const app = useAppStore()
-const unmapped = computed(() => {
-  const byName = new Map(app.repos.map((r) => [r.name, r]))
-  return props.items.filter((i) => byName.has(i.repo) && !byName.get(i.repo)?.localPath)
-})
-const unmappedProjects = computed(() => [...new Set(unmapped.value.map((i) => i.repo))].map((n) => app.repos.find((r) => r.name === n)).filter((r) => !!r))
+/** Projects mapped in this dialog (FolderDialog) since the list was loaded. */
+const mappedNow = ref(new Set<number>())
+const unmapped = computed(() => props.items.filter((i) => !i.fixable && !mappedNow.value.has(i.fixProjectId)))
+/** Mod page items whose page is not linked to a code project: linking comes first. */
+const needLink = computed(() => unmapped.value.filter((i) => i.needsLink))
+const unmappedProjects = computed(() =>
+  [...new Set(unmapped.value.filter((i) => !i.needsLink).map((i) => i.fixProjectId))].map((id) => app.repos.find((r) => r.id === id)).filter((r) => !!r),
+)
 const fixBlocked = computed(() => flow.value === 'fix' && props.items.length > 0 && unmapped.value.length === props.items.length)
+const blockedText = computed(() => (needLink.value.length === unmapped.value.length ? t('folder.neededMod') : t('folder.needed')))
+function onMapped(path: string) {
+  const p = unmappedProjects.value[0]
+  if (p && path) mappedNow.value = new Set([...mappedNow.value, p.id])
+}
 const folderOpen = ref(false)
 
 const profileOptions = computed(() => jobs.profiles.map((p) => ({ label: `${p.name} · ${p.cli}${p.model ? ' · ' + p.model : ''}`, value: p.id })))
@@ -88,9 +97,14 @@ async function submit() {
           v-if="flow === 'fix' && unmapped.length"
           class="hint warn"
         >
-          <i class="pi pi-folder" /> {{ fixBlocked ? t('folder.needed') : t('folder.skipped', { n: unmapped.length }) }}
+          <i class="pi pi-folder" /> {{ fixBlocked ? blockedText : t('folder.skipped', { n: unmapped.length }) }}
+          <RouterLink
+            v-if="needLink.length"
+            to="/projects"
+            class="folder-link"
+          >{{ t('folder.linkMod') }}</RouterLink>
           <Button
-            v-if="unmappedProjects.length === 1"
+            v-else-if="unmappedProjects.length === 1"
             :label="t('folder.link')"
             size="small"
             link
@@ -140,7 +154,7 @@ async function submit() {
         icon="pi pi-sparkles"
         :loading="sending"
         :disabled="!items.length || fixBlocked"
-        :title="fixBlocked ? t('folder.needed') : undefined"
+        :title="fixBlocked ? blockedText : undefined"
         @click="submit"
       />
     </template>
@@ -148,6 +162,7 @@ async function submit() {
   <FolderDialog
     v-model:visible="folderOpen"
     :project="unmappedProjects[0] ?? null"
+    @saved="onMapped"
   />
 </template>
 

@@ -40,13 +40,32 @@ func TestModFixRunsInCodeFolder(t *testing.T) {
 		t.Fatalf("mod item: %+v %v", chunk, err)
 	}
 	modItem = chunk.Items[0].ID
+	if f := chunk.Items[0].Fix; f.Fixable || !f.NeedsLink || f.Folder != "" || f.ProjectID != mods[0].ID {
+		t.Fatalf("unlinked item fix: %+v", f)
+	}
 
-	// Not linked yet: no folder to fix in.
-	if q, err := e.r.Enqueue(ctx, []int64{modItem}, flowFix, ""); !errors.Is(err, ErrNoFolder) || q[0].Error != CodeNoFolder {
+	// Not linked yet: no folder to fix in; the hint says to link the mod.
+	if q, err := e.r.Enqueue(ctx, []int64{modItem}, flowFix, ""); !errors.Is(err, ErrNoFolder) || q[0].Error != CodeNoFolder || q[0].Hint != HintLinkMod {
 		t.Fatalf("unlinked fix: %+v %v", q, err)
 	}
 	if err := e.st.SetProjectLinks(ctx, e.proj[0].ID, []int64{mods[0].ID}); err != nil {
 		t.Fatal(err)
+	}
+	// Linked: the item and its mod page report the code project's folder as fixable.
+	if chunk, err = e.st.Issues(ctx, store.IssueFilter{Platform: "nexus"}); err != nil || len(chunk.Items) != 1 {
+		t.Fatalf("mod item: %+v %v", chunk, err)
+	}
+	if f := chunk.Items[0].Fix; !f.Fixable || f.NeedsLink || f.Folder != e.local || f.ProjectID != e.proj[0].ID {
+		t.Fatalf("linked item fix: %+v (want %s)", f, e.local)
+	}
+	repos, err := e.st.Repos(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rp := range repos {
+		if rp.ID == mods[0].ID && (!rp.Fixable || rp.Folder != e.local || rp.ProjectID != e.proj[0].ID) {
+			t.Fatalf("linked mod page fix: %+v", rp.Fix)
+		}
 	}
 	j := e.wait(e.enqueue(flowFix, modItem)[0].ID, store.JobNeedsReview)
 	res := result(t, j)

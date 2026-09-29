@@ -77,6 +77,9 @@ type AutomationItem struct {
 	Labels     []string
 	LocalPath  string
 	ProjectURL string
+	// NeedsLink: a mod page item whose page is not linked to a code project
+	// (a fix has no folder until the mod is linked to a project with one).
+	NeedsLink bool
 }
 
 // AutomationItemFacts returns item itemID's labels and the folder its fixes run
@@ -86,8 +89,8 @@ func (s *Store) AutomationItemFacts(ctx context.Context, itemID int64) (Automati
 		it     AutomationItem
 		labels string
 	)
-	err := s.db.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
-		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL)
+	err := s.db.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+`, `+needsLinkCol+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
+		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL, &it.NeedsLink)
 	if errors.Is(err, sql.ErrNoRows) {
 		return it, ErrNotFound
 	}

@@ -150,8 +150,10 @@ export function useDispatchToast() {
   const { t } = useI18n()
   return (res: { ok: true; data: { jobs: QueuedJob[] } } | { ok: false; error: string; body?: unknown }) => {
     if (!res.ok) {
-      const noFolder = (res.body as { code?: string } | undefined)?.code === 'no_folder' // 409: nothing queued
-      toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail: noFolder ? t('folder.needed') : res.error, life: 6000 })
+      const body = res.body as { code?: string; hint?: string } | undefined
+      const noFolder = body?.code === 'no_folder' // 409: nothing queued
+      const detail = noFolder ? (body?.hint === 'link_mod' ? t('folder.neededMod') : t('folder.needed')) : res.error
+      toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail, life: 6000 })
       return
     }
     const { queued, existing, failed } = summarise(res.data.jobs)

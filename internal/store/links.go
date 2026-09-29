@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 )
 
 // Project links (migration 009): a mod page (a project of a non-GitHub source)
@@ -25,6 +27,97 @@ const linkJoin = ` LEFT JOIN project_links pl ON pl.mod_project_id = p.id LEFT J
 // folderCols are the folder and remote URL a fix of project p's items uses:
 // the linked code project's for a mod page, else p's own (needs linkJoin).
 const folderCols = `coalesce(cp.local_path, p.local_path), coalesce(cp.url, p.url)`
+
+// needsLinkCol is true for a mod page p with no linked code project (needs linkJoin).
+const needsLinkCol = `(pl.code_project_id IS NULL AND (SELECT platform FROM sources WHERE id = p.source_id) <> '` + CodePlatform + `')`
+
+// Fix is where fixes of a project's items run — the one answer the UI and the
+// runner share: the project's own folder, or a linked mod page's code project's.
+type Fix struct {
+	// ProjectID is the project whose folder is used (a mod page's code project).
+	ProjectID int64 `json:"fixProjectId"`
+	// Folder is that project's mapped folder ("" = none).
+	Folder string `json:"fixFolder"`
+	// Fixable: Folder is a git clone of that project (folders.StatusOK).
+	Fixable bool `json:"fixable"`
+	// NeedsLink: a mod page without a linked code project.
+	NeedsLink bool   `json:"needsLink,omitempty"`
+	url       string // remote URL the folder must match
+}
+
+// fixTargets returns the Fix of each project in ids, Fixable checked on disk
+// (a stat and a read of .git/config per distinct folder).
+func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, error) {
+	out := map[int64]Fix{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	nums := make([]string, 0, len(ids))
+	for _, id := range ids {
+		nums = append(nums, strconv.FormatInt(id, 10))
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, coalesce(cp.id, p.id), `+folderCols+`, `+needsLinkCol+`
+		FROM projects p`+linkJoin+` WHERE p.id IN (SELECT value FROM json_each(?))`, "["+strings.Join(nums, ",")+"]")
+	if err != nil {
+		return nil, fmt.Errorf("store: fix targets: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	checked := map[[2]string]bool{}
+	for rows.Next() {
+		var (
+			id int64
+			f  Fix
+		)
+		if err := rows.Scan(&id, &f.ProjectID, &f.Folder, &f.url, &f.NeedsLink); err != nil {
+			return nil, fmt.Errorf("store: scan fix target: %w", err)
+		}
+		k := [2]string{f.Folder, f.url}
+		ok, seen := checked[k]
+		if !seen {
+			ok = folders.Check(f.Folder, f.url) == folders.StatusOK
+			checked[k] = ok
+		}
+		f.Fixable = ok
+		out[id] = f
+	}
+	return out, rows.Err()
+}
+
+// fillRepoFix sets each repo's Fix.
+func (s *Store) fillRepoFix(ctx context.Context, list []Repo) error {
+	ids := make([]int64, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	fx, err := s.fixTargets(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		list[i].Fix = fx[list[i].ID]
+	}
+	return nil
+}
+
+// fillIssueFix sets each issue's Fix (its project's).
+func (s *Store) fillIssueFix(ctx context.Context, list []Issue) error {
+	seen := map[int64]bool{}
+	var ids []int64
+	for i := range list {
+		if !seen[list[i].RepoID] {
+			seen[list[i].RepoID] = true
+			ids = append(ids, list[i].RepoID)
+		}
+	}
+	fx, err := s.fixTargets(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		list[i].Fix = fx[list[i].RepoID]
+	}
+	return nil
+}
 
 // LinkRef is one end of a project link.
 type LinkRef struct {
