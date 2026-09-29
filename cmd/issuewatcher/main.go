@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,7 +50,25 @@ const (
 	// =1: server + sync only, for automated runs: no tray icon, no popups, no
 	// browser launch (URLs are logged), no window focusing, no autostart registry writes.
 	envHeadless = "IW_HEADLESS"
+	// Dev/E2E only: GitHub REST + GraphQL base (e.g. a githubtest fake from
+	// tools/fakegithub) and the web base for OAuth/device endpoints (default:
+	// the API base). The user token goes there: never set it with real credentials.
+	envGitHubAPI = "IW_GITHUB_API"
+	envGitHubWeb = "IW_GITHUB_WEB"
 )
+
+// newAuth is the GitHub sign-in owner for dataDir, with the dev endpoint override.
+func newAuth(log *slog.Logger, dataDir string) *github.Auth {
+	auth := github.NewAuth(filepath.Join(dataDir, "secrets"))
+	if api := strings.TrimRight(os.Getenv(envGitHubAPI), "/"); api != "" {
+		auth.APIURL, auth.WebURL = api, api
+		if web := strings.TrimRight(os.Getenv(envGitHubWeb), "/"); web != "" {
+			auth.WebURL = web
+		}
+		log.Warn("dev: GitHub endpoints overridden", "api", auth.APIURL, "web", auth.WebURL)
+	}
+	return auth
+}
 
 // snapshotScale renders IW_POPUP_SNAPSHOT samples at 144 DPI.
 const snapshotScale = 1.5
@@ -137,7 +156,7 @@ func run() (err error) {
 	}
 	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: entry}
 	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized) || l.quiet()
-	return serve(log, dataDir, cfgs, store.New(db), github.NewAuth(filepath.Join(dataDir, "secrets")), settings, minimized, headless, l, &serving)
+	return serve(log, dataDir, cfgs, store.New(db), newAuth(log, dataDir), settings, minimized, headless, l, &serving)
 }
 
 func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, auth *github.Auth,

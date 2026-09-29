@@ -67,8 +67,9 @@ type Server struct {
 	// LabelAdds counts POST /repos/{o}/{r}/issues/{n}/labels calls.
 	LabelAdds int
 
-	hits Hits
-	fail *failure
+	hits  Hits
+	fail  *failure
+	calls []Call
 
 	codes      map[string]string // auth code → PKCE challenge
 	access     map[string]bool   // live access tokens
@@ -78,9 +79,30 @@ type Server struct {
 	deviceHits int // device polls answered
 }
 
+// Call is one request the fake received (method + path, query left out).
+type Call struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
+}
+
 // New starts the fake; it is closed with the test.
 func New(t *testing.T) *Server {
 	t.Helper()
+	s := Start()
+	t.Cleanup(s.Close)
+	return s
+}
+
+// Start starts the fake on a random loopback port; the caller closes it.
+func Start() *Server {
+	s := NewUnstarted()
+	s.Start()
+	return s
+}
+
+// NewUnstarted builds the fake without starting it (set Server.Listener to
+// pick the address, then Server.Start).
+func NewUnstarted() *Server {
 	s := &Server{codes: map[string]string{}, access: map[string]bool{}, refresh: map[string]bool{}, ExpiresIn: 28800}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /app-manifests/{code}/conversions", s.conversion)
@@ -97,9 +119,29 @@ func New(t *testing.T) *Server {
 	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", s.authed(s.createPull))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/labels", s.authed(s.listLabels))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/labels", s.authed(s.addLabels))
-	s.Server = httptest.NewServer(mux)
-	t.Cleanup(s.Close)
+	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Mu.Lock()
+		s.calls = append(s.calls, Call{Method: r.Method, Path: r.URL.Path})
+		s.Mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
 	return s
+}
+
+// Calls returns every request received so far, in order.
+func (s *Server) Calls() []Call {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	return append([]Call(nil), s.calls...)
+}
+
+// Grant issues a live access token without an OAuth round trip (seeds a
+// signed-in data dir for headless runs).
+func (s *Server) Grant() string {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	tok, _ := s.newTokens()["access_token"].(string)
+	return tok
 }
 
 // IssueCode registers an authorization code bound to a PKCE verifier's challenge,

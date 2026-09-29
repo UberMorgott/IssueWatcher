@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func labelJSON(name string) map[string]string {
@@ -58,6 +59,7 @@ func (s *Server) addLabels(w http.ResponseWriter, r *http.Request) {
 			}
 			if !slices.ContainsFunc(is.Labels, func(l string) bool { return strings.EqualFold(l, name) }) {
 				is.Labels = append(is.Labels, name)
+				is.UpdatedAt = time.Now().UTC().Truncate(time.Second) // GitHub bumps updated_at
 			}
 		}
 		out := []map[string]string{}
