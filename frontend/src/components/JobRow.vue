@@ -73,7 +73,12 @@ const { t } = useI18n()
       <span
         class="c-flow"
         role="gridcell"
-      ><i :class="FLOW_ICON[item.flow]" /> {{ t('jobs.flow.' + item.flow) }}</span>
+      ><i :class="FLOW_ICON[item.flow]" /> {{ t('jobs.flow.' + item.flow) }}<i
+        v-if="item.origin === 'rule'"
+        class="pi pi-bolt origin"
+        :title="t('jobs.origin.rule') + (item.ruleId ? ' · ' + item.ruleId : '')"
+        :aria-label="t('jobs.origin.rule')"
+      /></span>
       <span
         class="c-profile"
         role="gridcell"
@@ -171,6 +176,11 @@ const { t } = useI18n()
 
 .err {
   color: var(--iw-danger);
+}
+
+.origin {
+  color: var(--iw-warn);
+  font-size: calc(11px * var(--iw-fs, 1));
 }
 
 .c-flow,

@@ -7,7 +7,7 @@ import SelectButton from 'primevue/selectbutton'
 import { useI18n } from 'vue-i18n'
 import type { JobFlow } from '../api/types'
 import { useJobsStore } from '../stores/jobs'
-import { useDispatchToast } from '../lib/jobs'
+import { FLOW_ICON, useDispatchToast } from '../lib/jobs'
 
 // «Отправить агенту»: flow + profile for the selected issues, then POST /api/jobs.
 const props = defineProps<{ items: { id: number; repo: string; number: number; title: string }[] }>()
@@ -22,8 +22,9 @@ const profile = ref('')
 const sending = ref(false)
 
 const flowOptions = computed(() => [
-  { label: t('jobs.flow.fix'), value: 'fix', icon: 'pi pi-wrench' },
-  { label: t('jobs.flow.reply'), value: 'reply', icon: 'pi pi-comment' },
+  { label: t('jobs.flow.fix'), value: 'fix', icon: FLOW_ICON.fix },
+  { label: t('jobs.flow.reply'), value: 'reply', icon: FLOW_ICON.reply },
+  { label: t('jobs.flow.label'), value: 'label', icon: FLOW_ICON.label },
 ])
 const profileOptions = computed(() => jobs.profiles.map((p) => ({ label: `${p.name} · ${p.cli}${p.model ? ' · ' + p.model : ''}`, value: p.id })))
 
@@ -69,7 +70,7 @@ async function submit() {
             <i :class="option.icon" /> {{ option.label }}
           </template>
         </SelectButton>
-        <span class="hint">{{ flow === 'fix' ? t('jobs.fixHint') : t('jobs.replyHint') }}</span>
+        <span class="hint">{{ t('jobs.' + flow + 'Hint') }}</span>
       </div>
       <div class="field">
         <span class="lbl">{{ t('jobs.profile') }}</span>

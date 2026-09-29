@@ -103,7 +103,7 @@ export const useJobsStore = defineStore('jobs', () => {
   const settings = useSettingsStore()
   const agents = computed(() => settings.doc?.settings.agents)
   const profiles = computed<AgentProfile[]>(() => agents.value?.profiles ?? [])
-  /** Profile id the server uses for a flow when none is picked (role coder / responder). */
+  /** Profile id the server uses for a flow when none is picked (role coder / responder; label → responder). */
   function roleProfile(flow: JobFlow): string {
     const r = agents.value?.roles
     return (flow === 'fix' ? r?.coder : r?.responder) ?? ''

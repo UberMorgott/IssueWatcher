@@ -22,7 +22,10 @@ export const STATE_ICON: Record<JobState, string> = {
 export const FLOW_ICON: Record<JobFlow, string> = {
   fix: 'pi pi-wrench',
   reply: 'pi pi-comment',
+  label: 'pi pi-tags',
 }
+
+export const JOB_FLOWS: JobFlow[] = ['fix', 'reply', 'label']
 
 export function isActive(s: JobState): boolean {
   return ACTIVE_STATES.includes(s)
@@ -126,8 +129,9 @@ export function usePush() {
 }
 
 /** Does a live job row belong to a list filtered by state / flow / project? */
-export function matches(j: Job, f: { state: string; flow: string; project: number }): boolean {
+export function matches(j: Job, f: { state: string; flow: string; project: number; origin?: string }): boolean {
   if (f.flow && j.flow !== f.flow) return false
+  if (f.origin && j.origin !== f.origin) return false
   if (f.project && j.projectId !== f.project) return false
   if (f.state === 'active') return isActive(j.state)
   return !f.state || j.state === f.state

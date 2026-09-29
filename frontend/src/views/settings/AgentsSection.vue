@@ -174,16 +174,21 @@ const profileOptions = computed(() => (ag.value?.profiles ?? []).map((p) => ({ l
 const verifierOptions = computed(() => [{ label: t('settings.agents.noVerifier'), value: '' }, ...profileOptions.value])
 
 // --- prompts -----------------------------------------------------------------
-type PromptKey = 'system' | 'fixDirect' | 'fix' | 'reply' | 'review'
+type PromptKey = 'system' | 'fixDirect' | 'fix' | 'reply' | 'review' | 'label'
 const promptTab = ref<PromptKey>('system')
-const promptTabs = computed(() => (['system', 'fixDirect', 'fix', 'reply', 'review'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
+const promptTabs = computed(() => (['system', 'fixDirect', 'fix', 'reply', 'review', 'label'] as const).map((k) => ({ label: t('settings.agents.prompt.' + k), value: k })))
 const prompt = useDraft(() => ag.value?.prompts[promptTab.value])
 watch(promptTab, () => prompt.sync())
 const promptBox = ref<{ $el: HTMLTextAreaElement } | null>(null)
 
-// Prompt variables (fixed names, not translated; {diff} only in the review prompt).
-const VARS = ['repo', 'issue.number', 'issue.title', 'issue.url', 'issue.body', 'comments', 'localPath', 'branch', 'diff'] as const
-const vars = computed(() => VARS.filter((v) => v !== 'diff' || promptTab.value === 'review').map((v) => ({ name: '{' + v + '}', hint: t('settings.agents.vars.' + v.replace('.', '_')) })))
+// Prompt variables (fixed names, not translated; {diff} only in the review prompt, {labels} only in the label prompt).
+const VARS = ['repo', 'issue.number', 'issue.title', 'issue.url', 'issue.body', 'comments', 'localPath', 'branch', 'diff', 'labels'] as const
+const vars = computed(() =>
+  VARS.filter((v) => (v !== 'diff' || promptTab.value === 'review') && (v !== 'labels' || promptTab.value === 'label')).map((v) => ({
+    name: '{' + v + '}',
+    hint: t('settings.agents.vars.' + v.replace('.', '_')),
+  })),
+)
 
 function patchPrompt(key: PromptKey) {
   return (v: string): SettingsPatch => ({ agents: { prompts: { [key]: v } } })

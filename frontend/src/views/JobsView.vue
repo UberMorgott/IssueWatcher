@@ -12,7 +12,7 @@ import { api } from '../api/client'
 import type { Job, JobRowData as Row } from '../api/types'
 import { rowHeight } from '../lib/appearance'
 import { useChunks } from '../lib/chunks'
-import { JOB_STATES, matches } from '../lib/jobs'
+import { JOB_FLOWS, JOB_STATES, matches } from '../lib/jobs'
 import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 
@@ -32,10 +32,11 @@ const SKELETON_ROWS = 6
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const filters = computed(() => ({
   state: ['active', ...JOB_STATES].includes(str(route.query.state)) ? str(route.query.state) : '',
-  flow: ['fix', 'reply'].includes(str(route.query.flow)) ? str(route.query.flow) : '',
+  flow: (JOB_FLOWS as string[]).includes(str(route.query.flow)) ? str(route.query.flow) : '',
+  origin: (['manual', 'rule'] as const).find((o) => o === str(route.query.origin)) ?? ('' as const),
   project: Number(str(route.query.project)) || 0,
 }))
-function setQuery(patch: Partial<Record<'state' | 'flow' | 'project', string | number | null>>) {
+function setQuery(patch: Partial<Record<'state' | 'flow' | 'origin' | 'project', string | number | null>>) {
   const q: LocationQueryRaw = { ...route.query }
   for (const [k, v] of Object.entries(patch)) {
     if (v === null || v === '' || v === 0) delete q[k]
@@ -44,7 +45,7 @@ function setQuery(patch: Partial<Record<'state' | 'flow' | 'project', string | n
   void router.replace({ query: q })
 }
 
-const list = useChunks<Job>((cursor) => api.jobs({ ...filters.value, cursor, limit: CHUNK }))
+const list = useChunks<Job>((cursor) => api.jobs({ ...filters.value, origin: filters.value.origin || undefined, cursor, limit: CHUNK }))
 const items = list.items
 const skeletons: Row[] = Array.from({ length: SKELETON_ROWS }, (_, i) => ({ id: -1 - i, skeleton: true }) as Row)
 const rows = computed<Row[]>(() => (list.loading.value || (!items.value.length && !list.done.value && !list.error.value) ? [...items.value, ...skeletons] : items.value))
@@ -124,11 +125,15 @@ const stateOptions = computed(() => [
 ])
 const flowOptions = computed(() => [
   { label: t('jobs.allFlows'), value: '' },
-  { label: t('jobs.flow.fix'), value: 'fix' },
-  { label: t('jobs.flow.reply'), value: 'reply' },
+  ...JOB_FLOWS.map((f) => ({ label: t('jobs.flow.' + f), value: f })),
+])
+const originOptions = computed(() => [
+  { label: t('jobs.allOrigins'), value: '' },
+  { label: t('jobs.origin.manual'), value: 'manual' },
+  { label: t('jobs.origin.rule'), value: 'rule' },
 ])
 const projectOptions = computed(() => [{ label: t('issues.allProjects'), value: 0 }, ...app.repos.map((r) => ({ label: r.name, value: r.id }))])
-const anyFilter = computed(() => !!(filters.value.state || filters.value.flow || filters.value.project))
+const anyFilter = computed(() => !!(filters.value.state || filters.value.flow || filters.value.origin || filters.value.project))
 const state = computed(() => (list.error.value ? (list.status.value === 404 ? 'unavailable' : 'error') : 'ok'))
 
 function open(it: Row) {
@@ -156,6 +161,15 @@ function open(it: Row) {
         :allow-empty="false"
         :aria-label="t('jobs.flowLabel')"
         @update:model-value="(v: string) => setQuery({ flow: v })"
+      />
+      <Select
+        :model-value="filters.origin"
+        :options="originOptions"
+        option-label="label"
+        option-value="value"
+        :aria-label="t('jobs.originLabel')"
+        class="f-origin"
+        @update:model-value="(v: string) => setQuery({ origin: v })"
       />
       <Select
         :model-value="filters.project"
@@ -295,6 +309,10 @@ function open(it: Row) {
 
 .f-repo {
   width: 220px;
+}
+
+.f-origin {
+  width: 170px;
 }
 
 .f-total {

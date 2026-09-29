@@ -15,7 +15,7 @@ import JobBadge from '../components/JobBadge.vue'
 import JobProgress from '../components/JobProgress.vue'
 import JobLog from '../components/JobLog.vue'
 import DirectResult from '../components/DirectResult.vue'
-import { canPush, isActive, isDirect, jobOutcome, useDispatchToast, usePush } from '../lib/jobs'
+import { canPush, FLOW_ICON, isActive, isDirect, JOB_FLOWS, jobOutcome, useDispatchToast, usePush } from '../lib/jobs'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
@@ -438,7 +438,11 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                   :outcome="jobOutcome(j)"
                 />
                 <span class="job-card-text">
-                  <span>{{ t('jobs.flow.' + j.flow) }}<template v-if="j.phase && isActive(j.state) && j.state !== 'running'"> · {{ t('jobs.phase.' + j.phase) }}</template></span>
+                  <span>{{ t('jobs.flow.' + j.flow) }}<template v-if="j.phase && isActive(j.state) && j.state !== 'running'"> · {{ t('jobs.phase.' + j.phase) }}</template><template v-if="j.origin === 'rule'"> · {{ t('jobs.origin.rule') }}</template></span>
+                  <span
+                    v-if="j.flow === 'label' && j.result.labels"
+                    class="muted small"
+                  >{{ j.result.labels.length ? j.result.labels.join(', ') : t('job.labels.none') }}</span>
                   <JobProgress
                     v-if="j.state === 'running'"
                     :id="j.id"
@@ -493,10 +497,10 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               </template>
             </div>
             <SplitButton
-              v-for="f in (['fix', 'reply'] as const)"
+              v-for="f in JOB_FLOWS"
               :key="f"
-              :label="f === 'fix' ? t('item.fixWithAgent') : t('item.replyWithAgent')"
-              :icon="f === 'fix' ? 'pi pi-wrench' : 'pi pi-comment'"
+              :label="t('item.' + f + 'WithAgent')"
+              :icon="FLOW_ICON[f]"
               :model="profileMenu(f)"
               :disabled="!!activeJob(f) || dispatching"
               :severity="f === 'fix' ? undefined : 'secondary'"

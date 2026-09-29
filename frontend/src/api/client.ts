@@ -18,8 +18,10 @@ import type {
   DetectedCLI,
   Job,
   JobChunk,
+  JobAttempt,
   JobFlow,
   JobQuery,
+  RepoLabel,
   JobStep,
   QueuedJob,
 } from './types'
@@ -175,6 +177,7 @@ export const api = {
     const p = new URLSearchParams()
     if (q.state) p.set('state', q.state)
     if (q.flow) p.set('flow', q.flow)
+    if (q.origin) p.set('origin', q.origin)
     if (q.project) p.set('project', String(q.project))
     if (q.item) p.set('item', String(q.item))
     if (q.cursor) p.set('cursor', q.cursor)
@@ -196,6 +199,13 @@ export const api = {
    */
   jobAction: (id: number, action: JobAction) => jobCall('POST', `/api/jobs/${id}/${action}`),
   jobReply: (id: number, body: string) => jobCall('POST', `/api/jobs/${id}/reply`, { body }),
+  /** Добавить метки: add labels to a label job's issue (checked against the repo, add only) → done. */
+  jobLabels: (id: number, labels: string[]) => jobCall('POST', `/api/jobs/${id}/labels`, { labels }),
+  async jobAttempts(id: number): Promise<Result<JobAttempt[]>> {
+    const r = await call<{ attempts: JobAttempt[] }>('GET', `/api/jobs/${id}/attempts`)
+    return r.ok ? { ...r, data: (r.data.attempts ?? []).map((a) => ({ ...a, result: a.result && typeof a.result === 'object' ? a.result : {} })) } : r
+  },
+  projectLabels: (id: number) => call<RepoLabel[]>('GET', `/api/projects/${id}/labels`),
   detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
 }
 

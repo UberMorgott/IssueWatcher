@@ -290,7 +290,7 @@ export interface Agents {
 // --- agent jobs (internal/store Job, internal/runner Result) -----------------
 
 export type JobState = 'queued' | 'running' | 'needs_review' | 'done' | 'failed' | 'cancelled'
-export type JobFlow = 'fix' | 'reply'
+export type JobFlow = 'fix' | 'reply' | 'label'
 export type JobOrigin = 'manual' | 'rule'
 export type JobPhase = '' | 'prepare' | 'agent' | 'check' | 'verify' | 'review' | 'publish'
 
@@ -317,6 +317,8 @@ export interface AgentResult {
   /** The agent's own verify note. */
   verify?: string
   reply?: string
+  /** Label flow: the agent's picks as it wrote them. */
+  labels?: string[]
   final?: string
   costUsd?: number
   turns?: number
@@ -395,6 +397,31 @@ export interface JobResult {
   publishError?: string
   cleanupError?: string
   baseBranch?: string
+  /** Label flow: picks that exist in the repository (canonical names). */
+  labels?: string[]
+  /** Label flow: picks the repository does not have (dropped). */
+  droppedLabels?: string[]
+  /** Label flow: names actually added to the issue. */
+  appliedLabels?: string[]
+}
+
+/** GET /api/projects/{id}/labels row (provider.Label). */
+export interface RepoLabel {
+  name: string
+  /** Hex without '#', '' when unknown. */
+  color: string
+  description: string
+}
+
+/** GET /api/jobs/{id}/attempts row: an earlier attempt snapshot or the current one. */
+export interface JobAttempt {
+  attempt: number
+  state: JobState
+  error: string
+  errorCode: string
+  result: JobResult
+  startedAt: string
+  finishedAt: string
 }
 
 export interface Job {

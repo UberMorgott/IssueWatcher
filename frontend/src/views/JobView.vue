@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
-import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
 import Textarea from 'primevue/textarea'
 import Message from 'primevue/message'
+import MultiSelect from 'primevue/multiselect'
+import { useRoute } from 'vue-router'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
@@ -14,8 +15,9 @@ import JobLog from '../components/JobLog.vue'
 import JobProgress from '../components/JobProgress.vue'
 import DirectResult from '../components/DirectResult.vue'
 import DiffViewer from '../components/DiffViewer.vue'
+import LabelTag from '../components/LabelTag.vue'
 import { api } from '../api/client'
-import type { AgentResult, Job } from '../api/types'
+import type { AgentResult, Job, JobAttempt, RepoLabel } from '../api/types'
 import { absTime, elapsed, num, relTime, usd } from '../lib/format'
 import { canPush, FLOW_ICON, isActive, isDirect, jobCost, jobDuration, jobOutcome, usePush } from '../lib/jobs'
 import { useCrumbs } from '../lib/crumbs'
@@ -23,6 +25,7 @@ import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 
 const props = defineProps<{ id: string }>()
+const route = useRoute()
 const { t } = useI18n()
 const toast = useToast()
 const confirm = useConfirm()
@@ -35,9 +38,12 @@ const job = ref<Job | null>(null)
 const state = ref<'loading' | 'ok' | 'missing' | 'error'>('loading')
 const errorText = ref('')
 const attempt = ref(1)
-const busy = ref<'' | 'cancel' | 'retry' | 'dismiss' | 'pr' | 'reply'>('')
+const busy = ref<'' | 'cancel' | 'retry' | 'dismiss' | 'pr' | 'reply' | 'labels'>('')
 const draft = ref('')
 const draftDirty = ref(false)
+/** Label flow: the names «Добавить метки» sends (starts as the agent's picks). */
+const picked = ref<string[]>([])
+const pickedDirty = ref(false)
 
 async function load(quiet = false) {
   if (!quiet) state.value = 'loading'
@@ -54,8 +60,16 @@ async function load(quiet = false) {
 function setJob(j: Job) {
   const prev = job.value
   job.value = j
-  if (!prev || prev.id !== j.id || prev.attempt !== j.attempt) attempt.value = j.attempt
+  if (!prev || prev.id !== j.id) attempt.value = queryAttempt(j) ?? j.attempt
+  else if (prev.attempt !== j.attempt) attempt.value = j.attempt
   if (!draftDirty.value) draft.value = j.result.draft ?? j.result.agent?.reply ?? ''
+  if (!pickedDirty.value) picked.value = [...(j.result.labels ?? [])]
+}
+
+/** ?attempt=N (attempt history links), when it names an attempt of j. */
+function queryAttempt(j: Job): number | undefined {
+  const n = Number(route.query.attempt)
+  return Number.isInteger(n) && n >= 1 && n <= j.attempt ? n : undefined
 }
 
 watch(
@@ -63,9 +77,16 @@ watch(
   () => {
     job.value = null
     draftDirty.value = false
+    pickedDirty.value = false
     void load()
   },
   { immediate: true },
+)
+watch(
+  () => route.query.attempt,
+  () => {
+    if (job.value) attempt.value = queryAttempt(job.value) ?? job.value.attempt
+  },
 )
 // SSE reconnect: reload what may have been missed.
 watch(
@@ -93,7 +114,45 @@ useCrumbs(() => [
 
 const res = computed(() => job.value?.result ?? {})
 const current = computed(() => attempt.value === job.value?.attempt)
-const attemptOptions = computed(() => Array.from({ length: job.value?.attempt ?? 1 }, (_, i) => ({ label: t('job.attemptN', { n: i + 1 }), value: i + 1 })).reverse())
+
+// Attempt history (earlier snapshots + the current one), newest first.
+const attempts = ref<JobAttempt[]>([])
+watch(
+  () => (job.value && job.value.attempt > 1 ? `${job.value.id}:${job.value.attempt}:${job.value.state}` : ''),
+  async (key) => {
+    if (!key || !job.value) {
+      attempts.value = []
+      return
+    }
+    const r = await api.jobAttempts(job.value.id)
+    if (r.ok) attempts.value = [...r.data].reverse()
+  },
+  { immediate: true },
+)
+function attemptNote(a: JobAttempt): string {
+  const known = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'git', 'interrupted']
+  if (a.errorCode) return known.includes(a.errorCode) ? t('job.errorCode.' + a.errorCode) : a.errorCode
+  return a.error
+}
+
+// Label flow: the repository's labels for the editor (loaded while under review).
+const repoLabels = ref<RepoLabel[]>([])
+const labelsError = ref('')
+watch(
+  () => (job.value?.flow === 'label' && job.value.state === 'needs_review' ? job.value.projectId : 0),
+  async (pid) => {
+    if (!pid) return
+    const r = await api.projectLabels(pid)
+    labelsError.value = r.ok ? '' : r.error
+    if (r.ok) repoLabels.value = r.data
+  },
+  { immediate: true },
+)
+const labelOptions = computed(() => {
+  const names = repoLabels.value.map((l) => l.name)
+  for (const p of picked.value) if (!names.includes(p)) names.push(p)
+  return names.map((n) => ({ label: n, value: n }))
+})
 const diffFiles = computed(() => res.value.diff?.files?.length ?? 0)
 /** Re-fetch the diff when the attempt's result changes. */
 const diffVersion = computed(() => `${job.value?.state}:${res.value.diff?.bytes ?? 0}:${res.value.diff?.files?.length ?? 0}`)
@@ -101,8 +160,9 @@ const showDiff = computed(() => job.value?.flow === 'fix' && (!current.value || 
 
 const can = computed(() => {
   const j = job.value
-  if (!j) return { cancel: false, retry: false, dismiss: false, pr: false, push: false, reply: false }
+  if (!j) return { cancel: false, retry: false, dismiss: false, pr: false, push: false, reply: false, labels: false }
   return {
+    labels: j.flow === 'label' && j.state === 'needs_review',
     cancel: j.state === 'queued' || j.state === 'running',
     retry: j.state === 'failed' || j.state === 'cancelled' || j.state === 'needs_review',
     dismiss: j.state === 'needs_review' || j.state === 'failed',
@@ -142,17 +202,35 @@ async function run(action: 'cancel' | 'retry' | 'dismiss' | 'pr') {
   }
 }
 
-function ask(action: 'dismiss' | 'pr' | 'reply') {
+function ask(action: 'dismiss' | 'pr' | 'reply' | 'labels') {
   const j = job.value
   if (!j) return
   confirm.require({
     header: t('job.confirm.' + action + 'Title'),
-    message: t('job.confirm.' + (action === 'dismiss' && isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}` }),
+    message: t('job.confirm.' + (action === 'dismiss' && isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}`, labels: picked.value.join(', ') }),
     icon: action === 'dismiss' ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
     acceptProps: { label: t('job.actions.' + action), severity: action === 'dismiss' ? 'danger' : undefined },
-    accept: () => void (action === 'reply' ? sendReply() : run(action)),
+    accept: () => void (action === 'reply' ? sendReply() : action === 'labels' ? applyLabels() : run(action)),
   })
+}
+
+async function applyLabels() {
+  const j = job.value
+  if (!j || !picked.value.length || busy.value) return
+  busy.value = 'labels'
+  const r = await api.jobLabels(j.id, picked.value)
+  busy.value = ''
+  if (!r.ok) {
+    const detail = r.status === 409 ? t('job.notAllowed', { error: r.error }) : r.error
+    toast.add({ severity: 'error', summary: t('job.actionFailed.labels'), detail, life: 8000 })
+    void load(true)
+    return
+  }
+  pickedDirty.value = false
+  setJob(r.data)
+  const n = r.data.result.appliedLabels?.length ?? 0
+  toast.add({ severity: 'success', summary: n ? t('job.labels.added', n) : t('job.labels.nothingNew'), detail: `${j.repo}#${j.number}`, life: 5000 })
 }
 
 async function sendReply() {
@@ -231,6 +309,11 @@ function agentStats(a: AgentResult): string[] {
                 class="phase"
               ><i class="pi pi-spin pi-cog" /> {{ t('jobs.phase.' + job.phase) }}</span>
               <span class="flow"><i :class="FLOW_ICON[job.flow]" /> {{ t('jobs.flow.' + job.flow) }}<template v-if="direct"> · {{ t('jobs.directMode') }}</template></span>
+              <span
+                v-if="job.origin === 'rule'"
+                class="flow"
+                :title="job.ruleId"
+              ><i class="pi pi-bolt" /> {{ t('jobs.origin.rule') }}</span>
             </div>
             <JobProgress
               v-if="job.state === 'running'"
@@ -312,6 +395,15 @@ function agentStats(a: AgentResult): string[] {
           <div>
             <dt>{{ t('job.profile') }}</dt>
             <dd>{{ jobs.profileName(job.profileId) || '—' }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('jobs.originLabel') }}</dt>
+            <dd>
+              {{ t('jobs.origin.' + job.origin) }}<span
+                v-if="job.ruleId"
+                class="mono muted small"
+              > · {{ job.ruleId }}</span>
+            </dd>
           </div>
           <div>
             <dt>{{ t('jobs.attempt') }}</dt>
@@ -464,6 +556,86 @@ function agentStats(a: AgentResult): string[] {
         </div>
       </section>
 
+      <!-- label flow: suggestions → «Добавить метки» (add only), or what was added -->
+      <section
+        v-if="job.flow === 'label' && (res.labels || res.appliedLabels)"
+        class="panel card"
+      >
+        <div class="card-head">
+          <span class="panel-title"><i :class="FLOW_ICON.label" /> {{ t('job.labels.title') }}</span>
+          <span class="muted small">{{ can.labels ? t('job.labels.text') : '' }}</span>
+        </div>
+        <template v-if="can.labels">
+          <MultiSelect
+            v-model="picked"
+            :options="labelOptions"
+            option-label="label"
+            option-value="value"
+            filter
+            display="chip"
+            :placeholder="t('job.labels.none')"
+            :aria-label="t('job.labels.title')"
+            fluid
+            @update:model-value="pickedDirty = true"
+          />
+          <Message
+            v-if="labelsError"
+            severity="warn"
+            size="small"
+          >
+            {{ t('job.labels.loadError', { error: labelsError }) }}
+          </Message>
+          <div
+            v-if="res.droppedLabels?.length"
+            class="muted small"
+          >
+            {{ t('job.labels.dropped', { labels: res.droppedLabels.join(', ') }) }}
+          </div>
+          <div class="card-foot">
+            <span class="muted small">{{ t('job.labels.addOnly') }}</span>
+            <Button
+              :label="t('job.actions.labels')"
+              :icon="FLOW_ICON.label"
+              :loading="busy === 'labels'"
+              :disabled="!picked.length || !!busy || !app.githubConnected"
+              @click="ask('labels')"
+            />
+          </div>
+        </template>
+        <template v-else>
+          <div
+            v-if="res.labels?.length"
+            class="chips"
+          >
+            <span class="muted small">{{ t('job.labels.suggested') }}</span>
+            <LabelTag
+              v-for="l in res.labels"
+              :key="l"
+              :name="l"
+            />
+          </div>
+          <span
+            v-else
+            class="muted"
+          >{{ t('job.labels.none') }}</span>
+          <div
+            v-if="job.state === 'done'"
+            class="chips"
+          >
+            <span class="muted small">{{ t('job.labels.applied') }}</span>
+            <LabelTag
+              v-for="l in res.appliedLabels ?? []"
+              :key="l"
+              :name="l"
+            />
+            <span
+              v-if="!res.appliedLabels?.length"
+              class="muted small"
+            >{{ t('job.labels.nothingNew') }}</span>
+          </div>
+        </template>
+      </section>
+
       <div class="grid">
         <!-- agent result -->
         <section
@@ -488,7 +660,7 @@ function agentStats(a: AgentResult): string[] {
             {{ res.agent.summary }}
           </p>
           <p
-            v-else-if="res.agent.final && job.flow === 'fix'"
+            v-else-if="res.agent.final && job.flow !== 'reply'"
             class="prose"
           >
             {{ res.agent.final }}
@@ -573,24 +745,47 @@ function agentStats(a: AgentResult): string[] {
         </section>
       </div>
 
-      <!-- attempt switcher for log + diff -->
-      <div
+      <!-- attempt history: each links its log + diff (?attempt=) -->
+      <section
         v-if="job.attempt > 1"
-        class="attempts"
+        class="panel card"
       >
-        <span class="muted">{{ t('job.attemptShown') }}</span>
-        <Select
-          v-model="attempt"
-          :options="attemptOptions"
-          option-label="label"
-          option-value="value"
-          :aria-label="t('job.attemptShown')"
-        />
-        <span
-          v-if="!current"
-          class="muted small"
-        >{{ t('job.oldAttempt') }}</span>
-      </div>
+        <div class="card-head">
+          <span class="panel-title"><i class="pi pi-history" /> {{ t('job.attemptsTitle') }}</span>
+          <span
+            v-if="!current"
+            class="muted small"
+          >{{ t('job.oldAttempt') }}</span>
+        </div>
+        <ul class="attempts">
+          <li
+            v-for="a in attempts"
+            :key="a.attempt"
+          >
+            <RouterLink
+              :to="{ query: { ...route.query, attempt: String(a.attempt) } }"
+              class="attempt"
+              :class="{ on: a.attempt === attempt }"
+              :aria-current="a.attempt === attempt ? 'true' : undefined"
+            >
+              <JobBadge
+                :state="a.state"
+                compact
+              />
+              <span>{{ t('job.attemptN', { n: a.attempt }) }}</span>
+              <span
+                v-if="a.finishedAt || a.startedAt"
+                class="muted small"
+                :title="absTime(a.finishedAt || a.startedAt)"
+              >{{ relTime(a.finishedAt || a.startedAt) }}</span>
+              <span
+                v-if="attemptNote(a)"
+                class="muted small note"
+              >{{ attemptNote(a) }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+      </section>
 
       <section
         v-if="showDiff"
@@ -824,8 +1019,40 @@ details summary {
 
 .attempts {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attempt {
+  display: flex;
   align-items: center;
   gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--iw-text);
+  min-width: 0;
+}
+
+.attempt:hover,
+.attempt.on {
+  background: var(--iw-elevated);
+}
+
+.attempt .note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .progress {
