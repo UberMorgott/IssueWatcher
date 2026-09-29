@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 )
 
@@ -416,6 +417,7 @@ func (s *Store) SetLocalPath(ctx context.Context, id int64, path string) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	folders.Invalidate()
 	return nil
 }
 

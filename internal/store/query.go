@@ -38,13 +38,54 @@ type Repo struct {
 
 // Repos lists active projects with counts, by name.
 func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
-	rows, err := s.rd.QueryContext(ctx, `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, `+linkColsAs+`,
+	return s.repos(ctx, `p.active = 1`)
+}
+
+// Repo is one active project with counts (ErrNotFound when there is none).
+func (s *Store) Repo(ctx context.Context, id int64) (Repo, error) {
+	list, err := s.repos(ctx, `p.active = 1 AND p.id = ?`, id)
+	if err != nil {
+		return Repo{}, err
+	}
+	if len(list) == 0 {
+		return Repo{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
+// ProjectCounts is the number of active projects per platform.
+func (s *Store) ProjectCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.rd.QueryContext(ctx, `SELECT s.platform, count(*) FROM projects p JOIN sources s ON s.id = p.source_id
+		WHERE p.active = 1 GROUP BY s.platform`)
+	if err != nil {
+		return nil, fmt.Errorf("store: project counts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int{}
+	for rows.Next() {
+		var (
+			platform string
+			n        int
+		)
+		if err := rows.Scan(&platform, &n); err != nil {
+			return nil, fmt.Errorf("store: project counts: %w", err)
+		}
+		out[platform] = n
+	}
+	return out, rows.Err()
+}
+
+const reposSelect = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, `+linkColsAs+`,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
 		count(i.id) FILTER (WHERE i.unread = 1)
 		FROM projects p JOIN sources s ON s.id = p.source_id
 		LEFT JOIN items i ON i.project_id = p.id
-		WHERE p.active = 1 GROUP BY p.id ORDER BY p.name COLLATE NOCASE`)
+		WHERE `
+
+func (s *Store) repos(ctx context.Context, where string, args ...any) ([]Repo, error) {
+	q := reposSelect + where + " GROUP BY p.id ORDER BY p.name COLLATE NOCASE" //nolint:gosec // G202: where is a fixed clause, values bound
+	rows, err := s.rd.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: repos: %w", err)
 	}

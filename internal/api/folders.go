@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -49,7 +48,7 @@ func (s *Server) handleFolders(w http.ResponseWriter, r *http.Request) {
 	for _, p := range repos {
 		out = append(out, FolderRow{
 			ProjectID: p.ID, Name: p.Name, URL: p.URL, Platform: p.Platform, Key: p.Key, LocalPath: p.LocalPath,
-			Status: folders.Check(p.LocalPath, p.URL),
+			Status: folders.Cached(p.LocalPath, p.URL),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -75,17 +74,15 @@ func (s *Server) handleSetPath(w http.ResponseWriter, r *http.Request) {
 		}
 		p = filepath.Clean(p)
 	}
-	repos, err := s.opts.Store.Repos(r.Context())
+	rp, err := s.opts.Store.Repo(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		errJSON(w, http.StatusNotFound, "not found")
+		return
+	}
 	if err != nil {
 		s.internalError(w, "list folders", err)
 		return
 	}
-	i := slices.IndexFunc(repos, func(rp store.Repo) bool { return rp.ID == id })
-	if i < 0 {
-		errJSON(w, http.StatusNotFound, "not found")
-		return
-	}
-	rp := repos[i]
 	// Any existing folder is mapped (a fix job runs there); the returned status
 	// tells whether it is a clone of this project (git flow) or not (notGit /
 	// mismatch: an in-place run without commit or push — a UI warning).

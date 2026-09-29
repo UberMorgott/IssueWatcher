@@ -49,8 +49,9 @@ type Fix struct {
 	url       string // remote URL the folder must match
 }
 
-// fixTargets returns the Fix of each project in ids, Fixable checked on disk
-// (a stat and a read of .git/config per distinct folder).
+// fixTargets returns the Fix of each project in ids, Fixable from the
+// folder's status (folders.Cached: a stat and a read of .git/config per
+// distinct folder at most every CacheTTL), checked after the rows are closed.
 func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, error) {
 	out := map[int64]Fix{}
 	if len(ids) == 0 {
@@ -66,7 +67,6 @@ func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, err
 		return nil, fmt.Errorf("store: fix targets: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	checked := map[[2]string]folders.Status{}
 	for rows.Next() {
 		var (
 			id int64
@@ -75,16 +75,18 @@ func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, err
 		if err := rows.Scan(&id, &f.ProjectID, &f.Folder, &f.url, &f.NeedsLink); err != nil {
 			return nil, fmt.Errorf("store: scan fix target: %w", err)
 		}
-		k := [2]string{f.Folder, f.url}
-		st, seen := checked[k]
-		if !seen {
-			st = folders.Check(f.Folder, f.url)
-			checked[k] = st
-		}
+		out[id] = f
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: fix targets: %w", err)
+	}
+	_ = rows.Close() // release the connection before any disk I/O
+	for id, f := range out {
+		st := folders.Cached(f.Folder, f.url)
 		f.Fixable, f.Git = st.Exists(), st == folders.StatusOK
 		out[id] = f
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // fillRepoFix sets each repo's Fix.

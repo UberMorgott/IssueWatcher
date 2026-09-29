@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 )
 
 // Job states (docs/ARCHITECTURE.md → Runner).
@@ -461,6 +463,7 @@ func (s *Store) UpdateJob(ctx context.Context, id int64, from []string, c JobCha
 	}
 	if c.Finished {
 		add("finished_at", now)
+		defer folders.Invalidate() // a fix may have created, cloned or changed a folder
 	}
 	q := "UPDATE jobs SET " + strings.Join(set, ", ") + " WHERE id = ?" //nolint:gosec // G202: fixed column names, bound values
 	args = append(args, id)

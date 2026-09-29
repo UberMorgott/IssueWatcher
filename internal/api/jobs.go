@@ -300,22 +300,15 @@ func (s *Server) handleProjectLabels(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	repos, err := s.opts.Store.Repos(r.Context())
-	if err != nil {
-		s.internalError(w, "list projects", err)
+	p, err := s.opts.Store.Repo(r.Context(), id)
+	if s.jobError(w, err) {
 		return
 	}
-	for _, p := range repos {
-		if p.ID == id {
-			labels, err := s.opts.Runner.RepoLabels(r.Context(), p.Name)
-			if s.jobError(w, err) {
-				return
-			}
-			writeJSON(w, http.StatusOK, labels)
-			return
-		}
+	labels, err := s.opts.Runner.RepoLabels(r.Context(), p.Name)
+	if s.jobError(w, err) {
+		return
 	}
-	errJSON(w, http.StatusNotFound, "not found")
+	writeJSON(w, http.StatusOK, labels)
 }
 
 // jobError writes the HTTP error for a runner/store error; false when err is nil.

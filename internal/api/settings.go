@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 )
 
 // EventSettingsChanged carries the new SettingsDoc after every saved change.
@@ -86,6 +87,7 @@ func (s *Server) settingsResult(w http.ResponseWriter, doc SettingsDoc, err erro
 	var ve *config.ValidationError
 	switch {
 	case err == nil:
+		folders.Invalidate() // roots or project settings may change what a folder means
 		s.Publish(EventSettingsChanged, doc)
 		writeJSON(w, http.StatusOK, doc)
 	case errors.Is(err, config.ErrConflict):

@@ -171,14 +171,12 @@ var platformNames = map[string]string{
 // Platforms implements api.Platforms: every platform, GitHub first.
 func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 	sources := map[string]syncer.SourceStatus{}
-	projects := map[string]int{}
 	for _, s := range m.group.Status().Sources {
 		sources[s.Platform] = s
 	}
-	if repos, err := m.st.Repos(ctx); err == nil {
-		for _, r := range repos {
-			projects[r.Platform]++
-		}
+	projects, err := m.st.ProjectCounts(ctx)
+	if err != nil {
+		projects = map[string]int{}
 	}
 	cfg := m.cfgs.Get().Providers
 	m.mu.Lock()
