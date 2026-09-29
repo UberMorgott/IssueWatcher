@@ -180,6 +180,15 @@ func (p *Provider) Account(context.Context) (string, error) {
 	return s.SteamID, nil
 }
 
+// LocalAccount implements provider.LocalAccounter: the stored session's SteamID64.
+func (p *Provider) LocalAccount() (string, bool) {
+	s, err := p.current()
+	if err != nil || s.SteamID == "" {
+		return "", false
+	}
+	return s.SteamID, true
+}
+
 // fileURL is a Workshop item's page.
 func (p *Provider) fileURL(id string) string {
 	return p.opts.CommunityURL + "/sharedfiles/filedetails/?id=" + id

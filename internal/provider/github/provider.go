@@ -45,6 +45,12 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	return p.auth.Login(), nil
 }
 
+// LocalAccount implements provider.LocalAccounter: the login of the stored token.
+func (p *Provider) LocalAccount() (string, bool) {
+	login := p.auth.Login()
+	return login, login != ""
+}
+
 // ListProjects returns every repo the user reaches through the app's installations.
 func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error) {
 	var installs []int64

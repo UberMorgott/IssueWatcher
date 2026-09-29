@@ -15,13 +15,14 @@ import (
 type PollTarget struct {
 	Project
 	Activity time.Time          // newest item update (zero = no items)
+	Checked  time.Time          // last change check (zero = never)
 	Poll     provider.PollState // persisted change-detection state
 }
 
 // PollTargets lists the active projects of a source with their newest item
 // update and poll state.
 func (s *Store) PollTargets(ctx context.Context, sourceID int64) ([]PollTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.poll_state,
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.poll_state, p.checked_at,
 		COALESCE((SELECT max(i.updated_at) FROM items i WHERE i.project_id = p.id), '')
 		FROM projects p WHERE p.source_id = ? AND p.active = 1 ORDER BY p.id`, sourceID)
 	if err != nil {
@@ -32,13 +33,14 @@ func (s *Store) PollTargets(ctx context.Context, sourceID int64) ([]PollTarget, 
 	for rows.Next() {
 		var (
 			t                       PollTarget
-			cursor, state, activity string
+			cursor, state, checked, activity string
 		)
-		if err := rows.Scan(&t.ID, &t.ExternalID, &t.Name, &t.URL, &cursor, &state, &activity); err != nil {
+		if err := rows.Scan(&t.ID, &t.ExternalID, &t.Name, &t.URL, &cursor, &state, &checked, &activity); err != nil {
 			return nil, fmt.Errorf("store: poll targets: %w", err)
 		}
 		t.Cursor, _ = time.Parse(timeFormat, cursor)
 		t.Activity, _ = time.Parse(timeFormat, activity)
+		t.Checked, _ = time.Parse(timeFormat, checked)
 		_ = json.Unmarshal([]byte(state), &t.Poll) // a damaged state only costs one full answer
 		out = append(out, t)
 	}

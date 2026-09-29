@@ -183,6 +183,14 @@ type Labeler interface {
 	AddLabels(ctx context.Context, project string, number int, names []string) ([]string, error)
 }
 
+// LocalAccounter is a provider that knows its signed-in account from local
+// state (a stored token or session), without a network call. The syncer uses
+// it on start to resume the stored source of that account; ok is false when
+// signed out.
+type LocalAccounter interface {
+	LocalAccount() (account string, ok bool)
+}
+
 // Provider is one platform adapter.
 type Provider interface {
 	Platform() string

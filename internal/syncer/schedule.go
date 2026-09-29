@@ -134,6 +134,13 @@ func (s *Syncer) interval(t *target, now time.Time) time.Duration {
 func (s *Syncer) Step(ctx context.Context) time.Duration {
 	now := s.now()
 	s.mu.Lock()
+	warm := !s.warmed
+	s.warmed = true
+	s.mu.Unlock()
+	if warm {
+		s.warmStart(ctx, now)
+	}
+	s.mu.Lock()
 	paused, force := s.pausedUntil, s.forceReconcile
 	s.mu.Unlock()
 	if now.Before(paused) && !force {
@@ -150,7 +157,7 @@ func (s *Syncer) Step(ctx context.Context) time.Duration {
 		s.afterError(err, now)
 		return s.untilNext(s.now())
 	}
-	if _, ok := s.opts.Provider.(provider.Poller); ok {
+	if _, ok := s.opts.Provider.(provider.Poller); ok && s.accountConfirmed(ctx, now) {
 		s.checkDue(ctx, now)
 	}
 	return s.untilNext(s.now())

@@ -98,6 +98,8 @@ type Syncer struct {
 	nextReconcile  time.Time
 	reconciledOnce bool
 	forceReconcile bool
+	warmed         bool // warmStart ran (first Step)
+	verifyAccount  bool // resumed from the store: the first check confirms the account
 	pausedUntil    time.Time
 	backoff        time.Duration
 	budgetFree     time.Time
