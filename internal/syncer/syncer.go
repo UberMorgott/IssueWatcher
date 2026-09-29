@@ -355,12 +355,14 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 // SyncProject re-reads one project of this syncer's source now (the project
 // list's row sync): items since its cursor, stored and reported like a
 // reconcile's (listeners, OnUpdate), one cycle at a time.
-func (s *Syncer) SyncProject(ctx context.Context, pr store.Project) error {
+// sourceID is the project's source: a project of another account (the
+// provider switched accounts) is not written, ErrNoSource.
+func (s *Syncer) SyncProject(ctx context.Context, sourceID int64, pr store.Project) error {
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
 	c0 := s.opts.Store.Changes()
-	events, err := s.syncProject(ctx, pr)
+	events, err := s.syncProject(ctx, sourceID, pr)
 	s.update(func(st *Status) {
 		st.Running = false
 		st.Relogin = errors.Is(err, provider.ErrRelogin)
@@ -380,7 +382,7 @@ func (s *Syncer) SyncProject(ctx context.Context, pr store.Project) error {
 	return errors.Join(err, uerr)
 }
 
-func (s *Syncer) syncProject(ctx context.Context, pr store.Project) ([]store.Event, error) {
+func (s *Syncer) syncProject(ctx context.Context, sourceID int64, pr store.Project) ([]store.Event, error) {
 	s.mu.Lock()
 	src, login := s.source, s.login
 	s.mu.Unlock()
@@ -392,6 +394,9 @@ func (s *Syncer) syncProject(ctx context.Context, pr store.Project) ([]store.Eve
 		if src, err = s.opts.Store.UpsertSource(ctx, s.opts.Provider.Platform(), login); err != nil {
 			return nil, err
 		}
+	}
+	if src != sourceID {
+		return nil, fmt.Errorf("%s: %w", pr.ExternalID, ErrNoSource)
 	}
 	items, err := s.opts.Provider.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
 	if err != nil {

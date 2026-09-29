@@ -271,3 +271,42 @@ func TestGroupSyncProjects(t *testing.T) {
 		t.Fatalf("no steam account: %v", missing)
 	}
 }
+
+// After an account switch (A -> B) the old account's projects stay active, but
+// a row sync of one never writes the new account's items into it.
+func TestGroupSyncProjectsAccountSwitch(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	nx := &fakeProvider{platform: "nexus", account: "A", item: "a-item"}
+	sn := New(Options{Store: st, Provider: nx, Log: slog.New(slog.DiscardHandler)})
+	g := NewGroup(sn)
+	if err := sn.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	repos, err := st.Repos(t.Context())
+	if err != nil || len(repos) != 1 {
+		t.Fatalf("repos: %+v %v", repos, err)
+	}
+	projA := repos[0].ID
+	nx.account, nx.item = "B", "b-item"
+	if err := sn.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := st.GroupTargets(t.Context(), projA)
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets: %+v %v", targets, err)
+	}
+	if targets[0].SourceID == sn.sourceID() {
+		t.Fatalf("project A reported under source B")
+	}
+	if started, missing := g.SyncProjects(t.Context(), targets); len(started) != 0 || len(missing) != 1 {
+		t.Fatalf("A's project synced through B: started %v missing %v", started, missing)
+	}
+	if err := sn.SyncProject(t.Context(), targets[0].SourceID, targets[0].Project); !errors.Is(err, ErrNoSource) {
+		t.Fatalf("direct sync of A's project through B: %v", err)
+	}
+}

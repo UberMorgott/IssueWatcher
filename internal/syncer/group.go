@@ -215,6 +215,28 @@ func syncerFor(syncers []*Syncer, platform string, sourceID int64) *Syncer {
 	return nil
 }
 
+// projectSyncer is the syncer that may write a project of source sourceID:
+// the syncer of that exact source, else the only syncer of platform while its
+// account is still unknown (SyncProject re-checks once learnt). Unlike
+// syncerFor it never falls back to another account's syncer: after an account
+// switch its items would land in the old account's project.
+func projectSyncer(syncers []*Syncer, platform string, sourceID int64) *Syncer {
+	var same []*Syncer
+	for _, s := range syncers {
+		if s.opts.Provider.Platform() != platform {
+			continue
+		}
+		if s.sourceID() == sourceID {
+			return s
+		}
+		same = append(same, s)
+	}
+	if len(same) == 1 && same[0].sourceID() == 0 {
+		return same[0]
+	}
+	return nil
+}
+
 // SyncProjects syncs targets now (a project and its linked mod pages), each
 // through the syncer of its source, in the background: ctx's values without
 // its cancel (the syncs outlive the request), stopped when the group stops. It
@@ -232,14 +254,14 @@ func (g *Group) SyncProjects(ctx context.Context, targets []store.SyncTarget) (s
 	started, missing = []string{}, []string{}
 	var wg sync.WaitGroup
 	for _, t := range targets {
-		s := syncerFor(syncers, t.Platform, t.SourceID)
+		s := projectSyncer(syncers, t.Platform, t.SourceID)
 		if s == nil {
 			missing = append(missing, t.Platform)
 			continue
 		}
 		started = append(started, t.Platform)
 		wg.Go(func() {
-			if err := s.SyncProject(run, t.Project); err != nil {
+			if err := s.SyncProject(run, t.SourceID, t.Project); err != nil {
 				s.opts.Log.Warn("sync project", "project", t.Name, "err", err)
 			}
 		})
