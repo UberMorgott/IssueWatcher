@@ -28,8 +28,8 @@ func ts(t time.Time) string {
 
 // Store wraps the database with the queries sync and the API need.
 type Store struct {
-	db      *sql.DB // the writer (one connection): writes and transactions
-	rd      *sql.DB // readers: a query_only pool, or db itself (New)
+	db      *sql.DB      // the writer (one connection): writes and transactions
+	rd      *sql.DB      // readers: a query_only pool, or db itself (New)
 	changes atomic.Int64 // rows sync really changed (items, comments, projects)
 }
 
@@ -201,12 +201,16 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 	}
 	baseline := syncedAt == ""
 
+	stored, err := loadStored(ctx, tx, sourceID, items)
+	if err != nil {
+		return nil, err
+	}
 	var (
 		events  []Event
 		changes int64
 	)
 	for i := range items {
-		ev, changed, err := applyItem(ctx, tx, sourceID, projectID, pr, &items[i], self, baseline)
+		ev, changed, err := applyItem(ctx, tx, sourceID, projectID, pr, &items[i], stored[items[i].ExternalID], self, baseline)
 		if err != nil {
 			return nil, err
 		}
@@ -261,8 +265,88 @@ const projectKeySQL = `s.platform || ':' || p.external_id`
 // projectRef is a project's display name and settings key.
 type projectRef struct{ name, key string }
 
+// storedItem is an item's stored row and comments, loaded once per batch.
+type storedItem struct {
+	id              int64
+	fields          [13]any // as the UPDATE binds them
+	status, updated string
+	unread          bool
+	comments        map[string][4]string // external id → author, body, url, updated_at
+}
+
+// loadStored reads the stored rows of a batch's items and their comments in
+// two queries, so an unchanged item costs no statement at all.
+func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provider.Item) (map[string]*storedItem, error) {
+	out := make(map[string]*storedItem, len(items))
+	if len(items) == 0 {
+		return out, nil
+	}
+	ids := make([]string, len(items))
+	for i := range items {
+		ids[i] = items[i].ExternalID
+	}
+	idsJSON, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, external_id, project_id, kind, number, title, body, url, author, status, raw_status,
+		labels, created_at, updated_at, closed_at, unread FROM items WHERE source_id = ? AND external_id IN (SELECT value FROM json_each(?))`,
+		sourceID, string(idsJSON))
+	if err != nil {
+		return nil, fmt.Errorf("store: lookup items: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	byID := map[int64]*storedItem{}
+	var keys []int64
+	for rows.Next() {
+		var (
+			st                                                                storedItem
+			ext, kind, title, body, url, author, raw, labels, created, closed string
+			project                                                           int64
+			number                                                            int
+		)
+		if err := rows.Scan(&st.id, &ext, &project, &kind, &number, &title, &body, &url, &author, &st.status, &raw,
+			&labels, &created, &st.updated, &closed, &st.unread); err != nil {
+			return nil, fmt.Errorf("store: lookup items: %w", err)
+		}
+		st.fields = [13]any{project, kind, number, title, body, url, author, st.status, raw, labels, created, st.updated, closed}
+		st.comments = map[string][4]string{}
+		out[ext], byID[st.id] = &st, &st
+		keys = append(keys, st.id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: lookup items: %w", err)
+	}
+	_ = rows.Close()
+	if len(keys) == 0 {
+		return out, nil
+	}
+	keysJSON, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	crows, err := tx.QueryContext(ctx, `SELECT item_id, external_id, author, body, url, updated_at FROM comments
+		WHERE item_id IN (SELECT value FROM json_each(?))`, string(keysJSON))
+	if err != nil {
+		return nil, fmt.Errorf("store: lookup comments: %w", err)
+	}
+	defer func() { _ = crows.Close() }()
+	for crows.Next() {
+		var (
+			item int64
+			ext  string
+			c    [4]string
+		)
+		if err := crows.Scan(&item, &ext, &c[0], &c[1], &c[2], &c[3]); err != nil {
+			return nil, fmt.Errorf("store: lookup comments: %w", err)
+		}
+		byID[item].comments[ext] = c
+	}
+	return out, crows.Err()
+}
+
 func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr projectRef,
-	it *provider.Item, self string, baseline bool,
+	it *provider.Item, st *storedItem, self string, baseline bool,
 ) (events []Event, changed bool, err error) {
 	status := "closed"
 	if it.Open {
@@ -282,24 +366,27 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		oldStatus  string
 		oldUpdated string
 	)
-	err = tx.QueryRowContext(ctx, `SELECT id, status, updated_at FROM items WHERE source_id = ? AND external_id = ?`,
-		sourceID, it.ExternalID).Scan(&id, &oldStatus, &oldUpdated)
-	existed := err == nil
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, fmt.Errorf("store: lookup item: %w", err)
+	existed := st != nil
+	if existed {
+		id, oldStatus, oldUpdated = st.id, st.status, st.updated
 	}
 	changed = !existed || oldStatus != status || oldUpdated != ts(it.UpdatedAt)
 	kind := it.Kind
 	if kind == "" {
 		kind = KindIssue
 	}
-	args := []any{projectID, kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
+	fields := [13]any{projectID, kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
 		string(lj), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt)}
-	if existed {
+	args := fields[:]
+	switch {
+	case existed && fields == st.fields:
+		// Unchanged row: no write (a full-history source re-reads every item
+		// on each reconcile).
+	case existed:
 		_, err = tx.ExecContext(ctx, `UPDATE items SET project_id = ?, kind = ?, number = ?, title = ?, body = ?,
 			url = ?, author = ?, status = ?, raw_status = ?, labels = ?, created_at = ?, updated_at = ?, closed_at = ?
 			WHERE id = ?`, append(args, id)...)
-	} else {
+	default:
 		err = tx.QueryRowContext(ctx, `INSERT INTO items (project_id, kind, number, title, body, url, author,
 			status, raw_status, labels, created_at, updated_at, closed_at, source_id, external_id)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -324,8 +411,14 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		events = append(events, e)
 	}
 	for _, c := range it.Comments {
-		inserted, err := saveComment(ctx, tx, id, c)
-		if err != nil {
+		var inserted bool
+		if sc, ok := st.comment(c.ExternalID); ok {
+			if sc != [4]string{c.Author, c.Body, c.URL, ts(c.UpdatedAt)} {
+				if _, err := saveComment(ctx, tx, id, c); err != nil {
+					return nil, false, err
+				}
+			}
+		} else if inserted, err = saveComment(ctx, tx, id, c); err != nil {
 			return nil, false, err
 		}
 		changed = changed || inserted
@@ -339,7 +432,7 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 	// tray all read the flag): closing it, here or by our own push/Fixes seen on
 	// sync, marks it read; its events still notify.
 	switch {
-	case status == "closed" && existed:
+	case status == "closed" && existed && st.unread:
 		if _, err := tx.ExecContext(ctx, `UPDATE items SET unread = 0 WHERE id = ? AND unread = 1`, id); err != nil {
 			return nil, false, fmt.Errorf("store: mark read: %w", err)
 		}
@@ -349,6 +442,15 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		}
 	}
 	return events, changed, nil
+}
+
+// comment is a stored comment of the item (none when st is nil).
+func (st *storedItem) comment(ext string) ([4]string, bool) {
+	if st == nil {
+		return [4]string{}, false
+	}
+	c, ok := st.comments[ext]
+	return c, ok
 }
 
 type execer interface {
@@ -366,8 +468,9 @@ func saveComment(ctx context.Context, db execer, itemID int64, c provider.Commen
 	if n, _ := res.RowsAffected(); n == 1 {
 		return true, nil
 	}
-	_, err = db.ExecContext(ctx, `UPDATE comments SET author = ?, body = ?, url = ?, updated_at = ?
-		WHERE item_id = ? AND external_id = ?`, c.Author, c.Body, c.URL, ts(c.UpdatedAt), itemID, c.ExternalID)
+	_, err = db.ExecContext(ctx, `UPDATE comments SET author = ?1, body = ?2, url = ?3, updated_at = ?4
+		WHERE item_id = ?5 AND external_id = ?6
+			AND (author IS NOT ?1 OR body IS NOT ?2 OR url IS NOT ?3 OR updated_at IS NOT ?4)`, c.Author, c.Body, c.URL, ts(c.UpdatedAt), itemID, c.ExternalID)
 	if err != nil {
 		return false, fmt.Errorf("store: update comment: %w", err)
 	}
