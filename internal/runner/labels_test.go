@@ -134,6 +134,30 @@ func TestLabelAutoApply(t *testing.T) {
 	}
 }
 
+// A rule job whose agent finds no fitting label ends done (nothing to apply
+// or review) instead of blocking the issue's next label job; a manual one
+// still waits for the user, who may pick labels by hand.
+func TestLabelRuleNoPicksDone(t *testing.T) {
+	mode(t, "ok")
+	t.Setenv("FAKECLI_LABELS", "")
+	e := setup(t, 1, nil)
+	e.labelRepo()
+	j, err := e.st.CreateJob(t.Context(), e.items[0], "label", "codex", store.OriginRule, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.r.Refresh()
+	if j = e.wait(j.ID, store.JobNeedsReview, store.JobDone, store.JobFailed); j.State != store.JobDone || len(result(t, j).Labels) != 0 {
+		t.Fatalf("rule job without picks: %+v", j)
+	}
+	if _, _, adds := e.ghState(); adds != 0 {
+		t.Fatalf("labels sent: %d", adds)
+	}
+	if j := e.wait(e.enqueue("label", e.items[0])[0].ID, store.JobNeedsReview, store.JobDone); j.State != store.JobNeedsReview {
+		t.Fatalf("manual job without picks: %+v", j)
+	}
+}
+
 func TestMatchLabels(t *testing.T) {
 	repo := []provider.Label{{Name: "Bug"}, {Name: "good first issue"}}
 	known, unknown := matchLabels(repo, []string{"bug", " Good First Issue ", "BUG", "", "nope"})

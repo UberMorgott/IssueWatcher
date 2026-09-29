@@ -138,8 +138,16 @@ func (r *Runner) runLabel(ctx context.Context, j *store.Job, res *Result, log *j
 	if len(res.DroppedLabels) > 0 {
 		log.addf(StepInfo, "dropped (not in the repository): %s", strings.Join(res.DroppedLabels, ", "))
 	}
-	if j.Origin == store.OriginRule && len(res.Labels) > 0 && cfg.AutomationFor(in.ProjectName).AutoApplyLabels {
-		return r.autoApply(ctx, j.ItemID, res, log), nil
+	if j.Origin == store.OriginRule {
+		if len(res.Labels) == 0 && len(res.DroppedLabels) == 0 {
+			// The agent found no label fits: nothing to apply or review, and a
+			// needs_review job would block the next label job of the issue.
+			log.add(StepInfo, "no label fits: nothing to apply")
+			return store.JobDone, nil
+		}
+		if len(res.Labels) > 0 && cfg.AutomationFor(in.ProjectName).AutoApplyLabels {
+			return r.autoApply(ctx, j.ItemID, res, log), nil
+		}
 	}
 	return store.JobNeedsReview, nil
 }
