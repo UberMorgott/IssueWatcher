@@ -10,6 +10,7 @@ import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
+import PlatformIcon from './components/PlatformIcon.vue'
 import { connectLive, type LiveEventName } from './api/live'
 import type { DataChange, LiveItemEvent, SettingsDoc, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
@@ -17,6 +18,7 @@ import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
 import { jobOutcome, jobRef } from './lib/jobs'
+import { jobPlatform, repoPlatform } from './lib/platforms'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
@@ -64,6 +66,7 @@ const KIND: Record<string, { key: string; icon: string; severity: 'info' | 'succ
   'item.closed': { key: 'app.issueClosed', icon: 'pi pi-check-circle', severity: 'secondary' },
 }
 const toastIcon = (msg: unknown) => (msg as { data?: { icon?: string } }).data?.icon ?? 'pi pi-inbox'
+const toastPlatform = (msg: unknown) => (msg as { data?: { platform?: string } }).data?.platform ?? ''
 const jobLinks = (msg: unknown) => (msg as { data?: { links?: { label: string; to: string; note: string }[] } }).data?.links ?? []
 
 function onLive(name: LiveEventName, data: unknown) {
@@ -112,7 +115,7 @@ function onLive(name: LiveEventName, data: unknown) {
           summary: failed ? t('app.agentFailed') : t('app.agentFinished', { outcome: label }),
           detail: `${jobRef(done)} · ${failed && reason ? reason : done.title}`,
           life: 10000,
-          data: { id: done.itemId, job: done.itemId ? undefined : done.id, icon: failed ? 'pi pi-times-circle' : 'pi pi-sparkles' },
+          data: { id: done.itemId, job: done.itemId ? undefined : done.id, icon: failed ? 'pi pi-times-circle' : 'pi pi-sparkles', platform: jobPlatform(done, app.repos) },
         } as never)
       }
       return
@@ -129,7 +132,7 @@ function onLive(name: LiveEventName, data: unknown) {
       const k = KIND[name]
       const detail =
         name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
-      toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon } } as never)
+      toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon, platform: repoPlatform(e.repo, app.repos) } } as never)
       app.invalidate({ reason: 'sync', itemId: e.id })
     }
   }
@@ -305,7 +308,12 @@ const shortcuts = computed(() => [
               {{ message.summary }}
             </div>
             <div class="live-detail">
-              {{ message.detail }}
+              <PlatformIcon
+                v-if="toastPlatform(message)"
+                :platform="toastPlatform(message)"
+                :size="13"
+                class="live-mark"
+              />{{ message.detail }}
             </div>
           </div>
           <button
@@ -518,6 +526,11 @@ const shortcuts = computed(() => [
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.live-mark {
+  vertical-align: -2px;
+  margin-right: 5px;
 }
 
 .jobs-toast {

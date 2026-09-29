@@ -38,3 +38,13 @@ export function fallbackCaps(platform: string): Capabilities {
 /** Item reference for crumbs and toasts: owner/repo#12 on GitHub, the mod page name elsewhere. */
 export const itemRef = (it: { repo: string; number: number; platform?: string }) =>
   isModPlatform(it.platform ?? '') ? it.repo : `${it.repo}#${it.number}`
+
+/** A job's platform: its project key's prefix (platform:external_id), else its project's; GitHub when unknown. */
+export function jobPlatform(j: { projectKey?: string; projectId: number }, repos: readonly { id: number; platform: string }[]): string {
+  const k = j.projectKey ?? ''
+  const i = k.indexOf(':')
+  return i > 0 ? k.slice(0, i) : (repos.find((r) => r.id === j.projectId)?.platform || 'github')
+}
+
+/** A live event's platform, found by its project name ('' when no synced project has that name). */
+export const repoPlatform = (repo: string, repos: readonly { name: string; platform: string }[]) => repos.find((r) => r.name === repo)?.platform ?? ''

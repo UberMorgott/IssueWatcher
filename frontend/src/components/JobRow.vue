@@ -3,14 +3,18 @@ import Skeleton from 'primevue/skeleton'
 import { useI18n } from 'vue-i18n'
 import JobBadge from './JobBadge.vue'
 import JobProgress from './JobProgress.vue'
+import PlatformIcon from './PlatformIcon.vue'
 import type { JobRowData as Row } from '../api/types'
 import { absTime, elapsed, relTime, usd } from '../lib/format'
 import { FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome, jobRef } from '../lib/jobs'
+import { jobPlatform } from '../lib/platforms'
+import { useAppStore } from '../stores/app'
 
 // One virtualised row of the jobs list (same contract as IssueRow).
 defineProps<{ item: Row; top: number; profile: string }>()
 const emit = defineEmits<{ open: [] }>()
 const { t } = useI18n()
+const app = useAppStore()
 </script>
 
 <template>
@@ -59,7 +63,10 @@ const { t } = useI18n()
         <span
           v-if="item.state === 'running'"
           class="t-meta t-run"
-        ><span class="mono">{{ jobRef(item) }}</span><JobProgress
+        ><PlatformIcon
+          :platform="jobPlatform(item, app.repos)"
+          :size="13"
+        /><span class="mono">{{ jobRef(item) }}</span><JobProgress
           :id="item.id"
           :attempt="item.attempt"
           :started-at="item.startedAt"
@@ -68,7 +75,10 @@ const { t } = useI18n()
         <span
           v-else
           class="t-meta"
-        ><span class="mono">{{ jobRef(item) }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
+        ><PlatformIcon
+          :platform="jobPlatform(item, app.repos)"
+          :size="13"
+        /><span class="mono">{{ jobRef(item) }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
       </span>
       <span
         class="c-flow"
@@ -165,6 +175,11 @@ const { t } = useI18n()
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.t-meta .pi-mark {
+  vertical-align: -2px;
+  margin-right: 5px;
 }
 
 .t-run {

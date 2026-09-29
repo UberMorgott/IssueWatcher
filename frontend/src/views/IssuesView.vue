@@ -246,6 +246,7 @@ const repoOptions = computed(() => {
   if (cur && !opts.some((o) => o.value === cur.id)) opts.push({ label: cur.name, value: cur.id, platform: cur.platform })
   return [{ label: t('issues.allProjects'), value: 0, platform: '' }, ...opts]
 })
+const selectedRepo = computed(() => repoOptions.value.find((o) => o.value === filters.value.repo))
 /** Keeps the project filter when it has a channel on the new platform. */
 function setSource(v: string) {
   const r = repoById.value.get(filters.value.repo)
@@ -422,6 +423,17 @@ onBeforeUnmount(() => {
           class="f-repo"
           @update:model-value="(v: number) => setQuery({ repo: v })"
         >
+          <template #value="{ placeholder }">
+            <span
+              v-if="selectedRepo"
+              class="opt"
+            ><PlatformIcon
+              v-if="selectedRepo.platform"
+              :platform="selectedRepo.platform"
+              :size="14"
+            />{{ selectedRepo.label }}</span>
+            <span v-else>{{ placeholder }}</span>
+          </template>
           <template #option="{ option }">
             <span class="opt"><PlatformIcon
               v-if="option.platform"

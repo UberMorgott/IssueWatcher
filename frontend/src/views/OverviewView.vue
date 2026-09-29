@@ -9,12 +9,14 @@ import EChart, { type ChartTheme } from '../components/EChart.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import PlatformTiles from '../components/PlatformTiles.vue'
+import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { Issue, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, shortDay, shortRepo } from '../lib/format'
 import { cachedRef } from '../lib/cache'
+import { repoPlatform } from '../lib/platforms'
 
 const app = useAppStore()
 const { t } = useI18n()
@@ -252,7 +254,11 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                 <span class="unread-dot" />
                 <span class="row-main">
                   <span class="row-title">{{ it.title }}</span>
-                  <span class="row-meta"><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ relTime(it.updatedAt) }}</span>
+                  <span class="row-meta"><PlatformIcon
+                    :platform="it.platform || 'github'"
+                    :size="12"
+                    class="meta-mark"
+                  /><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ relTime(it.updatedAt) }}</span>
                 </span>
               </RouterLink>
             </div>
@@ -279,7 +285,12 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                 />
                 <span class="row-main">
                   <span class="row-title">{{ a.data.title }}</span>
-                  <span class="row-meta"><i18n-t
+                  <span class="row-meta"><PlatformIcon
+                    v-if="repoPlatform(a.data.repo, app.repos)"
+                    :platform="repoPlatform(a.data.repo, app.repos)"
+                    :size="12"
+                    class="meta-mark"
+                  /><i18n-t
                     :keypath="activityKey[a.kind]"
                     scope="global"
                   ><template #actor>{{ a.data.actor || t('common.someone') }}</template><template #ref><span class="mono">{{ shortRepo(a.data.repo) }}#{{ a.data.number }}</span></template></i18n-t> · {{ relTime(a.at) }}</span>
@@ -312,7 +323,11 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                 />
                 <span class="row-main">
                   <span class="row-title">{{ it.title }}</span>
-                  <span class="row-meta"><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ t('overview.updated', { time: relTime(it.updatedAt) }) }}</span>
+                  <span class="row-meta"><PlatformIcon
+                    :platform="it.platform || 'github'"
+                    :size="12"
+                    class="meta-mark"
+                  /><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ t('overview.updated', { time: relTime(it.updatedAt) }) }}</span>
                 </span>
               </RouterLink>
             </div>
@@ -440,6 +455,11 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.meta-mark {
+  vertical-align: -2px;
+  margin-right: 5px;
 }
 
 .row-meta {

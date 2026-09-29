@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { safeUrl } from '../lib/safeUrl'
 import { jobCache } from '../lib/cache'
+import { jobPlatform } from '../lib/platforms'
+import PlatformIcon from '../components/PlatformIcon.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
@@ -358,6 +360,11 @@ function agentStats(a: AgentResult): string[] {
               :to="'/item/' + job.itemId"
               class="title"
             >
+              <PlatformIcon
+                :platform="jobPlatform(job, app.repos)"
+                :size="16"
+                class="ref-mark"
+              />
               <span class="mono ref">{{ job.repo }}#{{ job.number }}</span> {{ job.title }}
             </RouterLink>
             <RouterLink
@@ -365,6 +372,11 @@ function agentStats(a: AgentResult): string[] {
               :to="'/issues?repo=' + job.projectId"
               class="title"
             >
+              <PlatformIcon
+                :platform="jobPlatform(job, app.repos)"
+                :size="16"
+                class="ref-mark"
+              />
               <span class="mono ref">{{ job.repo }}</span> {{ t('job.triage.project') }}
             </RouterLink>
           </div>
@@ -1000,6 +1012,11 @@ function agentStats(a: AgentResult): string[] {
 .ref {
   color: var(--iw-muted);
   font-weight: 500;
+}
+
+.ref-mark {
+  vertical-align: -2px;
+  margin-right: 6px;
 }
 
 .actions {
