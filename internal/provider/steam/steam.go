@@ -516,15 +516,25 @@ func (p *Provider) readThread(ctx context.Context, project provider.Project, sin
 			break
 		}
 	}
-	total := max(first.TotalCount, len(all))
 	items := make([]provider.Item, 0, len(all))
-	for i, c := range slices.Backward(all) { // oldest first
+	for _, c := range slices.Backward(all) { // oldest first
 		if !since.IsZero() && c.CreatedAt.Before(since) {
 			continue
 		}
-		items = append(items, p.item(project, c, total-i, s.SteamID))
+		items = append(items, p.item(project, c, itemNumber(c.ID), s.SteamID))
 	}
 	return items, first, nil
+}
+
+// itemNumber is a comment's stable item number: the low 31 bits of its id (a
+// position in the thread would repeat after a deletion; the full id does not
+// fit a JavaScript number). 0 → 1.
+func itemNumber(commentID string) int {
+	n, err := strconv.ParseUint(commentID, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return max(int(n&0x7fffffff), 1) //nolint:gosec // G115: masked to 31 bits
 }
 
 // ItemExternalID is a comment item's key: comment:<publishedfileid>/<commentid>

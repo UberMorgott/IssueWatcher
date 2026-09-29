@@ -107,7 +107,8 @@ func TestSyncItemsPagingAndSince(t *testing.T) {
 		t.Fatalf("items %d renders %v", len(items), f.renders)
 	}
 	for i, it := range items {
-		if it.Number != i+1 || it.Kind != "comment" || !it.Open || it.Title == "" || !strings.HasPrefix(it.ExternalID, "comment:"+fileID+"/") {
+		// Stable numbers from the comment id: a deletion never makes a number repeat.
+		if it.Number != itemNumber(strings.TrimPrefix(it.ExternalID, "comment:"+fileID+"/")) || it.Number <= 0 || it.Kind != "comment" || !it.Open || it.Title == "" || !strings.HasPrefix(it.ExternalID, "comment:"+fileID+"/") {
 			t.Fatalf("item %d: %+v", i, it)
 		}
 		if i > 0 && it.CreatedAt.Before(items[i-1].CreatedAt) {
@@ -127,7 +128,7 @@ func TestSyncItemsPagingAndSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.renders) != 1 || len(items) != 3 || items[2].Number != 23 {
+	if len(f.renders) != 1 || len(items) != 3 || items[2].Number != 583935357196866537&0x7fffffff {
 		t.Fatalf("since: renders %v items %d", f.renders, len(items))
 	}
 }
@@ -202,5 +203,16 @@ func TestSettingsProtectedAndValidated(t *testing.T) {
 	}
 	if st2, _ := p2.Status(); st2 != st {
 		t.Fatalf("reload status %+v vs %+v", st2, st)
+	}
+}
+
+// L4: numbers are the low 31 bits of the comment id, positive, and do not
+// depend on the position in the thread.
+func TestItemNumberStable(t *testing.T) {
+	if got := itemNumber("583935357196866537"); got != 583935357196866537&0x7fffffff || got <= 0 {
+		t.Fatalf("got %d", got)
+	}
+	if itemNumber("2147483648") != 1 || itemNumber("x") != 0 {
+		t.Fatal("edge cases")
 	}
 }
