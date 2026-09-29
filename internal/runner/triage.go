@@ -171,7 +171,12 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 		log.add(StepInfo, "no fix job queued: "+t.ProjectName+" has no usable local folder ("+string(st)+")")
 		return store.JobDone, nil
 	}
-	r.queueFixes(ctx, *j, coder, tr, log)
+	// A cancel up to here cancels the triage; from here the top-N fix jobs are
+	// queued as one step, never cut short halfway behind a "done" triage.
+	if ctx.Err() != nil {
+		return "", context.Cause(ctx)
+	}
+	r.queueFixes(context.WithoutCancel(ctx), *j, coder, tr, log)
 	return store.JobDone, nil
 }
 
