@@ -10,6 +10,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/store"
+	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 // Data API (all JSON, session or bearer required; docs/ARCHITECTURE.md → HTTP API):
@@ -242,6 +243,8 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusNotFound, "not found")
 	case errors.Is(err, provider.ErrNotSignedIn):
 		errJSON(w, http.StatusConflict, "not signed in to GitHub")
+	case errors.Is(err, syncer.ErrNoSource):
+		errJSON(w, http.StatusConflict, "no connected account for this item")
 	case errors.As(err, &rl):
 		errJSON(w, http.StatusTooManyRequests, err.Error())
 	default:

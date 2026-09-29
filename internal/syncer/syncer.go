@@ -69,6 +69,7 @@ const (
 // notifications), so listeners know when the dashboard data is stale.
 type Progress struct {
 	State   string `json:"state"`
+	Source  string `json:"source,omitempty"` // platform[:account] of the syncer that reports
 	Repo    string `json:"repo,omitempty"`
 	Done    int    `json:"done"`
 	Total   int    `json:"total"`
@@ -113,6 +114,7 @@ func (s *Syncer) OnProgress(f func(Progress)) {
 func (s *Syncer) progress(p Progress) {
 	s.mu.Lock()
 	fs := append([]func(Progress){}, s.onProgress...)
+	p.Source = s.labelLocked()
 	s.mu.Unlock()
 	for _, f := range fs {
 		f(p)
@@ -301,6 +303,9 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	s.source, s.login = src, login
+	s.mu.Unlock()
 	list, err := p.ListProjects(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
@@ -390,6 +395,11 @@ func (s *Syncer) Reply(ctx context.Context, itemID int64, body string) (store.Co
 	if ref.Platform != s.opts.Provider.Platform() {
 		return store.Comment{}, ErrWrongPlatform
 	}
+	return s.reply(ctx, ref, body)
+}
+
+func (s *Syncer) reply(ctx context.Context, ref store.ItemRef, body string) (store.Comment, error) {
+	itemID := ref.ID
 	c, err := s.opts.Provider.Reply(ctx, ref.ExternalID, body)
 	if err != nil {
 		return store.Comment{}, err

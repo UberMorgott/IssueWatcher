@@ -52,11 +52,11 @@ type Options struct {
 	Log         *slog.Logger
 
 	// Phase 1 (all optional; nil disables the matching endpoints).
-	GitHub         *github.Auth   // sign-in endpoints
-	Store          *store.Store   // data endpoints (need Sync too)
-	Sync           *syncer.Syncer // poller status, sync now, replies
-	OnUnreadChange func()         // called after the user marks an item read
-	Settings       SettingsStore  // GET/PATCH /api/settings (+ folders with Store)
+	GitHub         *github.Auth  // sign-in endpoints
+	Store          *store.Store  // data endpoints (need Sync too)
+	Sync           *syncer.Group // per-source syncers: status, sync now, replies
+	OnUnreadChange func()        // called after the user marks an item read
+	Settings       SettingsStore // GET/PATCH /api/settings (+ folders with Store)
 	// TestNotification shows a sample popup (Settings → Notifications).
 	TestNotification func()
 	// Focus brings the browser window showing the dashboard to the front

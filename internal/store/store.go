@@ -292,13 +292,15 @@ type ItemRef struct {
 	ID         int64
 	ExternalID string
 	Platform   string
+	SourceID   int64  // the account the item was synced from
+	Account    string // that account's login
 }
 
 // ItemRef looks up the platform identity of item id.
 func (s *Store) ItemRef(ctx context.Context, id int64) (ItemRef, error) {
 	ref := ItemRef{ID: id}
-	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform FROM items i
-		JOIN sources s ON s.id = i.source_id WHERE i.id = ?`, id).Scan(&ref.ExternalID, &ref.Platform)
+	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, s.id, s.account FROM items i
+		JOIN sources s ON s.id = i.source_id WHERE i.id = ?`, id).Scan(&ref.ExternalID, &ref.Platform, &ref.SourceID, &ref.Account)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ref, ErrNotFound
 	}

@@ -142,11 +142,15 @@ export interface SyncStatus {
   checks?: number
   notModified?: number
   rate?: { limit: number; remaining: number; reset: string }
+  /** Every connected account's own status (internal/syncer GroupStatus); top-level fields = the primary (GitHub) one. */
+  sources?: (Omit<SyncStatus, 'sources'> & { platform: string; account: string })[]
 }
 
 /** sync.status live event: one step of a sync cycle (internal/syncer Progress). */
 export interface SyncProgress {
   state: 'started' | 'progress' | 'done' | 'error'
+  /** platform[:account] of the reporting source. */
+  source?: string
   repo?: string
   done: number
   total: number

@@ -49,7 +49,7 @@ func newEnv(t *testing.T, extra ...func(*Options)) *env {
 		Assets: fstest.MapFS{"index.html": {Data: []byte(indexHTML)}},
 		Open:   func(u string) { e.opened <- u },
 		Log:    slog.New(slog.DiscardHandler),
-		GitHub: a, Store: st, Sync: sy,
+		GitHub: a, Store: st, Sync: syncer.NewGroup(sy),
 		OnUnreadChange: func() { e.unread <- struct{}{} },
 	}
 	for _, f := range extra {

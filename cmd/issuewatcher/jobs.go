@@ -19,7 +19,7 @@ import (
 // newRunner wires the agent job queue to the dashboard (SSE job.changed /
 // job.log, data.changed for issue badges) and the tray («Агент закончил»).
 // srv and tray are read at call time: both are set after the runner exists.
-func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, gh *github.Provider, sy *syncer.Syncer,
+func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, gh *github.Provider, sy *syncer.Group,
 	srv func() *api.Server, tray func() *notify.Tray,
 ) *runner.Runner {
 	exe, err := os.Executable() // the job's MCP server: <exe> mcp --item <id>

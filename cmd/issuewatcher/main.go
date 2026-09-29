@@ -215,24 +215,25 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	group.Store(cfg.Notifications.Group)
 	gh := github.NewProvider(auth)
 	var jobs *runner.Runner // set below; the sync loop starts after it exists
-	sy := syncer.New(syncer.Options{
-		Store: st, Provider: gh, Plan: syncPlan(cfg.Sync), Log: log,
-		OnUpdate: func(events []store.Event, unread int) {
-			popups := events
-			if group.Load() {
-				popups = groupRepeats(events)
-			}
-			if tray != nil {
-				tray.NotifyEvents(popups) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
-			}
-			setBadge(int64(unread))
-			publishLive(srv, live.Load().Filter(events, time.Now()))
-			if jobs != nil {
-				jobs.Automate(context.Background(), events) // rules → rule jobs (off by default)
-				jobs.Refresh()                              // a closed issue ends its direct fix job
-			}
-		},
-	})
+	onUpdate := func(events []store.Event, unread int) {
+		popups := events
+		if group.Load() {
+			popups = groupRepeats(events)
+		}
+		if tray != nil {
+			tray.NotifyEvents(popups) // own popups, filtered by notify.Prefs (Tray.SetPrefs)
+		}
+		setBadge(int64(unread))
+		publishLive(srv, live.Load().Filter(events, time.Now()))
+		if jobs != nil {
+			jobs.Automate(context.Background(), events) // rules → rule jobs (off by default)
+			jobs.Refresh()                              // a closed issue ends its direct fix job
+		}
+	}
+	// One syncer per connected account (source); GitHub is the primary one.
+	sy := syncer.NewGroup(syncer.New(syncer.Options{
+		Store: st, Provider: gh, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
+	}))
 	// Settings apply live: popups, toasts, poll interval.
 	cfgs.Subscribe(func(_, cur config.Settings) {
 		lp := liveFilter(cur.Notifications)
