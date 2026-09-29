@@ -8,10 +8,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/UberMorgott/issuewatcher/internal/control"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
@@ -34,6 +38,7 @@ Talks to the running IssueWatcher of this data dir (never starts it).
 JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running.
 
   help
+  mcp                 MCP server on stdin/stdout (register: claude mcp add issuewatcher -- <exe> mcp)
 
   status
   projects
@@ -70,6 +75,15 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return fail(exitAPI, err)
+	}
+	if args[0] == "mcp" {
+		if len(args) > 1 {
+			return fail(exitUsage, errors.New("mcp takes no arguments"))
+		}
+		if err := runMCP(dataDir); err != nil {
+			return fail(exitAPI, err)
+		}
+		return exitOK
 	}
 	c := &cli{c: control.New(dataDir), stdin: stdin, ctx: context.Background()}
 	out, err := c.run(args)
@@ -360,6 +374,27 @@ func (c *cli) job(args []string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return c.c.Job(c.ctx, id)
+}
+
+// runMCP serves the MCP tools over stdio until the client disconnects. stdout
+// carries only JSON-RPC: logs go to data\logs\mcp.log.
+func runMCP(dataDir string) error {
+	logDir := filepath.Join(dataDir, "logs")
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(logDir, "mcp.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // G304: fixed name inside our own data dir
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	log := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn})).With("pid", os.Getpid())
+	s := control.NewMCPServer(control.New(dataDir), Version, log)
+	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		log.Error("mcp: stopped", "err", err)
+		return err
+	}
+	return nil
 }
 
 // cliMain runs a CLI launch (stdio attached first for the GUI build).

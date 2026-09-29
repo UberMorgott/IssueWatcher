@@ -7,9 +7,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,6 +104,171 @@ func (c *controlApp) ok(t *testing.T, stdin string, out any, args ...string) {
 		if err := json.Unmarshal(b, out); err != nil {
 			t.Fatalf("%v: %v: %s", args, err, b)
 		}
+	}
+}
+
+// mcpProc is `exe mcp` spoken to in raw newline-delimited JSON-RPC.
+type mcpProc struct {
+	t      *testing.T
+	in     io.WriteCloser
+	out    *bufio.Scanner
+	nextID int
+}
+
+func (c *controlApp) mcp(t *testing.T) *mcpProc {
+	t.Helper()
+	cmd := exec.Command(c.exe, "mcp") //nolint:gosec,noctx // our test build; ended by stdin EOF in Cleanup (t.Context is cancelled first)
+	cmd.Env = append(os.Environ(), "IW_DATA_DIR="+c.data)
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = in.Close() // EOF ends the server
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("mcp exit: %v; stderr %q", err, stderr.String())
+			}
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			t.Error("mcp did not exit on stdin EOF")
+		}
+		if stderr.Len() > 0 {
+			t.Errorf("mcp wrote to stderr: %q", stderr.String())
+		}
+	})
+	sc := bufio.NewScanner(out)
+	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	return &mcpProc{t: t, in: in, out: sc}
+}
+
+func (m *mcpProc) send(method string, params any, notify bool) {
+	m.t.Helper()
+	msg := map[string]any{"jsonrpc": "2.0", "method": method, "params": params}
+	if !notify {
+		m.nextID++
+		msg["id"] = m.nextID
+	}
+	b, _ := json.Marshal(msg)
+	if _, err := m.in.Write(append(b, '\n')); err != nil {
+		m.t.Fatal(err)
+	}
+}
+
+// call sends a request and returns its result; every stdout line must be a JSON-RPC message.
+func (m *mcpProc) call(method string, params any, result any) {
+	m.t.Helper()
+	m.send(method, params, false)
+	for m.out.Scan() {
+		var msg struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      *int            `json:"id"`
+			Result  json.RawMessage `json:"result"`
+			Error   json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(m.out.Bytes(), &msg); err != nil || msg.JSONRPC != "2.0" {
+			m.t.Fatalf("stdout line is not JSON-RPC: %q", m.out.Text())
+		}
+		if msg.ID == nil || *msg.ID != m.nextID {
+			continue // a notification
+		}
+		if msg.Error != nil {
+			m.t.Fatalf("%s: %s", method, msg.Error)
+		}
+		if err := json.Unmarshal(msg.Result, result); err != nil {
+			m.t.Fatalf("%s: %v: %s", method, err, msg.Result)
+		}
+		return
+	}
+	m.t.Fatalf("%s: stdout closed: %v", method, m.out.Err())
+}
+
+type toolResult struct {
+	IsError bool `json:"isError"`
+	Content []struct {
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+func (m *mcpProc) tool(name string, args map[string]any) toolResult {
+	m.t.Helper()
+	var r toolResult
+	m.call("tools/call", map[string]any{"name": name, "arguments": args}, &r)
+	if len(r.Content) != 1 {
+		m.t.Fatalf("%s: %+v", name, r)
+	}
+	return r
+}
+
+func TestMCPE2E(t *testing.T) {
+	c := startControlApp(t)
+	c.useFakeCLI(t)
+	m := c.mcp(t)
+	var init struct {
+		ProtocolVersion string `json:"protocolVersion"`
+		ServerInfo      struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+	}
+	m.call("initialize", map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{},
+		"clientInfo": map[string]any{"name": "e2e", "version": "0"}}, &init)
+	if init.ServerInfo.Name != "issuewatcher" || init.ProtocolVersion != "2025-06-18" {
+		t.Fatalf("initialize: %+v", init)
+	}
+	m.send("notifications/initialized", map[string]any{}, true)
+	var tools struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	m.call("tools/list", map[string]any{}, &tools)
+	if len(tools.Tools) != 15 {
+		t.Fatalf("tools/list: %d tools", len(tools.Tools))
+	}
+	r := m.tool("list_items", map[string]any{"limit": 5})
+	var page struct {
+		Items []struct {
+			ID int64 `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(r.Content[0].Text), &page); r.IsError || err != nil || len(page.Items) != 1 {
+		t.Fatalf("list_items: %+v", r)
+	}
+	itemID := page.Items[0].ID
+	r = m.tool("start_jobs", map[string]any{"flow": "reply", "item_ids": []int64{itemID}})
+	var queued struct {
+		Jobs []struct {
+			Job struct {
+				ID int64 `json:"id"`
+			} `json:"job"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal([]byte(r.Content[0].Text), &queued); r.IsError || err != nil || len(queued.Jobs) != 1 {
+		t.Fatalf("start_jobs: %+v", r)
+	}
+	jobID := queued.Jobs[0].Job.ID
+	waitFor(t, "reply job needs_review", func() bool {
+		r := m.tool("get_job", map[string]any{"id": jobID})
+		return strings.Contains(r.Content[0].Text, `"state":"needs_review"`)
+	})
+	r = m.tool("send_job_reply", map[string]any{"id": jobID, "body": "Sent over MCP."})
+	if r.IsError || !strings.Contains(r.Content[0].Text, `"state":"done"`) || c.comments(1) != 1 {
+		t.Fatalf("send_job_reply: %+v, fake comments %d", r, c.comments(1))
+	}
+	if r := m.tool("send_job_reply", map[string]any{"id": jobID, "body": "again"}); !r.IsError || !strings.Contains(r.Content[0].Text, "HTTP 409") {
+		t.Fatalf("second send_job_reply: %+v", r)
 	}
 }
 
