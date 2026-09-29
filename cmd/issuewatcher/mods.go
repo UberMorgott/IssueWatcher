@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -41,6 +42,13 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, plan
 		b := mcpbridge.New(mcpbridge.Options{Name: nexus.Platform, Log: log,
 			Command: command(func(p config.Providers) config.MCPServer { return p.Nexus.MCP })})
 		p := nexus.New(nexus.Options{Bridge: b, Log: log, Author: func() string { return cfgs.Get().Providers.Nexus.Author }})
+		m.bridges = append(m.bridges, b)
+		m.syncers = append(m.syncers, syncer.New(syncer.Options{Store: st, Provider: p, Plan: plan, Log: log, OnUpdate: onUpdate}))
+	}
+	if cfg.CurseForge.Enabled {
+		b := mcpbridge.New(mcpbridge.Options{Name: curseforge.Platform, Log: log,
+			Command: command(func(p config.Providers) config.MCPServer { return p.CurseForge.MCP })})
+		p := curseforge.New(curseforge.Options{Bridge: b, Log: log, Author: func() string { return cfgs.Get().Providers.CurseForge.Author }})
 		m.bridges = append(m.bridges, b)
 		m.syncers = append(m.syncers, syncer.New(syncer.Options{Store: st, Provider: p, Plan: plan, Log: log, OnUpdate: onUpdate}))
 	}
