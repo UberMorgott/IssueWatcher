@@ -73,6 +73,8 @@ type Options struct {
 	Runner *runner.Runner
 	// Picker shows the native folder dialog (FolderDialog «Обзор…»); nil (headless) → 409 unavailable.
 	Picker FolderPicker
+	// Steam is the Steam provider's account settings (/api/providers/steam); nil disables them.
+	Steam SteamSettings
 }
 
 // Server serves the SPA and the loopback API.
@@ -146,6 +148,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Runner != nil && opts.Store != nil {
 		s.registerJobs(mux)
+	}
+	if opts.Steam != nil {
+		s.registerSteam(mux)
 	}
 	if opts.TestNotification != nil {
 		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)

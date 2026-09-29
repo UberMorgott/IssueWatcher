@@ -32,6 +32,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/paths"
 	folderpicker "github.com/UberMorgott/issuewatcher/internal/picker"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -231,8 +232,11 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		}
 	}
 	// One syncer per connected account (source); GitHub is the primary one.
+	stm := steam.New(steam.Options{Dir: filepath.Join(dataDir, "secrets"), Log: log}) // keyless reads once a SteamID is set
 	sy := syncer.NewGroup(syncer.New(syncer.Options{
 		Store: st, Provider: gh, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
+	}), syncer.New(syncer.Options{
+		Store: st, Provider: stm, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
 	}))
 	// Settings apply live: popups, toasts, poll interval.
 	cfgs.Subscribe(func(_, cur config.Settings) {
@@ -312,6 +316,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		SessionSecret: session,
 		Runner:        jobs,
 		Picker:        picker,
+		Steam:         stm,
 	})
 	if err != nil {
 		return err
