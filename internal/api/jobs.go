@@ -321,6 +321,8 @@ func (s *Server) jobError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// handleDetect answers from the cached detection (agentDetect); ?refresh=1
+// detects again.
 func (s *Server) handleDetect(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.opts.Runner.Detect(r.Context()))
+	writeJSON(w, http.StatusOK, s.detectAgents(r.Context(), r.URL.Query().Get("refresh") == "1"))
 }

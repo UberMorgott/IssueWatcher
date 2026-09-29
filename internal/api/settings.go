@@ -88,6 +88,7 @@ func (s *Server) settingsResult(w http.ResponseWriter, doc SettingsDoc, err erro
 	switch {
 	case err == nil:
 		folders.Invalidate() // roots or project settings may change what a folder means
+		s.redetectAgents()   // agent profiles may name other CLIs
 		s.Publish(EventSettingsChanged, doc)
 		writeJSON(w, http.StatusOK, doc)
 	case errors.Is(err, config.ErrConflict):

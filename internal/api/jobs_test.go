@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -189,5 +190,28 @@ func TestAutomationLogAPI(t *testing.T) {
 	}
 	if code := e.call(t, http.MethodGet, "/api/automation/log?cursor=bad!", "", nil); code != http.StatusBadRequest {
 		t.Fatalf("bad cursor: %d", code)
+	}
+}
+
+// Agent CLI detection runs once (at start) and GETs answer from the cache;
+// ?refresh=1 detects again.
+func TestAgentDetectCached(t *testing.T) {
+	var looks atomic.Int32
+	e := syncedEnv(t, func(o *Options) {
+		o.Runner = runner.New(runner.Options{Store: o.Store, DataDir: filepath.Join(t.TempDir(), "data"), Settings: config.Defaults,
+			LookPath: func(string) (string, error) { looks.Add(1); return "", context.Canceled }})
+	})
+	var det []runner.Detected
+	for range 2 {
+		if code := e.call(t, http.MethodGet, "/api/agents/detect", "", &det); code != http.StatusOK || len(det) != 2 {
+			t.Fatalf("detect %d %+v", code, det)
+		}
+	}
+	if n := looks.Load(); n != 2 { // one detection: claude + codex
+		t.Fatalf("PATH lookups for two GETs: %d, want 2", n)
+	}
+	e.call(t, http.MethodGet, "/api/agents/detect?refresh=1", "", &det)
+	if n := looks.Load(); n != 4 {
+		t.Fatalf("PATH lookups after refresh: %d, want 4", n)
 	}
 }

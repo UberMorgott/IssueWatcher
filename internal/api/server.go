@@ -98,6 +98,7 @@ type Server struct {
 	opener opener       // OpenBrowser decisions and the pending new tab (open.go)
 	pickMu sync.Mutex   // one native folder dialog at a time (dialog.go)
 	labels labelRefresh // background label fetches (labels.go)
+	agents agentDetect  // cached agent CLI detection (detect.go)
 
 	bg     context.Context // background work of the server (label fetches), ended by Shutdown
 	stopBg context.CancelFunc
@@ -153,6 +154,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Updates != nil {
 		s.registerUpdate(mux)
+	}
+	if opts.Runner != nil {
+		go s.detectAgents(s.bg, false) //nolint:contextcheck // once at start, in the background
 	}
 	if opts.Runner != nil && opts.Store != nil {
 		s.registerJobs(mux)
