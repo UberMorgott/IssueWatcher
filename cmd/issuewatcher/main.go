@@ -74,6 +74,11 @@ func newAuth(log *slog.Logger, dataDir string) *github.Auth {
 const snapshotScale = 1.5
 
 func main() {
+	if isCLI(os.Args[1:]) {
+		// CLI/MCP subcommands talk to the running app; they run before the
+		// single-instance lock and never open the tray, DB or a message box.
+		os.Exit(cliMain(os.Args[1:]))
+	}
 	if err := run(); err != nil {
 		// Release builds have no console: show the reason (never block an automated run).
 		if os.Getenv(envHeadless) != "1" {
