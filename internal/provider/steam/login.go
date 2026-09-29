@@ -90,7 +90,7 @@ func (p *Provider) StartQR(ctx context.Context) (QRStatus, error) {
 	if p.opts.QRInterval > 0 {
 		interval = p.opts.QRInterval
 	}
-	bg, cancel := context.WithTimeout(context.Background(), qrTimeout)
+	bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), qrTimeout) // outlives the request that starts it
 	l := &qrLogin{cancel: cancel, status: QRStatus{State: QRPending, ChallengeURL: r.Response.ChallengeURL}}
 	p.qmu.Lock()
 	if p.qr != nil {

@@ -48,6 +48,7 @@ func fakeJWT(exp time.Time) string {
 }
 
 func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch r.URL.Path {
@@ -105,7 +106,7 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 		f.issued++
 		v := ownerID + "%7C%7C" + fakeJWT(f.exp.Add(time.Duration(f.issued)*time.Second))
 		f.valid = append(f.valid, v)
-		http.SetCookie(w, &http.Cookie{Name: "steamLoginSecure", Value: v, Path: "/", Secure: true, HttpOnly: true})
+		http.SetCookie(w, &http.Cookie{Name: "steamLoginSecure", Value: v, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode})
 		writeJSON(w, map[string]any{"result": 1})
 	case "/my/":
 		if f.accepts(r) {

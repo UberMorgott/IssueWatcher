@@ -347,6 +347,10 @@ func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, e
 	}
 	ctx, cancel := context.WithTimeout(ctx, loginTimeout)
 	defer cancel()
+	// Already signed in (or a window already open): no new import or window.
+	if res, err := l.LoginStatus(ctx); err == nil && (res.LoggedIn || res.InProgress) {
+		return m.loginResult(ctx, id, res), nil
+	}
 	res, err := l.Login(ctx)
 	if err != nil {
 		return api.LoginStatus{}, err
