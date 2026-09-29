@@ -147,6 +147,13 @@ const issuesTo = (r: Repo, platform: string, unread = false) => ({
   name: 'issues',
   query: unread ? { repo: String(r.id), source: platform, unread: '1', state: 'all' } : { repo: String(r.id), source: platform },
 })
+/** A channel's name for tooltips: the platform, plus the mod page's name (the chip itself shows only icon + count). */
+const channelLabel = (c: Integration) => (isModPlatform(c.platform) ? ` «»` : platformName(c.platform))
+/** A channel chip's tooltip: what + any sync trouble (relogin note). */
+function channelTip(c: Integration, what = ''): string {
+  const trouble = channelTrouble(c.platform)
+  return [what || channelLabel(c), trouble].filter(Boolean).join(' · ')
+}
 /** Sync trouble of a platform's source: relogin first, else its last error ("" = fine). */
 function channelTrouble(platform: string): string {
   const srcs = (app.sync?.sources ?? []).filter((s) => s.platform === platform)
@@ -330,28 +337,29 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     >
                       <a
                         v-if="c.id !== data.id"
-                        v-tooltip.top="t('projects.openModPage') + ' · ' + c.name"
+                        v-tooltip.top="channelTip(c, t('projects.openModPage') + ' · ' + channelLabel(c))"
                         :href="safeUrl(c.url)"
                         target="_blank"
                         rel="noopener noreferrer"
                         class="chip-link"
+                        :aria-label="channelTip(c)"
                       ><PlatformIcon
                         :platform="c.platform"
                         :size="12"
-                      /><span class="chip-name">{{ c.name }}</span></a>
+                      /></a>
                       <PlatformIcon
                         v-else
                         :platform="c.platform"
                         :size="12"
                       />
                       <RouterLink
-                        v-tooltip.top="t('projects.channelIssues', { platform: platformName(c.platform) }) + ' · ' + c.open + ' ' + t('words.open', c.open)"
+                        v-tooltip.top="channelTip(c, t('projects.channelIssues', { platform: channelLabel(c) }) + ' · ' + c.open + ' ' + t('words.open', c.open))"
                         :to="issuesTo(data, c.platform)"
                         class="count mono"
                       >{{ c.open }}</RouterLink>
                       <RouterLink
                         v-if="c.unread"
-                        v-tooltip.top="t('projects.channelUnread', { platform: platformName(c.platform) }) + ' · ' + c.unread + ' ' + t('words.unread', c.unread)"
+                        v-tooltip.top="channelTip(c, t('projects.channelUnread', { platform: channelLabel(c) }) + ' · ' + c.unread + ' ' + t('words.unread', c.unread))"
                         :to="issuesTo(data, c.platform, true)"
                         class="count unread mono"
                       >{{ c.unread }}</RouterLink>
