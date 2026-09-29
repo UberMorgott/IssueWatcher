@@ -37,6 +37,9 @@ type Options struct {
 	Author func() string
 	Log    *slog.Logger
 	Now    func() time.Time
+	// ReadBackWaits are the pauses before each further read-back of a reply
+	// whose id is unknown (default 5, 10, 15 s: new posts show up late).
+	ReadBackWaits []time.Duration
 }
 
 // Provider implements provider.Provider and provider.Poller.
@@ -60,6 +63,9 @@ func New(opts Options) *Provider {
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.ReadBackWaits == nil {
+		opts.ReadBackWaits = []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second}
 	}
 	if opts.Author == nil {
 		opts.Author = func() string { return "" }
@@ -447,12 +453,4 @@ func (p *Provider) FetchChanged(ctx context.Context, project provider.Project, _
 // FullReconcile implements provider.Poller.
 func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, since time.Time) ([]provider.Item, error) {
 	return p.SyncItems(ctx, project, since)
-}
-
-// canReply: posting lands in step 7 (Reply).
-const canReply = false
-
-// Reply implements provider.Provider (not yet: read-only first cut).
-func (p *Provider) Reply(context.Context, string, string) (provider.Comment, error) {
-	return provider.Comment{}, errors.ErrUnsupported
 }

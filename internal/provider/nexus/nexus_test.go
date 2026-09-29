@@ -124,7 +124,7 @@ func setup(t *testing.T) *env {
 	e.site.install(e.fake)
 	b := mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial, CallTimeout: 5 * time.Second})
 	t.Cleanup(b.Close)
-	e.prov = nexus.New(nexus.Options{Bridge: b, Author: func() string { return "Morgott" }})
+	e.prov = nexus.New(nexus.Options{Bridge: b, Author: func() string { return "Morgott" }, ReadBackWaits: []time.Duration{time.Millisecond}})
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
