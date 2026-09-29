@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/UberMorgott/issuewatcher/internal/picker"
 )
 
 // Native folder dialog (FolderDialog «Обзор…»):
@@ -111,10 +113,11 @@ func (s *Server) pickerStart(ctx context.Context, id int64, hint string) string 
 	return ""
 }
 
-// existingDir returns p cleaned when it is an absolute path of an existing folder, else "".
+// existingDir returns p cleaned when it is an absolute path of an existing local
+// folder, else "". Network paths are skipped unchecked: stat of a dead share blocks.
 func existingDir(p string) string {
 	p = strings.TrimSpace(p)
-	if p == "" || !filepath.IsAbs(p) {
+	if p == "" || !filepath.IsAbs(p) || picker.IsNetworkPath(p) {
 		return ""
 	}
 	p = filepath.Clean(p)

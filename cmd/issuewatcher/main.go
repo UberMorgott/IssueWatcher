@@ -2,6 +2,11 @@
 // opened in the user's default browser, all state in data\ next to the exe.
 package main
 
+// The exe's manifest (per-monitor v2 DPI awareness, common controls v6) lives in
+// rsrc_windows_amd64.syso, generated from winres/winres.json:
+//
+//go:generate go run github.com/tc-hib/go-winres@v0.3.3 make --in ../../winres/winres.json --arch amd64 --out rsrc
+
 import (
 	"bytes"
 	"context"
@@ -271,10 +276,13 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
 
 	focus := notify.FocusDashboard
-	var picker api.FolderPicker = folderpicker.New()
+	var picker api.FolderPicker
 	if headless {
-		focus = nil  // never raise the user's own dashboard window
-		picker = nil // no desktop dialogs
+		focus = nil // never raise the user's own dashboard window; no desktop dialogs
+	} else {
+		fp := folderpicker.New(log)
+		go fp.Warm() // COM + dialog class loaded before the first «Обзор…»
+		picker = fp
 	}
 	// quit shuts the app down gracefully (tray loop or headless wait returns,
 	// then HTTP/SSE, sync and SQLite close); the updater calls it once the new

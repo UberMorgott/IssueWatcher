@@ -77,6 +77,9 @@ $rawSize = (Get-Item $raw).Length
 Step 'upx --best --lzma'
 Run { upx --best --lzma -q -o $exe $raw | Out-Null } 'upx'
 Run { upx -t -q $exe | Out-Null } 'upx -t'
+# The manifest (cmd/issuewatcher/rsrc_windows_amd64.syso) must survive packing:
+# without it Windows bitmap-stretches every window (blurry dialogs on HiDPI).
+if (-not [IO.File]::ReadAllText($exe, [Text.Encoding]::ASCII).Contains('permonitorv2')) { Fail 'packed exe has no per-monitor-v2 DPI manifest' }
 $size = (Get-Item $exe).Length
 Remove-Item $raw
 

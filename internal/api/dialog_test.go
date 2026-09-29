@@ -127,3 +127,15 @@ func TestFolderDialogOneAtATime(t *testing.T) {
 		t.Fatalf("first: %d", code)
 	}
 }
+
+// A network start folder is dropped before any stat (a dead share would block the dialog).
+func TestPickerStartSkipsNetworkPaths(t *testing.T) {
+	for _, p := range []string{`\\iw-no-such-host\share`, `//iw-no-such-host/share`, `\\?\UNC\iw-no-such-host\share`} {
+		if got := existingDir(p); got != "" {
+			t.Errorf("existingDir(%q) = %q, want \"\"", p, got)
+		}
+	}
+	if got := existingDir(t.TempDir()); got == "" {
+		t.Error("existingDir(local temp dir) = \"\"")
+	}
+}

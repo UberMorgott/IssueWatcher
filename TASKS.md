@@ -13,7 +13,8 @@ See `docs/ARCHITECTURE.md` for decisions and phases.
 - [x] Single instance: named mutex per data dir; second launch → `POST /api/open` to running instance
 - [x] Dashboard placeholder (PrimeVue DataTable, mock rows, checkbox selection) + `/item/:id` route — replaced by the Phase 1 SPA
 - [ ] Manual visual check: tray icon/badge look, menu, real balloon click, DataTable in browser
-- [ ] App icon + manifest resource for the exe (go-winres)
+- [x] Manifest resource for the exe (go-winres, `winres/winres.json` → checked-in `cmd/issuewatcher/rsrc_windows_amd64.syso`, `go generate ./cmd/issuewatcher`): per-monitor v2 DPI (crisp folder dialog/menus), common controls v6, asInvoker; `release.ps1` fails if the UPX-packed exe lost it
+- [ ] App icon resource for the exe (go-winres)
 
 ## Phase 1 — GitHub
 - [x] Auth backend: GitHub App manifest flow + web flow/PKCE/loopback + refresh; device-flow fallback (`internal/provider/github`, `internal/api/github_auth.go`)
