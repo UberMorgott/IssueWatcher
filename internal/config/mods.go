@@ -14,9 +14,10 @@ type Providers struct {
 type ModPlatform struct {
 	Enabled bool      `json:"enabled"`
 	MCP     MCPServer `json:"mcp"`
-	// Author is the author name whose mods are listed: Nexus = the mod's author
-	// field (may differ from the uploader account), required; CurseForge = the
-	// CFWidget author, default the session's display name.
+	// Author is whose projects are listed: Nexus = the exact uploader account
+	// name or member id (required; not the mod's free-text author field, which
+	// anyone can set); CurseForge = the CFWidget author, default the session's
+	// display name.
 	Author string `json:"author,omitempty"`
 }
 

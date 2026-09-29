@@ -26,6 +26,7 @@ type site struct {
 	failPage  int                       // get_mod_comments page answering an error
 	crashOnce bool
 	bugsOff   bool
+	oldServer bool // search_mods without the uploader filter
 }
 
 func ts(min int) string {
@@ -63,12 +64,27 @@ func newSite() *site {
 
 func (s *site) install(f *mcptest.Server) {
 	f.Handle("search_mods", func(args map[string]any) (any, error) {
-		if args["author"] != "Morgott" {
-			return map[string]any{"total": 0, "offset": 0, "count": 50, "mods": []any{}}, nil
-		}
-		return map[string]any{"total": 1, "offset": 0, "count": 50, "mods": []any{map[string]any{
+		mine := map[string]any{
 			"game": "windrose", "modId": 147, "name": "ShareShip", "url": "https://www.nexusmods.com/windrose/mods/147",
-			"author": "Morgott", "uploader": map[string]any{"name": "UberMorgott", "memberId": 6541781}}}}, nil
+			"author": "Morgott", "uploader": map[string]any{"name": "UberMorgott", "memberId": 6541781},
+		}
+		// Someone else's mod with "Morgott" typed into its free-text author field.
+		spoof := map[string]any{
+			"game": "skyrim", "modId": 9, "name": "Not mine", "url": "https://www.nexusmods.com/skyrim/mods/9",
+			"author": "Morgott", "uploader": map[string]any{"name": "Stranger", "memberId": 42},
+		}
+		s.mu.Lock()
+		old := s.oldServer
+		s.mu.Unlock()
+		switch {
+		case old: // ignores the uploader filter: everything matching nothing
+			return map[string]any{"total": 2, "offset": 0, "count": 50, "mods": []any{spoof, mine}}, nil
+		case args["uploader"] == "UberMorgott" || args["uploader_id"] == float64(6541781):
+			return map[string]any{"total": 1, "offset": 0, "count": 50, "mods": []any{mine}}, nil
+		case args["author"] == "Morgott":
+			return map[string]any{"total": 2, "offset": 0, "count": 50, "mods": []any{spoof, mine}}, nil
+		}
+		return map[string]any{"total": 0, "offset": 0, "count": 50, "mods": []any{}}, nil
 	})
 	f.Handle("get_mod_comments", func(args map[string]any) (any, error) {
 		s.mu.Lock()
@@ -124,7 +140,7 @@ func setup(t *testing.T) *env {
 	e.site.install(e.fake)
 	b := mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial, CallTimeout: 5 * time.Second})
 	t.Cleanup(b.Close)
-	e.prov = nexus.New(nexus.Options{Bridge: b, Author: func() string { return "Morgott" }, ReadBackWaits: []time.Duration{time.Millisecond},
+	e.prov = nexus.New(nexus.Options{Bridge: b, Author: func() string { return "UberMorgott" }, ReadBackWaits: []time.Duration{time.Millisecond},
 		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }})
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -267,6 +283,32 @@ func TestMissingServerOrAuthorIsSignedOut(t *testing.T) {
 	p = nexus.New(nexus.Options{Bridge: b})
 	if _, err := p.Account(t.Context()); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("no author: %v", err)
+	}
+}
+
+// M3: projects and the account come from the uploader account (name or member
+// id), never from the free-text author field; a server that ignores the
+// filter fails instead of watching strangers' mods.
+func TestUploaderAccount(t *testing.T) {
+	for _, who := range []string{"UberMorgott", "6541781"} {
+		e := setup(t)
+		p := nexus.New(nexus.Options{Bridge: mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial}), Author: func() string { return who }})
+		if a, err := p.Account(t.Context()); err != nil || a != "UberMorgott" {
+			t.Fatalf("%s: account %q %v", who, a, err)
+		}
+		prs, err := p.ListProjects(t.Context())
+		if err != nil || len(prs) != 1 || prs[0].ExternalID != "windrose/147" {
+			t.Fatalf("%s: projects %+v %v", who, prs, err)
+		}
+		e.site.mu.Lock()
+		e.site.oldServer = true
+		e.site.mu.Unlock()
+		if _, err := p.ListProjects(t.Context()); err == nil {
+			t.Fatalf("%s: an unfiltered listing must fail", who)
+		}
+		if _, err := p.Account(t.Context()); err == nil {
+			t.Fatalf("%s: account from a stranger's mod", who)
+		}
 	}
 }
 

@@ -32,8 +32,9 @@ type Caller interface {
 // Options configures the provider.
 type Options struct {
 	Bridge Caller
-	// Author returns the mod author name to list (the mod's author field, e.g.
-	// "Morgott"; the uploader account may differ).
+	// Author returns the uploader account whose mods are listed: its exact
+	// account name (e.g. "UberMorgott") or member id. Not the mod's free-text
+	// author field, which anyone can set to any name.
 	Author func() string
 	Log    *slog.Logger
 	Now    func() time.Time
@@ -47,7 +48,7 @@ type Provider struct {
 	opts Options
 
 	mu      sync.Mutex
-	account string              // uploader name of the author's mods (= comment author name)
+	account string              // uploader account name (= comment author name)
 	bugs    map[string]bugCache // bug id → last read report, re-read when its list row changes
 }
 
@@ -103,28 +104,81 @@ type modsResult struct {
 		Name     string `json:"name"`
 		URL      string `json:"url"`
 		Uploader struct {
-			Name *string `json:"name"`
+			Name     *string `json:"name"`
+			MemberID *int    `json:"memberId"`
 		} `json:"uploader"`
 	} `json:"mods"`
 }
 
-// Account implements provider.Provider: reads need no login, so the account
-// is the uploader name of the author's mods (what comments show as author).
-func (p *Provider) Account(ctx context.Context) (string, error) {
-	author := strings.TrimSpace(p.opts.Author())
-	if author == "" {
-		return "", fmt.Errorf("%w: nexus: no mod author set (providers.nexus.author)", provider.ErrNotSignedIn)
+// uploader is the configured account: an exact uploader account name or its
+// member id. Both identify one account (the mod's free-text author field does
+// not: anyone can type any name there).
+type uploader struct {
+	name string
+	id   int
+}
+
+func (p *Provider) uploader() (uploader, error) {
+	v := strings.TrimSpace(p.opts.Author())
+	if v == "" {
+		return uploader{}, fmt.Errorf("%w: nexus: no uploader account set (providers.nexus.author)", provider.ErrNotSignedIn)
 	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return uploader{id: n}, nil
+	}
+	return uploader{name: v}, nil
+}
+
+// args is the search_mods filter for the account.
+func (u uploader) args() map[string]any {
+	if u.id > 0 {
+		return map[string]any{"uploader_id": u.id, "include_adult": true}
+	}
+	return map[string]any{"uploader": u.name, "include_adult": true}
+}
+
+// owns reports whether a listed mod was uploaded by the account.
+func (u uploader) owns(name *string, id *int) bool {
+	if u.id > 0 {
+		return id != nil && *id == u.id
+	}
+	return name != nil && strings.EqualFold(*name, u.name)
+}
+
+// errOldServer: search_mods ignored the uploader filter (a server build from
+// before it existed) and listed other people's mods.
+var errOldServer = errors.New("nexus: the MCP server ignores the uploader filter — update and rebuild nexusmods-mcp-server")
+
+// Account implements provider.Provider: reads need no login, so the account
+// is the configured uploader (what comments show as author), checked against
+// its mods. The web session itself is not consulted: web_status cannot tell
+// which member is signed in.
+func (p *Provider) Account(ctx context.Context) (string, error) {
+	u, err := p.uploader()
+	if err != nil {
+		return "", err
+	}
+	args := u.args()
+	args["count"] = 1
 	var r modsResult
-	if err := p.call(ctx, "search_mods", map[string]any{"author": author, "count": 1}, &r); err != nil {
+	if err := p.call(ctx, "search_mods", args, &r); err != nil {
 		if errors.Is(err, mcpbridge.ErrUnavailable) {
 			return "", fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
 		}
 		return "", err
 	}
-	name := author
-	if len(r.Mods) > 0 && r.Mods[0].Uploader.Name != nil && *r.Mods[0].Uploader.Name != "" {
-		name = *r.Mods[0].Uploader.Name
+	name := u.name
+	if len(r.Mods) > 0 {
+		m := r.Mods[0]
+		if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
+			return "", errOldServer
+		}
+		if m.Uploader.Name != nil && *m.Uploader.Name != "" {
+			name = *m.Uploader.Name
+		}
+	}
+	if name == "" {
+		return "", fmt.Errorf("%w: nexus: member %d has no mods to learn the account name from", provider.ErrNotSignedIn, u.id)
 	}
 	p.mu.Lock()
 	p.account = name
@@ -132,17 +186,25 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	return name, nil
 }
 
-// ListProjects implements provider.Provider: every mod of the author. A
-// failed page fails the listing (a partial one would deactivate projects).
+// ListProjects implements provider.Provider: every mod the account uploaded.
+// A failed page fails the listing (a partial one would deactivate projects).
 func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error) {
-	author := strings.TrimSpace(p.opts.Author())
+	u, err := p.uploader()
+	if err != nil {
+		return nil, err
+	}
 	var out []provider.Project
 	for offset := 0; ; {
+		args := u.args()
+		args["count"], args["offset"] = 50, offset
 		var r modsResult
-		if err := p.call(ctx, "search_mods", map[string]any{"author": author, "count": 50, "offset": offset}, &r); err != nil {
+		if err := p.call(ctx, "search_mods", args, &r); err != nil {
 			return nil, err
 		}
 		for _, m := range r.Mods {
+			if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
+				return nil, errOldServer
+			}
 			url := m.URL
 			if url == "" {
 				url = fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID)

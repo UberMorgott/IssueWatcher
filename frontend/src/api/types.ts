@@ -230,7 +230,7 @@ export interface Providers {
 export interface ModPlatform {
   enabled: boolean
   mcp: { command: string; args: string[] }
-  /** Nexus: the mod author name (required); CurseForge: CFWidget author override. */
+  /** Nexus: the exact uploader account name or member id (required); CurseForge: CFWidget author override. */
   author?: string
 }
 
