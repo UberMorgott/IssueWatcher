@@ -79,6 +79,11 @@ func main() {
 		// single-instance lock and never open the tray, DB or a message box.
 		os.Exit(cliMain(os.Args[1:]))
 	}
+	if exe, err := os.Executable(); err == nil && isCLICopy(exe) {
+		// The console copy is for shells only: the desktop app is issuewatcher.exe.
+		_, _ = os.Stderr.WriteString(cliUsage)
+		os.Exit(exitUsage)
+	}
 	if err := run(); err != nil {
 		// Release builds have no console: show the reason (never block an automated run).
 		if os.Getenv(envHeadless) != "1" {
@@ -316,6 +321,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	} else {
 		_ = selfupdate.Cleanup(context.Background(), settings.exe, 1, 0) // leftovers of a crashed update
 	}
+	go refreshCLI(log, settings.exe) // past the rollback point: the copy matches the version that stays
 	rt := instance.Runtime{
 		PID: os.Getpid(), Port: srv.Port(), URL: srv.BaseURL(), Token: srv.Token(),
 		Version: Version, StartedAt: time.Now().UTC(),

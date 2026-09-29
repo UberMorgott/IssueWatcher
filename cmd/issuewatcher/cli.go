@@ -32,9 +32,11 @@ const (
 // errUsage marks a command-line mistake (exit 2).
 var errUsage = errors.New("usage")
 
-const cliUsage = `usage: issuewatcher <command> [flags]
+const cliUsage = `usage: issuewatcher-cli <command> [flags]
 
 Talks to the running IssueWatcher of this data dir (never starts it).
+issuewatcher-cli.exe (next to issuewatcher.exe, written by the app on start) is
+for shells; issuewatcher.exe takes the same commands through pipes (agents, MCP).
 JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running.
 
   help

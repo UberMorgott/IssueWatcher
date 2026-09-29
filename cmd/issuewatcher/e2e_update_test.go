@@ -49,9 +49,10 @@ type e2e struct {
 	procs []int // every PID seen, killed at the end
 }
 
+// build makes a release-style (windowed, -H windowsgui) exe, like release.ps1.
 func build(t *testing.T, out, version, pub string) []byte {
 	t.Helper()
-	ld := fmt.Sprintf("-s -w -X main.Version=%s -X github.com/UberMorgott/issuewatcher/internal/selfupdate.publicKey=%s", version, pub)
+	ld := fmt.Sprintf("-s -w -H windowsgui -X main.Version=%s -X github.com/UberMorgott/issuewatcher/internal/selfupdate.publicKey=%s", version, pub)
 	cmd := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-ldflags", ld, "-o", out, ".")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build %s: %v\n%s", version, err, b)
@@ -324,6 +325,9 @@ func (e *e2e) success(t *testing.T) {
 	}
 	waitNoLeftovers(t, a)
 	assertExe(t, a, e.new, "v0.1.1")
+	// The new version refreshes the console copy for shells.
+	cliNew, _, _ := consoleCopy(e.new)
+	waitFor(t, "console copy of v0.1.1", func() bool { b, _ := os.ReadFile(filepath.Join(a.dir, cliExeName)); return bytes.Equal(b, cliNew) })
 	if st := a.status(t); st.LastResult == nil || !st.LastResult.OK || st.LastResult.From != "v0.1.0" || st.LastResult.To != "v0.1.1" {
 		t.Fatalf("lastResult %+v", st.LastResult)
 	}

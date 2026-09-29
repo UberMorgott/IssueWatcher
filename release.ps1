@@ -106,9 +106,19 @@ try {
     $health = $h.Content | ConvertFrom-Json
     if ($h.StatusCode -ne 200 -or $health.version -ne $Version) { Fail "smoke: /api/health $($h.StatusCode) version '$($health.version)'" }
     Write-Host "smoke: /api/health 200, version $($health.version), pid $($proc.Id)"
+    # The app writes its console copy for shells next to itself (not an asset).
+    $cli = Join-Path $out 'issuewatcher-cli.exe'
+    for ($i = 0; $i -lt 40 -and -not (Test-Path $cli); $i++) { Start-Sleep -Milliseconds 250 }
+    if (-not (Test-Path $cli)) { Fail 'smoke: issuewatcher-cli.exe never appeared' }
+    Start-Sleep -Milliseconds 500 # written as .new, then renamed: settled once it exists
+    $env:IW_DATA_DIR = $smokeData
+    try { $cliOut = & $cli status; $cliCode = $LASTEXITCODE } finally { Remove-Item env:IW_DATA_DIR -ErrorAction SilentlyContinue; if ($null -ne $saved.IW_DATA_DIR) { $env:IW_DATA_DIR = $saved.IW_DATA_DIR } }
+    if ($cliCode -ne 0 -or (($cliOut -join "`n") | ConvertFrom-Json).health.version -ne $Version) { Fail "smoke: issuewatcher-cli status exit $cliCode" }
+    Write-Host "smoke: issuewatcher-cli.exe status exit 0"
 } finally {
     if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force; $proc.WaitForExit(10000) | Out-Null }
     Remove-Item -Recurse -Force $smokeData -ErrorAction SilentlyContinue
+    Get-ChildItem $out -Force -Filter '*issuewatcher-cli.exe*' | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
 # --- manifest + signature -----------------------------------------------------------

@@ -307,6 +307,26 @@ func TestControlE2E(t *testing.T) {
 	if !st.Running || st.Health.Version != "v0.0.0-e2e" {
 		t.Fatalf("status %+v", st)
 	}
+	// The windowed build keeps a console copy next to it for interactive shells.
+	gui, err := os.ReadFile(c.exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, ok, err := consoleCopy(gui)
+	if err != nil || !ok {
+		t.Fatalf("e2e build is not windowed: ok %v err %v", ok, err)
+	}
+	cliExe := filepath.Join(c.dir, cliExeName)
+	waitFor(t, "console copy", func() bool { b, _ := os.ReadFile(cliExe); return bytes.Equal(b, want) })
+	viaCopy := &controlApp{app: &app{dir: c.dir, exe: cliExe, data: c.data}}
+	st.Running = false
+	viaCopy.ok(t, "", &st, "status")
+	if !st.Running || st.Health.Version != "v0.0.0-e2e" {
+		t.Fatalf("status via %s: %+v", cliExeName, st)
+	}
+	if code, _, stderr := viaCopy.cli(t, ""); code != exitUsage || !strings.Contains(stderr, "usage:") {
+		t.Fatalf("%s without a command: exit %d, stderr %q", cliExeName, code, stderr)
+	}
 	var projects []struct {
 		ID   int64
 		Name string

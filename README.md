@@ -63,10 +63,17 @@ apply_job_labels, push_job, create_pr` (local ids, pages ≤ 50; logs in
 `data\logs\mcp.log`). Publishing tools (comment, push, PR) have no extra gate:
 approve them in your MCP client.
 
-The release exe is a windowed app: Windows shells do not wait for it. Pipe its
-output so they do — `issuewatcher status | Out-String` in PowerShell (also sets
-`$LASTEXITCODE`). Agents and MCP
-clients read through pipes and need nothing extra.
+In a shell use `issuewatcher-cli.exe`: the app writes it next to itself on
+every start (a console build of the same exe, refreshed by updates). Shells
+wait for it and `$LASTEXITCODE` / `%ERRORLEVEL%` are set:
+
+```powershell
+& "C:\path\to\issuewatcher-cli.exe" status; $LASTEXITCODE
+```
+
+`issuewatcher.exe` is windowed, so an interactive shell does not wait for it
+(output after the prompt, exit code lost); agents and MCP clients read it
+through pipes, where it works as is.
 
 ## Build
 
