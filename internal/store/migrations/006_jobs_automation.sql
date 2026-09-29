@@ -1,8 +1,9 @@
--- Phase 3 automation: new flow label and job origin (manual | rule).
--- SQLite cannot alter a CHECK, and jobs now hold real rows, so the table is
--- rebuilt by copying every row (ids, attempts, results kept).
+-- Phase 3 automation: the jobs table starts fresh with the label flow and the
+-- job origin (manual | rule). Owner decision 2026-09-29: no row-preserving
+-- migration, old job rows are discarded. Ids continue after the old maximum
+-- (AUTOINCREMENT seeded below) so data\jobs\<id> logs/diffs never collide.
 CREATE TABLE jobs_new (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     flow        TEXT NOT NULL CHECK (flow IN ('fix', 'reply', 'label')),
@@ -12,7 +13,7 @@ CREATE TABLE jobs_new (
     rule_id     TEXT NOT NULL DEFAULT '',   -- config agents.automation.rules[].id (origin rule)
     profile_id  TEXT NOT NULL DEFAULT '',   -- config agents.profiles[].id
     attempt     INTEGER NOT NULL DEFAULT 1, -- a retry is a new attempt of the same job
-    phase       TEXT NOT NULL DEFAULT '',   -- step while running: prepare, agent, verify, review, publish
+    phase       TEXT NOT NULL DEFAULT '',   -- step while running: prepare, agent, check, verify, review, publish
     branch      TEXT NOT NULL DEFAULT '',   -- fix: iw/<number>-<slug>
     worktree    TEXT NOT NULL DEFAULT '',   -- fix: data\worktrees\<project>\<job>; '' once removed
     base_sha    TEXT NOT NULL DEFAULT '',   -- fix: commit the branch started from
@@ -23,15 +24,10 @@ CREATE TABLE jobs_new (
     finished_at TEXT NOT NULL DEFAULT '',
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
-
-INSERT INTO jobs_new (id, item_id, project_id, flow, state, profile_id, attempt, phase, branch, worktree, base_sha,
-                      error, result, created_at, started_at, finished_at, updated_at)
-SELECT id, item_id, project_id, flow, state, profile_id, attempt, phase, branch, worktree, base_sha,
-       error, result, created_at, started_at, finished_at, updated_at
-FROM jobs;
+INSERT INTO sqlite_sequence (name, seq) SELECT 'jobs_new', coalesce(max(id), 0) FROM jobs;
 
 DROP TABLE jobs;
-ALTER TABLE jobs_new RENAME TO jobs;
+ALTER TABLE jobs_new RENAME TO jobs; -- also renames its sqlite_sequence row
 
 CREATE INDEX jobs_item ON jobs(item_id, id);
 CREATE INDEX jobs_state ON jobs(state, id);
