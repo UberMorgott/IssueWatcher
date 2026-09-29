@@ -252,8 +252,13 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
 	var changed int
-	events, err := s.cycleOnce(ctx, &changed)
+	events, src, complete, err := s.cycleOnce(ctx, &changed)
 	now := s.now()
+	if complete { // every project was read (per-project errors included): a restart resumes from here
+		if merr := s.opts.Store.MarkReconciled(ctx, src, now); merr != nil {
+			s.opts.Log.Error("sync: mark reconciled", "err", merr)
+		}
+	}
 	var rl *provider.RateLimitError
 	s.update(func(st *Status) {
 		st.Running = false
@@ -295,27 +300,29 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 }
 
 // cycleOnce syncs every project; *changed accumulates rows that really changed.
-func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, error) {
+// complete reports that every project was read (per-project errors included)
+// of source src.
+func (s *Syncer) cycleOnce(ctx context.Context, changed *int) (events []store.Event, src int64, complete bool, err error) {
 	p := s.opts.Provider
 	login, err := p.Account(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
-	src, err := s.opts.Store.UpsertSource(ctx, p.Platform(), login)
+	src, err = s.opts.Store.UpsertSource(ctx, p.Platform(), login)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
 	s.mu.Lock()
 	s.source, s.login = src, login
 	s.mu.Unlock()
 	list, err := p.ListProjects(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list projects: %w", err)
+		return nil, src, false, fmt.Errorf("list projects: %w", err)
 	}
 	c0 := s.opts.Store.Changes()
 	projects, err := s.opts.Store.SyncProjects(ctx, src, list)
 	if err != nil {
-		return nil, err
+		return nil, src, false, err
 	}
 	step := func() int { // rows changed since the previous report
 		c := s.opts.Store.Changes()
@@ -325,17 +332,14 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 		return n
 	}
 	s.progress(Progress{State: ProgressStarted, Total: len(projects), Changed: step()})
-	var (
-		events []store.Event
-		errs   []error
-	)
+	var errs []error
 	for i, pr := range projects {
 		items, err := p.SyncItems(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
 		if err != nil {
 			var rl *provider.RateLimitError
 			if errors.As(err, &rl) || errors.Is(err, provider.ErrNotSignedIn) || ctx.Err() != nil {
 				s.refreshTargets(ctx, src, login)
-				return events, err // stop the cycle; the rest waits for the next one
+				return events, src, false, err // stop the cycle; the rest waits for the next one
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", pr.ExternalID, err))
 			s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects)})
@@ -343,13 +347,13 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int) ([]store.Event, er
 		}
 		evs, err := s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
 		if err != nil {
-			return events, err
+			return events, src, false, err
 		}
 		events = append(events, evs...)
 		s.progress(Progress{State: ProgressRepo, Repo: pr.Name, Done: i + 1, Total: len(projects), Changed: step()})
 	}
 	s.refreshTargets(ctx, src, login)
-	return events, errors.Join(errs...)
+	return events, src, true, errors.Join(errs...)
 }
 
 // SyncProject re-reads one project of this syncer's source now (the project

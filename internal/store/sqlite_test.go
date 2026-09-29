@@ -22,8 +22,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Fatalf("user_version = %d, want 12", version)
+	if version != 13 {
+		t.Fatalf("user_version = %d, want 13", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
@@ -293,4 +293,61 @@ func seedProjects(ctx context.Context, db *sql.DB, sourceID int64, list []provid
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// Migration 013 adds sources.reconciled_at, backfilled from the newest project
+// sync so an updated app resumes instead of reconciling again; a source never
+// synced stays empty.
+func TestMigration013SourceReconciled(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateTo(ctx, db, 12); err != nil {
+		t.Fatal(err)
+	}
+	s := New(db)
+	src, err := s.UpsertSource(ctx, "github", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := s.UpsertSource(ctx, "nexus", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects, err := seedProjects(ctx, db, src, []provider.Project{{ExternalID: "o/a", Name: "o/a"}, {ExternalID: "o/b", Name: "o/b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET synced_at = CASE id WHEN ? THEN '2026-09-01T10:00:00Z' ELSE '2026-09-02T10:00:00Z' END`, projects[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	s = New(db)
+	st, ok, err := s.LastSource(ctx, "github", "me")
+	if err != nil || !ok || st.ID != src || st.ReconciledAt.Format(timeFormat) != "2026-09-02T10:00:00Z" {
+		t.Fatalf("github source: %+v %v %v", st, ok, err)
+	}
+	st, ok, err = s.LastSource(ctx, "nexus", "")
+	if err != nil || !ok || st.ID != idle || !st.ReconciledAt.IsZero() {
+		t.Fatalf("never synced source: %+v %v %v", st, ok, err)
+	}
+	if _, ok, err := s.LastSource(ctx, "github", "other"); err != nil || ok {
+		t.Fatalf("unknown account: %v %v", ok, err)
+	}
+	if err := s.MarkReconciled(ctx, idle, t0); err != nil {
+		t.Fatal(err)
+	}
+	if st, _, _ := s.LastSource(ctx, "nexus", ""); !st.ReconciledAt.Equal(t0) {
+		t.Fatalf("after MarkReconciled: %+v", st)
+	}
 }
