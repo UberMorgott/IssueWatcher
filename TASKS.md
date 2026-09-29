@@ -151,3 +151,19 @@ Owner decision 2026-09-29: CurseForge + Nexus through his MCP servers (`E:\DEV\c
 - [ ] 12. **Manual (user)**: Nexus + CurseForge login from Settings; a reply from the dashboard on his own mod; a reply job draft sent; one Steam post on his own item (enables Steam reply); a rule `kinds:[bug]` → reply job on a new Nexus bug report Steam reply capability stays off: live check authorized by the owner 2026-09-29 but no cookies stored yet (paste them in Settings › Платформы, post once, then flip `Capabilities.Reply`).
 - [x] 14. **Zero-setup sign-in** (owner 2026-09-29: one click, no fields): Steam QR via IAuthenticationService in the dashboard + finalizelogin cookies + refresh-token renewal, replies on a verified session; Nexus/CurseForge through the servers' own login (silent browser import or sign-in window), Nexus member auto-detected (`web_status.account`, servers 81a8f41 / curseforge 60ff97f); `/api/platforms/{id}/login`; relogin state + tray card → `/connections?login=`; manual fields under «Дополнительно»; auto-link mod pages by name/slug + suggestion chips (migration 010). Tests `TestQRSignIn`, `TestReplyRenewsRefusedSessionAndPostsOnce`, `TestRefreshRefusedNeedsSignIn`, `TestSignInGivesTheAccount`, `TestLogin`, `TestLoginNexusZeroSetup`, `TestReloginCardOnce`, `TestAutoLink`; browser check: real Steam QR rendered, CurseForge SSO window opened, Nexus connected silently (UberMorgott, 1 mod page). Live Steam QR login + post: owner (scan once).
 - [x] 13. **Review fixes (v0.5.0)**: write tools answer `outcome_unknown` after a sent-but-failed post (servers) and Go reads back on any unsure write error (no duplicate replies); read-back skips replies present before the post + survives a cancelled request; Syncer enforces `Capabilities.Reply` (409 `reply_off`); first change check reconciles, full re-read hourly; Nexus lists by uploader account (name or member id), not the free-text author; Steam stable item numbers + settings write race; bridge Close final, ctx-aware call queue; https-only provider URLs + UI `safeUrl`; CF reply body escaped HTML; mutes keyed `platform:id`.
+
+## v0.7.0 — perf / storage & sync model (ARCHITECTURE.md → Storage & sync model; one step = one commit, each with `aegis verify`)
+Owner requirements 2026-09-30: resume deltas after a restart, never block the UI, every read path from SQLite, < 50 ms per endpoint. Baseline: restart with nothing changed upstream = 907 fake-GitHub calls (installations + 905 GraphQL) + `ProgressStarted 61`; `/api/agents/detect` p95 71.9 ms.
+- [x] 1. Persist the sync schedule: `sources.reconciled_at` (migration 013), `Store.MarkReconciled`/`LastSource` — 36fbad6
+- [x] 2. Warm start from SQLite: stored source, targets + poll state, next reconcile from `reconciled_at`, overdue work spread; account confirmed on the first check — 2900872
+- [x] 3. Items + cursor + poll state in one transaction (`ApplyChecked`); a failed store keeps the old state — fe86ade
+- [x] 4. First-reconcile retry backoff 1, 2, 4 … 15 min — d3fff77
+- [x] 5. Background vs user sync: `Progress.Background`, paced `sync.status` / coalesced `data.changed`, quiet topbar hint, one debounced refresh per cycle — 682240e
+- [x] 6. `query_only` reader pool (4 conns) for every read; single writer — 7108130
+- [x] 7. Folder status off the read path (30 s cache, checks after rows close), `/api/platforms` counts in SQL, labels load one project — 3969069
+- [x] 8. Project labels from SQLite (migration 014), background refresh + `data.changed{labels}` — 59da4ed
+- [x] 9. Agent CLI detection cached (`?refresh=1`) — ff17333
+- [x] 10. Parallel reconcile (`Plan.Concurrency` workers) — deb9946
+- [x] 11. No-op writes skipped (`BenchmarkApplyItemsNoop` ~95 → ~18 ms) — e6be8b9
+- [x] 12. Reconcile stamps the change-check baseline (`PollState.FullAt`) — b206d93
+- [x] 13. Docs: ARCHITECTURE.md → Storage & sync model; stale GitHub sync / SPA lines fixed
