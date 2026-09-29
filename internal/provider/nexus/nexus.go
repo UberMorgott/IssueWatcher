@@ -49,6 +49,7 @@ type Provider struct {
 
 	mu      sync.Mutex
 	account string              // uploader account name (= comment author name)
+	member  *uploader           // the signed-in member (web_status), when no account is configured
 	bugs    map[string]bugCache // bug id → last read report, re-read when its list row changes
 }
 
@@ -118,10 +119,32 @@ type uploader struct {
 	id   int
 }
 
-func (p *Provider) uploader() (uploader, error) {
+// uploader is the configured account, else the signed-in member (cached).
+func (p *Provider) uploader(ctx context.Context) (uploader, error) {
 	v := strings.TrimSpace(p.opts.Author())
 	if v == "" {
-		return uploader{}, fmt.Errorf("%w: nexus: no uploader account set (providers.nexus.author)", provider.ErrNotSignedIn)
+		p.mu.Lock()
+		m := p.member
+		p.mu.Unlock()
+		if m != nil {
+			return *m, nil
+		}
+		l, err := p.LoginStatus(ctx)
+		switch {
+		case errors.Is(err, mcpbridge.ErrUnavailable):
+			return uploader{}, fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
+		case err != nil:
+			return uploader{}, err
+		case !l.LoggedIn:
+			return uploader{}, fmt.Errorf("%w: nexus: not signed in (Settings › Платформы › Подключить)", provider.ErrNotSignedIn)
+		}
+		p.mu.Lock()
+		m = p.member
+		p.mu.Unlock()
+		if m == nil {
+			return uploader{}, fmt.Errorf("nexus: signed in, but the account is unknown (%s)", l.Detail)
+		}
+		return *m, nil
 	}
 	if n, err := strconv.Atoi(v); err == nil && n > 0 {
 		return uploader{id: n}, nil
@@ -149,12 +172,11 @@ func (u uploader) owns(name *string, id *int) bool {
 // before it existed) and listed other people's mods.
 var errOldServer = errors.New("nexus: the MCP server ignores the uploader filter — update and rebuild nexusmods-mcp-server")
 
-// Account implements provider.Provider: reads need no login, so the account
-// is the configured uploader (what comments show as author), checked against
-// its mods. The web session itself is not consulted: web_status cannot tell
-// which member is signed in.
+// Account implements provider.Provider: the configured uploader account, else
+// the member signed in to the MCP server's web session (web_status account),
+// checked against its mods; the name is what comments show as author.
 func (p *Provider) Account(ctx context.Context) (string, error) {
-	u, err := p.uploader()
+	u, err := p.uploader(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -167,7 +189,7 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 		}
 		return "", err
 	}
-	name := u.name
+	name := cmpName(u.name, p.memberName(u.id))
 	if len(r.Mods) > 0 {
 		m := r.Mods[0]
 		if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
@@ -189,7 +211,7 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 // ListProjects implements provider.Provider: every mod the account uploaded.
 // A failed page fails the listing (a partial one would deactivate projects).
 func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error) {
-	u, err := p.uploader()
+	u, err := p.uploader(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -512,4 +534,78 @@ func (p *Provider) FetchChanged(ctx context.Context, project provider.Project, _
 // FullReconcile implements provider.Poller.
 func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, since time.Time) ([]provider.Item, error) {
 	return p.SyncItems(ctx, project, since)
+}
+
+// ── sign-in ──────────────────────────────────────────────────────
+
+type sessionResult struct {
+	LoggedIn     bool   `json:"loggedIn"`
+	InProgress   bool   `json:"loginInProgress"`
+	WindowOpened bool   `json:"loginWindowOpened"`
+	Detail       string `json:"detail"`
+	Account      *struct {
+		MemberID int    `json:"memberId"`
+		Name     string `json:"name"`
+	} `json:"account"`
+	AccountError string `json:"accountError"`
+}
+
+func (p *Provider) session(s sessionResult) provider.Login {
+	l := provider.Login{LoggedIn: s.LoggedIn, InProgress: s.InProgress, Window: s.WindowOpened, Detail: cmpName(s.AccountError, s.Detail)}
+	if s.LoggedIn && s.Account != nil && s.Account.MemberID > 0 {
+		p.mu.Lock()
+		p.member = &uploader{id: s.Account.MemberID, name: s.Account.Name}
+		p.mu.Unlock()
+		l.Account = cmpName(s.Account.Name, strconv.Itoa(s.Account.MemberID))
+	}
+	return l
+}
+
+// Login implements provider.Loginer: web_login imports a browser's session or
+// opens the server's sign-in window (captured by the server itself).
+func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
+	var s sessionResult
+	if err := p.call(ctx, "web_login", nil, &s); err != nil {
+		return provider.Login{}, err
+	}
+	l := p.session(s)
+	if l.LoggedIn && l.Account == "" {
+		return p.LoginStatus(ctx) // web_login does not report the member
+	}
+	return l, nil
+}
+
+// LoginStatus implements provider.Loginer (web_status: session + member).
+func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
+	var s sessionResult
+	if err := p.call(ctx, "web_status", nil, &s); err != nil {
+		return provider.Login{}, err
+	}
+	return p.session(s), nil
+}
+
+// Member is the signed-in member id (0 = unknown), for storing it as the account.
+func (p *Provider) Member() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.member == nil {
+		return 0
+	}
+	return p.member.id
+}
+
+func (p *Provider) memberName(id int) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.member != nil && p.member.id == id && id > 0 {
+		return p.member.name
+	}
+	return ""
+}
+
+func cmpName(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

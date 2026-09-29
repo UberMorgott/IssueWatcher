@@ -40,6 +40,27 @@ type Capabilities struct {
 // ErrNotSignedIn means the provider has no usable credentials.
 var ErrNotSignedIn = errors.New("provider: not signed in")
 
+// ErrRelogin means the stored session expired or was refused: the user must
+// sign in again (Settings › Платформы; a tray card «войдите снова» offers it).
+var ErrRelogin = errors.New("provider: sign in again")
+
+// Login is the progress of an interactive sign-in («Подключить»).
+type Login struct {
+	LoggedIn   bool   `json:"loggedIn"`
+	InProgress bool   `json:"inProgress"` // a sign-in window is open
+	Window     bool   `json:"window"`     // this call opened it
+	Account    string `json:"account,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// Loginer is a provider whose session comes from an interactive sign-in:
+// Login imports a session silently when it can, else opens a sign-in window
+// and returns at once; LoginStatus reports whether the session has arrived.
+type Loginer interface {
+	Login(ctx context.Context) (Login, error)
+	LoginStatus(ctx context.Context) (Login, error)
+}
+
 // RateLimitError means the platform quota is exhausted until Reset.
 // Secondary marks GitHub's secondary (abuse) limit: back off even when Reset
 // is near, and longer on repeats.

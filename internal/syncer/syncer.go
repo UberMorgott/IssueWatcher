@@ -39,6 +39,7 @@ type Status struct {
 	LastSync         string               `json:"lastSync"` // last full reconcile
 	LastCheck        string               `json:"lastCheck"`
 	LastError        string               `json:"lastError"`
+	Relogin          bool                 `json:"relogin"` // the last cycle failed with provider.ErrRelogin
 	RateLimitedUntil string               `json:"rateLimitedUntil"`
 	Interval         string               `json:"interval"` // active-project check period (legacy field)
 	Mode             string               `json:"mode"`
@@ -257,6 +258,7 @@ func (s *Syncer) SyncOnce(ctx context.Context) error {
 	s.update(func(st *Status) {
 		st.Running = false
 		st.SignedIn = !errors.Is(err, provider.ErrNotSignedIn)
+		st.Relogin = errors.Is(err, provider.ErrRelogin)
 		st.RateLimitedUntil = ""
 		switch {
 		case err == nil:

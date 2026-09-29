@@ -27,6 +27,8 @@ type site struct {
 	crashOnce bool
 	bugsOff   bool
 	oldServer bool // search_mods without the uploader filter
+	loggedIn  bool // the server's web session
+	window    bool // web_login opened the sign-in window (signs in on the next web_status)
 }
 
 func ts(min int) string {
@@ -57,12 +59,34 @@ func newSite() *site {
 		bugs: []map[string]any{{"id": "900", "title": "Ship UI missing", "status": "New issue", "statusKey": "new", "open": true,
 			"replies": 1, "version": "1.3.0", "priority": "Not set", "lastPostAt": ts(40)}},
 		bugPosts: map[string]map[string]any{"900": {"issueId": "900", "canReply": true,
-			"report": map[string]any{"id": "900", "parentId": nil, "author": "dave", "authorId": 3, "createdAt": nil, "createdAtLocal": "2026-09-01T13:35", "body": "UI gone after update"},
+			"report":  map[string]any{"id": "900", "parentId": nil, "author": "dave", "authorId": 3, "createdAt": nil, "createdAtLocal": "2026-09-01T13:35", "body": "UI gone after update"},
 			"replies": []map[string]any{{"id": "901", "parentId": "900", "author": "UberMorgott", "authorId": 1, "createdAt": nil, "createdAtLocal": "2026-09-01T13:40", "body": "looking"}}}},
 	}
 }
 
 func (s *site) install(f *mcptest.Server) {
+	f.Handle("web_status", func(map[string]any) (any, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.window { // the user signed in inside the server's window
+			s.window, s.loggedIn = false, true
+			return map[string]any{"loggedIn": false, "loginInProgress": true, "cookiesStored": false, "detail": "UNAUTHORIZED", "account": nil}, nil
+		}
+		out := map[string]any{"loggedIn": s.loggedIn, "loginInProgress": false, "cookiesStored": s.loggedIn, "detail": "session valid", "account": nil}
+		if s.loggedIn {
+			out["account"] = map[string]any{"memberId": 6541781, "name": "UberMorgott"}
+		}
+		return out, nil
+	})
+	f.Handle("web_login", func(map[string]any) (any, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.loggedIn {
+			return map[string]any{"loggedIn": true, "loginWindowOpened": false, "loginInProgress": false, "detail": "Extracted 5 cookies; logged in."}, nil
+		}
+		s.window = true
+		return map[string]any{"loggedIn": false, "loginWindowOpened": true, "loginInProgress": true, "detail": "A Nexus Mods login window has opened."}, nil
+	})
 	f.Handle("search_mods", func(args map[string]any) (any, error) {
 		mine := map[string]any{
 			"game": "windrose", "modId": 147, "name": "ShareShip", "url": "https://www.nexusmods.com/windrose/mods/147",
@@ -329,5 +353,37 @@ func TestDetectChanges(t *testing.T) {
 	e.site.mu.Unlock()
 	if ch, _ = e.prov.DetectChanges(t.Context(), pr, &st); !ch.Overflow {
 		t.Fatal("a new bug reply was not detected")
+	}
+}
+
+// Zero setup: without a configured account the signed-in member of the
+// server's web session is the account (web_login opens the window, web_status
+// reports the member once the user signed in there).
+func TestSignInGivesTheAccount(t *testing.T) {
+	e := setup(t)
+	p := nexus.New(nexus.Options{Bridge: mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial})})
+	if _, err := p.Account(t.Context()); !errors.Is(err, provider.ErrNotSignedIn) {
+		t.Fatalf("before sign-in: %v", err)
+	}
+	l, err := p.Login(t.Context())
+	if err != nil || l.LoggedIn || !l.Window || !l.InProgress {
+		t.Fatalf("login %+v %v", l, err)
+	}
+	if l, err = p.LoginStatus(t.Context()); err != nil || l.LoggedIn || !l.InProgress {
+		t.Fatalf("while signing in %+v %v", l, err)
+	}
+	if l, err = p.LoginStatus(t.Context()); err != nil || !l.LoggedIn || l.Account != "UberMorgott" || p.Member() != 6541781 {
+		t.Fatalf("after sign-in %+v %v member %d", l, err, p.Member())
+	}
+	if a, err := p.Account(t.Context()); err != nil || a != "UberMorgott" {
+		t.Fatalf("account %q %v", a, err)
+	}
+	prs, err := p.ListProjects(t.Context())
+	if err != nil || len(prs) != 1 || prs[0].ExternalID != "windrose/147" {
+		t.Fatalf("projects %+v %v", prs, err)
+	}
+	// Already signed in: web_login answers at once, with the member.
+	if l, err = p.Login(t.Context()); err != nil || !l.LoggedIn || l.Window || l.Account != "UberMorgott" {
+		t.Fatalf("second login %+v %v", l, err)
 	}
 }

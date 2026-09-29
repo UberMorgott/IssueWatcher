@@ -26,7 +26,7 @@ const Platform = "curseforge"
 
 // ErrRelogin means the stored session expired or was refused (Cloudflare):
 // the owner must sign in again from Settings; the sync never opens a login window.
-var ErrRelogin = errors.New("curseforge: re-login needed")
+var ErrRelogin = fmt.Errorf("curseforge: re-login needed (%w)", provider.ErrRelogin)
 
 // ErrUnknownOutcome: the post may or may not have landed and a read-back did
 // not find it.
@@ -105,6 +105,7 @@ func (p *Provider) call(ctx context.Context, tool string, args map[string]any, o
 type sessionResult struct {
 	LoggedIn      bool   `json:"loggedIn"`
 	CookiesStored bool   `json:"cookiesStored"`
+	InProgress    bool   `json:"loginInProgress"`
 	Detail        string `json:"detail"`
 	User          *struct {
 		DisplayName *string `json:"displayName"`
@@ -128,15 +129,7 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	case !s.LoggedIn:
 		return "", fmt.Errorf("%w (%s)", ErrRelogin, s.Detail)
 	}
-	name := ""
-	if s.User != nil {
-		for _, v := range []*string{s.User.DisplayName, s.User.Username} {
-			if v != nil && *v != "" {
-				name = *v
-				break
-			}
-		}
-	}
+	name := s.name()
 	if name == "" {
 		return "", fmt.Errorf("%w: curseforge: session has no user", provider.ErrNotSignedIn)
 	}
@@ -144,6 +137,53 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	p.account = name
 	p.mu.Unlock()
 	return name, nil
+}
+
+// name is the session's display name (else username).
+func (s sessionResult) name() string {
+	if s.User != nil {
+		for _, v := range []*string{s.User.DisplayName, s.User.Username} {
+			if v != nil && *v != "" {
+				return *v
+			}
+		}
+	}
+	return ""
+}
+
+// Login implements provider.Loginer: cf_auto_extract_cookies keeps a browser's
+// session only when it is signed in, else opens the server's sign-in window
+// (captured by the server itself).
+func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
+	var r struct {
+		Result       string `json:"result"`
+		LoggedIn     bool   `json:"loggedIn"`
+		InProgress   bool   `json:"loginInProgress"`
+		WindowOpened bool   `json:"loginWindowOpened"`
+	}
+	if err := p.opts.Bridge.Call(ctx, "cf_auto_extract_cookies", nil, &r, true); err != nil {
+		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
+	}
+	if r.LoggedIn {
+		return p.LoginStatus(ctx)
+	}
+	return provider.Login{InProgress: r.InProgress || r.WindowOpened, Window: r.WindowOpened, Detail: r.Result}, nil
+}
+
+// LoginStatus implements provider.Loginer (cf_session_status).
+func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
+	var s sessionResult
+	if err := p.opts.Bridge.Call(ctx, "cf_session_status", nil, &s, true); err != nil {
+		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
+	}
+	l := provider.Login{LoggedIn: s.LoggedIn && s.name() != "", InProgress: s.InProgress, Detail: s.Detail}
+	if l.LoggedIn {
+		l.Account = s.name()
+		p.mu.Lock()
+		p.account = l.Account
+		p.mu.Unlock()
+	}
+	return l, nil
 }
 
 func (p *Provider) self(ctx context.Context) (string, error) {

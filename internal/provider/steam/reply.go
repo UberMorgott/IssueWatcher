@@ -16,7 +16,7 @@ import (
 
 // ErrSessionExpired: Steam refused the stored web cookies; the user must sign
 // in again (Settings › Платформы › Steam). It is a provider.ErrNotSignedIn.
-var ErrSessionExpired = fmt.Errorf("%w: Steam session expired — sign in again", provider.ErrNotSignedIn)
+var ErrSessionExpired = fmt.Errorf("%w: Steam session expired (%w)", provider.ErrNotSignedIn, provider.ErrRelogin)
 
 // ErrOutcomeUnknown: the post may or may not have landed and a read-back did
 // not find it. Never retried automatically (a retry could post twice).

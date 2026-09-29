@@ -47,9 +47,19 @@ type site struct {
 	cookies  bool
 	pages    map[int][]map[string]any
 	readErr  string // get_comments error code
+	window   bool   // cf_auto_extract_cookies opened the sign-in window
 }
 
 func (s *site) install(f *mcptest.Server) {
+	f.Handle("cf_auto_extract_cookies", func(map[string]any) (any, error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.loggedIn {
+			return map[string]any{"result": "Extracted 7 cookies from firefox", "cookiesStored": true, "loginWindowOpened": false, "loggedIn": true, "loginInProgress": false}, nil
+		}
+		s.window = true
+		return map[string]any{"result": "A CurseForge login window has opened.", "cookiesStored": s.cookies, "loginWindowOpened": true, "loggedIn": false, "loginInProgress": true}, nil
+	})
 	f.Handle("cf_session_status", func(map[string]any) (any, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -169,7 +179,7 @@ func TestSessionStates(t *testing.T) {
 	if err := e.sy.SyncOnce(t.Context()); err == nil {
 		t.Fatal("expired session must fail the sync")
 	}
-	if s := e.sy.Status(); s.LastError == "" {
+	if s := e.sy.Status(); s.LastError == "" || !s.Relogin {
 		t.Fatalf("status %+v", s)
 	}
 	// Reads refused mid-session (cookie expiry, Cloudflare) → re-login.
@@ -303,5 +313,27 @@ func TestReplyReadBackSurvivesCancel(t *testing.T) {
 	})
 	if cm, err := e.prov.Reply(ctx, "comment:1443010/20", "bye"); err != nil || cm.ExternalID != "33" {
 		t.Fatalf("%+v %v", cm, err)
+	}
+}
+
+func TestLogin(t *testing.T) {
+	e := setup(t)
+	e.site.loggedIn, e.site.cookies = false, false
+	l, err := e.prov.Login(t.Context())
+	if err != nil || l.LoggedIn || !l.Window || !l.InProgress {
+		t.Fatalf("login %+v %v", l, err)
+	}
+	if l, err = e.prov.LoginStatus(t.Context()); err != nil || l.LoggedIn {
+		t.Fatalf("before the user signed in %+v %v", l, err)
+	}
+	e.site.mu.Lock()
+	e.site.loggedIn, e.site.cookies = true, true // signed in inside the server's window
+	e.site.mu.Unlock()
+	if l, err = e.prov.LoginStatus(t.Context()); err != nil || !l.LoggedIn || l.Account != "Morgott" {
+		t.Fatalf("after %+v %v", l, err)
+	}
+	// A browser's signed-in session: imported, no window.
+	if l, err = e.prov.Login(t.Context()); err != nil || !l.LoggedIn || l.Window || l.Account != "Morgott" {
+		t.Fatalf("silent %+v %v", l, err)
 	}
 }
