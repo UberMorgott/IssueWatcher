@@ -37,19 +37,75 @@ type PlatformStatus struct {
 	Capabilities provider.Capabilities `json:"capabilities"`
 }
 
-// Platforms reports and checks the platform accounts (cmd/issuewatcher mods.go).
+// Sign-in states (POST/GET /api/platforms/{id}/login).
+const (
+	LoginIdle      = "idle"      // nothing running
+	LoginQR        = "qr"        // Steam: show challengeUrl as a QR code, scan it in the Steam app
+	LoginScanned   = "scanned"   // Steam: scanned, approve in the app
+	LoginWindow    = "window"    // Nexus / CurseForge: the sign-in window is open
+	LoginConnected = "connected" // signed in; account detected
+	LoginExpired   = "expired"   // the QR code timed out or was declined
+	LoginFailed    = "failed"
+)
+
+// LoginStatus is the progress of «Подключить» on one platform.
+type LoginStatus struct {
+	Platform     string `json:"platform"`
+	State        string `json:"state"`
+	ChallengeURL string `json:"challengeUrl,omitempty"`
+	Account      string `json:"account,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// Platforms reports, checks and signs in the platform accounts (cmd/issuewatcher mods.go).
 type Platforms interface {
 	Platforms(ctx context.Context) []PlatformStatus
 	Check(ctx context.Context, id string) (PlatformStatus, error)
+	Login(ctx context.Context, id string) (LoginStatus, error)
+	LoginStatus(ctx context.Context, id string) (LoginStatus, error)
+	CancelLogin(id string) error
 }
 
 // Platform endpoints:
 //
 //	GET  /api/platforms             every platform (GitHub first) with state and capabilities
 //	POST /api/platforms/{id}/check  live account check (nexus | curseforge | steam)
+//	POST /api/platforms/{id}/login  «Подключить»: Steam QR / Nexus, CurseForge sign-in window (switches the platform on)
+//	GET  /api/platforms/{id}/login  sign-in progress (polled by the dashboard)
+//	DELETE /api/platforms/{id}/login  cancel a Steam QR sign-in
 func (s *Server) registerPlatforms(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/platforms", s.handlePlatforms)
 	mux.HandleFunc("POST /api/platforms/{id}/check", s.handlePlatformCheck)
+	mux.HandleFunc("POST /api/platforms/{id}/login", s.handlePlatformLogin)
+	mux.HandleFunc("GET /api/platforms/{id}/login", s.handlePlatformLogin)
+	mux.HandleFunc("DELETE /api/platforms/{id}/login", s.handlePlatformLogin)
+}
+
+func (s *Server) handlePlatformLogin(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var (
+		st  LoginStatus
+		err error
+	)
+	switch r.Method {
+	case http.MethodPost:
+		st, err = s.opts.Platforms.Login(r.Context(), id)
+	case http.MethodDelete:
+		if err = s.opts.Platforms.CancelLogin(id); err == nil {
+			st = LoginStatus{Platform: id, State: LoginIdle}
+		}
+	default:
+		st, err = s.opts.Platforms.LoginStatus(r.Context(), id)
+	}
+	switch {
+	case errors.Is(err, ErrUnknownPlatform):
+		errJSON(w, http.StatusNotFound, "unknown platform")
+	case err != nil:
+		// A failed start (server missing, Steam unreachable) is a state, not a 500.
+		writeJSON(w, http.StatusOK, LoginStatus{Platform: id, State: LoginFailed, Error: err.Error()})
+	default:
+		writeJSON(w, http.StatusOK, st)
+	}
 }
 
 func (s *Server) handlePlatforms(w http.ResponseWriter, r *http.Request) {

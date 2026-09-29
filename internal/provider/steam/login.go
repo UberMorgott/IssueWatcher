@@ -103,6 +103,13 @@ func (p *Provider) StartQR(ctx context.Context) (QRStatus, error) {
 	return st, nil
 }
 
+// OnSignIn registers f, run after a QR sign-in stored the session.
+func (p *Provider) OnSignIn(f func()) {
+	p.qmu.Lock()
+	p.onSignIn = f
+	p.qmu.Unlock()
+}
+
 // QRLoginStatus reports the current (or last) QR sign-in.
 func (p *Provider) QRLoginStatus() QRStatus {
 	p.qmu.Lock()
@@ -188,8 +195,11 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 			return
 		}
 		p.opts.Log.Info("steam: signed in by QR", "steamId", id)
-		if p.opts.OnSignIn != nil {
-			p.opts.OnSignIn()
+		p.qmu.Lock()
+		f := p.onSignIn
+		p.qmu.Unlock()
+		if f != nil {
+			f()
 		}
 		return
 	}

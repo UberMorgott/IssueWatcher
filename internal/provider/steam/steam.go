@@ -51,8 +51,6 @@ type Options struct {
 	PageSize int
 	// QRInterval overrides the QR poll interval Steam asks for (tests).
 	QRInterval time.Duration
-	// OnSignIn runs after a QR sign-in stored the session.
-	OnSignIn func()
 }
 
 // Provider reads (and, with the user's cookies, posts) Workshop comments.
@@ -68,8 +66,9 @@ type Provider struct {
 	gap  sync.Mutex // serialises requests: one at a time, MinGap apart
 	last time.Time
 
-	qmu sync.Mutex // the QR sign-in
-	qr  *qrLogin
+	qmu      sync.Mutex // the QR sign-in
+	qr       *qrLogin
+	onSignIn func()
 }
 
 // New creates the provider; settings are read lazily from Options.Dir.

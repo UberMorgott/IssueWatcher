@@ -137,8 +137,10 @@ func (f *fakeAuth) accepts(r *http.Request) bool {
 
 func (f *fakeAuth) provider(t *testing.T, dir string, onSignIn func()) *Provider {
 	t.Helper()
-	return New(Options{Dir: dir, CommunityURL: f.srv.URL, APIURL: f.srv.URL, LoginURL: f.srv.URL,
-		MinGap: time.Millisecond, QRInterval: 5 * time.Millisecond, OnSignIn: onSignIn})
+	p := New(Options{Dir: dir, CommunityURL: f.srv.URL, APIURL: f.srv.URL, LoginURL: f.srv.URL,
+		MinGap: time.Millisecond, QRInterval: 5 * time.Millisecond})
+	p.OnSignIn(onSignIn)
+	return p
 }
 
 func waitQR(t *testing.T, p *Provider, want string) QRStatus {

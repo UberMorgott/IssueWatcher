@@ -4,11 +4,16 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/UberMorgott/issuewatcher/internal/api"
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge/mcptest"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
@@ -17,6 +22,21 @@ import (
 // A mod platform switched on or off in settings joins or leaves the running
 // sync group without a restart; its card reports the state.
 func TestModPlatformsApplyLive(t *testing.T) {
+	m, cfgs, group, dir := newTestPlatforms(t, nil)
+	state := func(id string) api.PlatformStatus {
+		for _, p := range m.Platforms(t.Context()) {
+			if p.ID == id {
+				return p
+			}
+		}
+		t.Fatalf("no %s card", id)
+		return api.PlatformStatus{}
+	}
+	testApplyLive(t, m, cfgs, group, dir, state)
+}
+
+func newTestPlatforms(t *testing.T, fakes map[string]*mcptest.Server) (*modPlatforms, *config.Store, *syncer.Group, string) {
+	t.Helper()
 	dir := t.TempDir()
 	cfgs, err := config.Open(dir)
 	if err != nil {
@@ -33,17 +53,15 @@ func TestModPlatformsApplyLive(t *testing.T) {
 	stm := steam.New(steam.Options{Dir: filepath.Join(dir, "secrets"), Log: log})
 	group := syncer.NewGroup(syncer.New(syncer.Options{Store: st, Provider: gh, Log: log}))
 	m := newModPlatforms(cfgs, st, log, group, gh, stm, nil)
-	t.Cleanup(m.Close)
-
-	state := func(id string) api.PlatformStatus {
-		for _, p := range m.Platforms(t.Context()) {
-			if p.ID == id {
-				return p
-			}
-		}
-		t.Fatalf("no %s card", id)
-		return api.PlatformStatus{}
+	if fakes != nil {
+		m.dial = func(id string) func(ctx context.Context) (mcp.Transport, error) { return fakes[id].Dial }
 	}
+	t.Cleanup(m.Close)
+	return m, cfgs, group, dir
+}
+
+func testApplyLive(t *testing.T, m *modPlatforms, cfgs *config.Store, group *syncer.Group, dir string, state func(string) api.PlatformStatus) {
+	t.Helper()
 	if n := len(group.Syncers()); n != 1 {
 		t.Fatalf("mod platforms are off by default, got %d syncers", n)
 	}
@@ -71,8 +89,8 @@ func TestModPlatformsApplyLive(t *testing.T) {
 	if p := state("nexus"); !p.Enabled {
 		t.Fatalf("nexus on: %+v", p)
 	}
-	// No author set → signed out before the server is even started.
-	if p, err := m.Check(t.Context(), "nexus"); err != nil || p.State != api.PlatformSignedOut || p.Error == "" {
+	// No author set → the account comes from the server's session: no server → unavailable.
+	if p, err := m.Check(t.Context(), "nexus"); err != nil || p.State != api.PlatformUnavailable || p.Error == "" {
 		t.Fatalf("check without author: %+v %v", p, err)
 	}
 	withAuthor, err := cfgs.Patch(on.Revision, []byte(`{"providers":{"nexus":{"author":"Someone"}}}`), nil)
@@ -97,5 +115,117 @@ func TestModPlatformsApplyLive(t *testing.T) {
 	}
 	if p := state("nexus"); p.State != api.PlatformDisabled {
 		t.Fatalf("nexus off again: %+v", p)
+	}
+}
+
+func platformState(t *testing.T, m *modPlatforms, id string) api.PlatformStatus {
+	t.Helper()
+	for _, p := range m.Platforms(t.Context()) {
+		if p.ID == id {
+			return p
+		}
+	}
+	t.Fatalf("no %s card", id)
+	return api.PlatformStatus{}
+}
+
+// «Подключить» Nexus: the platform is switched on, the server's sign-in window
+// opens, and once the user signed in there the member becomes the account
+// (stored as providers.nexus.author) and the card turns connected.
+func TestLoginNexusZeroSetup(t *testing.T) {
+	fake := mcptest.New()
+	var mu sync.Mutex
+	window, signedIn := false, false
+	fake.Handle("web_login", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		window = true
+		return map[string]any{"loggedIn": false, "loginWindowOpened": true, "loginInProgress": true, "detail": "window"}, nil
+	})
+	fake.Handle("web_status", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !signedIn {
+			signedIn = window // signs in inside the window before the next poll
+			return map[string]any{"loggedIn": false, "loginInProgress": window, "cookiesStored": false, "detail": "UNAUTHORIZED", "account": nil}, nil
+		}
+		return map[string]any{"loggedIn": true, "loginInProgress": false, "cookiesStored": true, "detail": "session valid",
+			"account": map[string]any{"memberId": 6541781, "name": "UberMorgott"}}, nil
+	})
+	fake.Handle("search_mods", func(args map[string]any) (any, error) {
+		return map[string]any{"total": 1, "mods": []any{map[string]any{"game": "windrose", "modId": 147, "name": "ShareShip",
+			"url": "https://www.nexusmods.com/windrose/mods/147", "uploader": map[string]any{"name": "UberMorgott", "memberId": 6541781}}}}, nil
+	})
+	m, cfgs, _, _ := newTestPlatforms(t, map[string]*mcptest.Server{"nexus": fake})
+
+	l, err := m.Login(t.Context(), "nexus")
+	if err != nil || l.State != api.LoginWindow {
+		t.Fatalf("login %+v %v", l, err)
+	}
+	if !cfgs.Get().Providers.Nexus.Enabled {
+		t.Fatal("login did not switch nexus on")
+	}
+	if l, err = m.LoginStatus(t.Context(), "nexus"); err != nil || l.State != api.LoginWindow {
+		t.Fatalf("while signing in %+v %v", l, err)
+	}
+	if l, err = m.LoginStatus(t.Context(), "nexus"); err != nil || l.State != api.LoginConnected || l.Account != "UberMorgott" {
+		t.Fatalf("after %+v %v", l, err)
+	}
+	if a := cfgs.Get().Providers.Nexus.Author; a != "6541781" {
+		t.Fatalf("detected account stored as %q", a)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if p := platformState(t, m, "nexus"); p.State == api.PlatformConnected && p.Account == "UberMorgott" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("card %+v", platformState(t, m, "nexus"))
+}
+
+// An expired session shows «войдите снова» once, and again only after the
+// platform was connected in between.
+func TestReloginCardOnce(t *testing.T) {
+	fake := mcptest.New()
+	var mu sync.Mutex
+	loggedIn := false
+	fake.Handle("cf_session_status", func(map[string]any) (any, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		out := map[string]any{"loggedIn": loggedIn, "cookiesStored": true, "detail": "expired", "user": nil, "loginInProgress": false}
+		if loggedIn {
+			out["user"] = map[string]any{"id": 1, "displayName": "Morgott", "username": "user_x"}
+		}
+		return out, nil
+	})
+	fake.Handle("search_author", func(map[string]any) (any, error) {
+		return map[string]any{"author": map[string]any{"id": 1, "username": "Morgott"}, "projects": []any{}}, nil
+	})
+	m, _, _, _ := newTestPlatforms(t, map[string]*mcptest.Server{"curseforge": fake})
+	var cards []string
+	m.onRelogin = func(id, name string) { mu.Lock(); cards = append(cards, id+"|"+name); mu.Unlock() }
+	if err := m.enable("curseforge"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if p, err := m.Check(t.Context(), "curseforge"); err != nil || p.State != api.PlatformRelogin {
+			t.Fatalf("check %+v %v", p, err)
+		}
+	}
+	mu.Lock()
+	loggedIn = true
+	mu.Unlock()
+	if p, _ := m.Check(t.Context(), "curseforge"); p.State != api.PlatformConnected {
+		t.Fatalf("connected %+v", p)
+	}
+	mu.Lock()
+	loggedIn = false
+	mu.Unlock()
+	_, _ = m.Check(t.Context(), "curseforge")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(cards) != 2 || cards[0] != "curseforge|CurseForge" {
+		t.Fatalf("cards %v", cards)
 	}
 }

@@ -240,6 +240,12 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}))
 	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate) // Nexus / CurseForge over MCP, switched live
 	defer mods.Close()
+	mods.onRelogin = func(id, name string) { // a click opens «Подключить» for that platform
+		c := notify.ReloginCard(id, name, time.Now())
+		if tray != nil {
+			tray.ShowCards(c)
+		}
+	}
 	// Settings apply live: popups, toasts, poll interval.
 	cfgs.Subscribe(func(_, cur config.Settings) {
 		lp := liveFilter(cur.Notifications)

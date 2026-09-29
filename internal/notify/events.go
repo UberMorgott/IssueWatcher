@@ -102,6 +102,13 @@ func JobCard(itemID int64, repo string, number int, ok bool, outcome, text strin
 	return c
 }
 
+// ReloginCard asks to sign in to a platform again; a click opens Подключения
+// with that platform's sign-in started (QR code or sign-in window).
+func ReloginCard(platform, name string, now time.Time) Card {
+	return Card{Kind: KindIssue, Title: name + ": войдите снова", Ref: name,
+		Text: "Сессия истекла — нажмите, чтобы войти", Time: now, Path: "/connections?login=" + url.QueryEscape(platform)}
+}
+
 // failReasons are the Russian card texts of the runner's error codes.
 var failReasons = map[string]string{
 	"no_folder":    "Папка проекта не привязана",

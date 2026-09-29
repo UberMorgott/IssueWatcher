@@ -142,3 +142,10 @@ func TestQuietHours(t *testing.T) {
 		}
 	}
 }
+
+func TestReloginCard(t *testing.T) {
+	c := ReloginCard("nexus", "Nexus Mods", time.Now())
+	if c.Target() != "/connections?login=nexus" || c.Title != "Nexus Mods: войдите снова" {
+		t.Fatalf("card %+v → %s", c, c.Target())
+	}
+}
