@@ -411,7 +411,7 @@ const shortcuts = computed(() => [
   display: grid;
   grid-template-columns: var(--iw-sidebar) minmax(0, 1fr);
   min-height: 100%;
-  transition: grid-template-columns 160ms ease;
+  transition: grid-template-columns 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .shell.collapsed {

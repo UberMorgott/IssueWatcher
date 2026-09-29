@@ -29,14 +29,41 @@ const active = (match: string[]) => match.includes(String(route.name))
     :class="{ collapsed: app.sidebarCollapsed && !mobile }"
     :aria-label="t('nav.main')"
   >
-    <RouterLink
-      to="/"
-      class="brand"
-      @click="emit('navigate')"
-    >
-      <span class="logo"><i class="pi pi-eye" /></span>
-      <span class="brand-text">IssueWatcher</span>
-    </RouterLink>
+    <div class="brand">
+      <RouterLink
+        to="/"
+        class="brand-home"
+        @click="emit('navigate')"
+      >
+        <span class="logo"><i class="pi pi-eye" /></span>
+        <span class="brand-text">IssueWatcher</span>
+      </RouterLink>
+      <RouterLink
+        v-if="app.version"
+        to="/settings/updates"
+        class="version mono"
+        :title="t('nav.versionTip')"
+        @click="emit('navigate')"
+      >
+        {{ app.version }}
+        <span
+          v-if="app.updateAvailable"
+          class="update-dot"
+          :aria-label="t('nav.updateAvailable')"
+        />
+      </RouterLink>
+      <button
+        v-if="!mobile"
+        v-tooltip.right="app.sidebarCollapsed ? t('nav.expandTip') : t('nav.collapseTip')"
+        type="button"
+        class="toggle"
+        :aria-label="app.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-expanded="!app.sidebarCollapsed"
+        @click="app.toggleSidebar()"
+      >
+        <i :class="app.sidebarCollapsed ? 'pi pi-angle-double-right' : 'pi pi-angle-double-left'" />
+      </button>
+    </div>
 
     <ul class="nav">
       <li
@@ -60,39 +87,15 @@ const active = (match: string[]) => match.includes(String(route.name))
         </RouterLink>
       </li>
     </ul>
-
-    <div class="foot">
-      <RouterLink
-        v-if="app.version"
-        to="/settings/updates"
-        class="version mono"
-        :title="t('nav.versionTip')"
-        @click="emit('navigate')"
-      >
-        {{ app.version }}
-        <span
-          v-if="app.updateAvailable"
-          class="update-dot"
-          :aria-label="t('nav.updateAvailable')"
-        />
-      </RouterLink>
-      <button
-        v-if="!mobile"
-        v-tooltip.right="app.sidebarCollapsed ? t('nav.expandTip') : undefined"
-        type="button"
-        class="collapse"
-        :aria-label="app.sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-        @click="app.toggleSidebar()"
-      >
-        <i :class="app.sidebarCollapsed ? 'pi pi-angle-double-right' : 'pi pi-angle-double-left'" />
-        <span class="nav-label">{{ t('nav.collapseLabel') }}</span>
-      </button>
-    </div>
   </nav>
 </template>
 
 <style scoped>
+/* Open/close: the width animates with an ease-out curve; labels fade instead of
+   popping, and only the sidebar lays out (contain) while it moves. */
 .sidebar {
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
   display: flex;
   flex-direction: column;
   width: var(--iw-sidebar);
@@ -101,8 +104,9 @@ const active = (match: string[]) => match.includes(String(route.name))
   gap: 8px;
   background: var(--iw-surface);
   border-right: 1px solid var(--iw-border);
-  transition: width 160ms ease;
+  transition: width 180ms var(--ease-out);
   overflow: hidden;
+  contain: layout paint;
 }
 
 .sidebar.collapsed {
@@ -112,10 +116,17 @@ const active = (match: string[]) => match.includes(String(route.name))
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 40px;
-  padding: 0 6px;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 0 0 6px;
   margin-bottom: 12px;
+}
+
+.brand-home {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   color: var(--iw-text);
   font-weight: 650;
   font-size: calc(16px * var(--iw-fs, 1));
@@ -135,6 +146,76 @@ const active = (match: string[]) => match.includes(String(route.name))
   box-shadow: 0 4px 14px rgb(134 165 255 / 30%);
 }
 
+.version {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  align-self: center;
+  margin-top: 3px;
+  font-size: calc(11px * var(--iw-fs, 1));
+  color: var(--iw-dimmed);
+  white-space: nowrap;
+}
+
+.version:hover {
+  color: var(--iw-text);
+}
+
+.update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--iw-primary);
+}
+
+.toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--iw-radius-sm);
+  background: transparent;
+  color: var(--iw-dimmed);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.toggle i {
+  font-size: calc(13px * var(--iw-fs, 1));
+}
+
+.toggle:hover {
+  background: var(--iw-hover);
+  color: var(--iw-text);
+}
+
+/* Collapsed: the toggle covers the logo on hover/focus, so the header keeps its
+   height and the nav never jumps. */
+.brand {
+  position: relative;
+}
+
+.collapsed .toggle {
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--iw-elevated);
+  color: var(--iw-text);
+  opacity: 0;
+}
+
+.collapsed .brand:hover .toggle,
+.collapsed .toggle:focus-visible {
+  opacity: 1;
+}
+
 .nav {
   list-style: none;
   margin: 0;
@@ -144,8 +225,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   gap: 2px;
 }
 
-.nav-item,
-.collapse {
+.nav-item {
   position: relative;
   display: flex;
   align-items: center;
@@ -153,27 +233,21 @@ const active = (match: string[]) => match.includes(String(route.name))
   width: 100%;
   height: 40px;
   padding: 0 12px;
-  border: 0;
   border-radius: var(--iw-radius-sm);
-  background: transparent;
   color: var(--iw-muted);
-  font: inherit;
   font-weight: 500;
   white-space: nowrap;
-  cursor: pointer;
   transition: background 140ms ease, color 140ms ease;
 }
 
-.nav-item i,
-.collapse i {
+.nav-item i {
   font-size: calc(16px * var(--iw-fs, 1));
   width: 20px;
   text-align: center;
   flex: none;
 }
 
-.nav-item:hover,
-.collapse:hover {
+.nav-item:hover {
   background: var(--iw-hover);
   color: var(--iw-text);
 }
@@ -210,8 +284,17 @@ const active = (match: string[]) => match.includes(String(route.name))
   background: var(--iw-primary);
 }
 
+.nav-label,
+.brand-text,
+.version {
+  transition: opacity 140ms var(--ease-out);
+}
+
 .collapsed .nav-label,
-.collapsed .brand-text,
+.collapsed .brand-text {
+  opacity: 0;
+}
+
 .collapsed .version {
   display: none;
 }
@@ -219,36 +302,9 @@ const active = (match: string[]) => match.includes(String(route.name))
 .collapsed .nav-badge {
   position: absolute;
   top: 4px;
-  right: 2px;
+  left: 26px;
   min-width: 0;
   padding: 0 5px;
   font-size: calc(10px * var(--iw-fs, 1));
-}
-
-.foot {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.version {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  font-size: calc(11px * var(--iw-fs, 1));
-  color: var(--iw-dimmed);
-}
-
-.version:hover {
-  color: var(--iw-text);
-}
-
-.update-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--iw-primary);
 }
 </style>

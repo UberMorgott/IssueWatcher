@@ -45,7 +45,7 @@ const en = {
     expand: 'Expand sidebar',
     expandTip: 'Expand sidebar  [',
     collapse: 'Collapse sidebar',
-    collapseLabel: 'Collapse',
+    collapseTip: 'Collapse sidebar  [',
     versionTip: 'Version — open updates',
     updateAvailable: 'Update available',
   },

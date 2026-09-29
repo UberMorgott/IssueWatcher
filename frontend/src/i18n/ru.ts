@@ -46,7 +46,7 @@ const ru: Messages = {
     expand: 'Развернуть панель',
     expandTip: 'Развернуть панель  [',
     collapse: 'Свернуть панель',
-    collapseLabel: 'Свернуть',
+    collapseTip: 'Свернуть панель  [',
     versionTip: 'Версия — открыть обновления',
     updateAvailable: 'Доступно обновление',
   },
