@@ -9,6 +9,9 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api/client'
 import { useAppStore } from '../stores/app'
 
+// Whether this instance can show the native folder dialog (null = not asked yet).
+const pickerAvailable = ref<boolean | null>(null)
+
 // «Привязать папку»: map (change, unmap) a project's local git clone.
 // PUT /api/projects/{id}/path refuses a folder that is not a clone of the
 // project (422 {code: missing|notGit|mismatch}); the error shows inline.
@@ -22,11 +25,34 @@ const app = useAppStore()
 const path = ref('')
 const error = ref('')
 const busy = ref(false)
+const picking = ref(false)
 watch(visible, (v) => {
   if (!v) return
   path.value = props.project?.localPath ?? ''
   error.value = ''
+  if (pickerAvailable.value === null) {
+    void api.folderDialog().then((r) => (pickerAvailable.value = r.ok && r.data.available))
+  }
 })
+
+// «Обзор…» opens the native Windows folder dialog (not in a headless instance);
+// the chosen folder is linked right away, so the usual clone check applies.
+async function browse() {
+  const p = props.project
+  if (!p || picking.value || busy.value) return
+  picking.value = true
+  error.value = ''
+  const r = await api.pickFolder({ projectId: p.id, title: t('folder.browseTitle', { name: p.name }), initial: path.value.trim() || undefined })
+  picking.value = false
+  if (!r.ok) {
+    if ((r.body as { code?: string } | undefined)?.code === 'unavailable') pickerAvailable.value = false
+    else error.value = r.error
+    return
+  }
+  if (r.data.cancelled || !r.data.path) return
+  path.value = r.data.path
+  await save(r.data.path)
+}
 
 async function save(next: string) {
   const p = props.project
@@ -63,15 +89,27 @@ async function save(next: string) {
       <p class="hint">
         {{ t('folder.text') }}
       </p>
-      <InputText
-        v-model="path"
-        class="mono"
-        :placeholder="t('folder.placeholder')"
-        :aria-label="t('folder.title', { name: project?.name ?? '' })"
-        :invalid="!!error"
-        autofocus
-        fluid
-      />
+      <div class="row">
+        <InputText
+          v-model="path"
+          class="mono grow"
+          :placeholder="t('folder.placeholder')"
+          :aria-label="t('folder.title', { name: project?.name ?? '' })"
+          :invalid="!!error"
+          autofocus
+          fluid
+        />
+        <Button
+          v-if="pickerAvailable"
+          :label="t('folder.browse')"
+          icon="pi pi-folder"
+          severity="secondary"
+          outlined
+          :loading="picking"
+          :disabled="busy"
+          @click="browse"
+        />
+      </div>
       <Message
         v-if="error"
         severity="error"
@@ -121,6 +159,17 @@ async function save(next: string) {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
 }
 
 .hint {

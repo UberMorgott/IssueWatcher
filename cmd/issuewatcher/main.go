@@ -30,6 +30,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 	"github.com/UberMorgott/issuewatcher/internal/notify"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
+	folderpicker "github.com/UberMorgott/issuewatcher/internal/picker"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
@@ -247,8 +248,10 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
 
 	focus := notify.FocusDashboard
+	var picker api.FolderPicker = folderpicker.New()
 	if headless {
-		focus = nil // never raise the user's own dashboard window
+		focus = nil  // never raise the user's own dashboard window
+		picker = nil // no desktop dialogs
 	}
 	// quit shuts the app down gracefully (tray loop or headless wait returns,
 	// then HTTP/SSE, sync and SQLite close); the updater calls it once the new
@@ -307,6 +310,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Focus:         focus,
 		SessionSecret: session,
 		Runner:        jobs,
+		Picker:        picker,
 	})
 	if err != nil {
 		return err

@@ -174,6 +174,10 @@ export const api = {
   folders: () => call<FolderRow[]>('GET', '/api/folders'),
   setFolder: (id: number, path: string) => call<FolderRow>('PUT', `/api/projects/${id}/path`, { path }),
   discoverFolders: () => call<{ suggestions: FolderSuggestion[]; visited: number; roots: string[] }>('POST', '/api/folders/discover'),
+  /** Native folder dialog (desktop only; 409 {code: unavailable|busy}). */
+  folderDialog: () => call<{ available: boolean }>('GET', '/api/dialog/folder'),
+  pickFolder: (body: { projectId?: number; title?: string; initial?: string }) =>
+    call<{ path: string; cancelled: boolean }>('POST', '/api/dialog/folder', body),
 
   // --- agent jobs
   async jobs(q: JobQuery): Promise<Result<JobChunk>> {

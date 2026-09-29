@@ -276,6 +276,8 @@ const ru: Messages = {
     },
     skipped: 'Без локальной папки — пропущены: {n}',
     discover: 'Автопоиск клонов',
+    browse: 'Обзор…',
+    browseTitle: 'Выберите git-клон {name}',
   },
   projects: {
     filter: 'Фильтр проектов',

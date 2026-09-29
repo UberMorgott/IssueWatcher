@@ -47,9 +47,9 @@ type Options struct {
 	// RequirePort: PreferredPort or nothing (a restart after a self-update,
 	// so open tabs reconnect to the same origin); New fails with ErrPortBusy.
 	RequirePort bool
-	Version       string
-	Open          func(url string) // opens a URL in the user's browser
-	Log           *slog.Logger
+	Version     string
+	Open        func(url string) // opens a URL in the user's browser
+	Log         *slog.Logger
 
 	// Phase 1 (all optional; nil disables the matching endpoints).
 	GitHub         *github.Auth   // sign-in endpoints
@@ -71,6 +71,8 @@ type Options struct {
 	Updates Updater
 	// Runner is the agent job queue (/api/jobs, /api/agents); nil disables it (needs Store).
 	Runner *runner.Runner
+	// Picker shows the native folder dialog (FolderDialog «Обзор…»); nil (headless) → 409 unavailable.
+	Picker FolderPicker
 }
 
 // Server serves the SPA and the loopback API.
@@ -89,6 +91,7 @@ type Server struct {
 	gh     *githubAuth // nil without Options.GitHub
 	hub    *hub        // live events for open tabs (events.go)
 	opener opener      // OpenBrowser decisions and the pending new tab (open.go)
+	pickMu sync.Mutex  // one native folder dialog at a time (dialog.go)
 }
 
 type launch struct {
@@ -123,6 +126,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/open", s.handleOpen)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	s.registerDialog(mux)
 	if opts.GitHub != nil {
 		s.registerGitHub(mux)
 	}

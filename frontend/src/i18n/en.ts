@@ -275,6 +275,8 @@ const en = {
     },
     skipped: 'Skipped without a local folder: {n}',
     discover: 'Discover clones',
+    browse: 'Browse…',
+    browseTitle: 'Choose the git clone of {name}',
   },
   projects: {
     filter: 'Filter projects',
