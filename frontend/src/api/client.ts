@@ -25,6 +25,10 @@ import type {
   JobStep,
   QueuedJob,
   AutomationChunk,
+  PlatformStatus,
+  SteamStatus,
+  SteamUpdate,
+  ProjectLinks,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -137,6 +141,7 @@ export const api = {
   issues(q: IssueQuery) {
     const p = new URLSearchParams()
     if (q.source) p.set('source', q.source)
+    if (q.kind) p.set('kind', q.kind)
     if (q.repo) p.set('project', String(q.repo))
     if (q.state && q.state !== 'all') p.set('state', q.state)
     if (q.label) p.set('label', q.label)
@@ -223,6 +228,14 @@ export const api = {
   },
   projectLabels: (id: number) => call<RepoLabel[]>('GET', `/api/projects/${id}/labels`),
   detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
+  // --- platforms (Settings › Платформы) and mod page links
+  platforms: () => call<PlatformStatus[]>('GET', '/api/platforms'),
+  checkPlatform: (id: string) => call<PlatformStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/check`),
+  steam: () => call<SteamStatus>('GET', '/api/providers/steam'),
+  saveSteam: (u: SteamUpdate) => call<SteamStatus>('PUT', '/api/providers/steam', u),
+  links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),
+  setLinks: (id: number, mods: number[]) => call<ProjectLinks>('PUT', `/api/projects/${id}/links`, { mods }),
+  unlink: (id: number) => call<void>('DELETE', `/api/projects/${id}/links`),
   automationLog: (cursor = '', limit = 50) =>
     call<AutomationChunk>('GET', `/api/automation/log?limit=${limit}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`),
 }

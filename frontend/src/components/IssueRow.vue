@@ -9,6 +9,7 @@ import JobProgress from './JobProgress.vue'
 import type { IssueRowData as Row } from '../api/types'
 import { absTime, relTime, repoOwner, shortRepo } from '../lib/format'
 import { jobOutcome } from '../lib/jobs'
+import { isModPlatform } from '../lib/platforms'
 import { useJobsStore } from '../stores/jobs'
 
 // One virtualised row of the issues list. Props are primitives or the row object
@@ -21,6 +22,9 @@ const { t } = useI18n()
 const jobs = useJobsStore()
 const live = computed(() => (props.item.job ? jobs.byId.get(props.item.job.id) : undefined))
 const jobState = computed(() => live.value?.state ?? props.item.job?.state)
+const mod = computed(() => isModPlatform(props.item.platform))
+/** GitHub rows show #N; mod rows their kind (the number is a local ordinal). */
+const ref_ = computed(() => (mod.value ? t('platforms.kindOne.' + (props.item.kind || 'comment')) : '#' + props.item.number))
 const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.item.job?.outcome ?? '')))
 </script>
 
@@ -91,7 +95,7 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           <span
             v-if="item.job && jobState === 'running'"
             class="t-meta t-run"
-          ><span class="mono">#{{ item.number }}</span><JobProgress
+          ><span :class="{ mono: !mod, kind: mod }">{{ ref_ }}</span><JobProgress
             :id="item.job.id"
             :attempt="live?.attempt ?? 1"
             :started-at="live?.startedAt"
@@ -100,7 +104,7 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           <span
             v-else
             class="t-meta"
-          ><span class="mono">#{{ item.number }}</span><template v-if="outcome"> · <span
+          ><span :class="{ mono: !mod, kind: mod }">{{ ref_ }}</span><template v-if="outcome"> · <span
             class="outcome"
             :class="outcome"
           >{{ t('jobs.outcome.' + outcome) }}</span> ·</template> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
@@ -111,10 +115,17 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
         role="gridcell"
       >
         <PlatformIcon
-          platform="github"
+          :platform="item.platform || 'github'"
           :size="14"
         />
-        <span class="p-name"><span class="p-owner">{{ repoOwner(item.repo) }}/</span>{{ shortRepo(item.repo) }}</span>
+        <span
+          v-if="mod"
+          class="p-name"
+        >{{ item.repo }}</span>
+        <span
+          v-else
+          class="p-name"
+        ><span class="p-owner">{{ repoOwner(item.repo) }}/</span>{{ shortRepo(item.repo) }}</span>
       </span>
       <span
         class="c-labels"
@@ -246,6 +257,11 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.kind {
+  color: var(--iw-muted);
+  font-weight: 500;
 }
 
 .t-run {

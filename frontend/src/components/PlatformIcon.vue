@@ -11,6 +11,7 @@ const marks: Record<string, { path?: string; hex: string; mono?: string; title: 
   curseforge: { path: siCurseforge.path, hex: '#' + siCurseforge.hex, title: 'CurseForge' },
   steam: { path: siSteam.path, hex: '#' + siSteam.hex, title: 'Steam Workshop' },
   claude: { path: siClaude.path, hex: '#' + siClaude.hex, title: 'Claude Code' },
+  nexus: { hex: '#DA8E35', mono: 'N', title: 'Nexus Mods' },
   nexusmods: { hex: '#DA8E35', mono: 'N', title: 'Nexus Mods' },
   codex: { hex: '#10A37F', mono: '>_', title: 'Codex' },
 }

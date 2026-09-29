@@ -5,6 +5,7 @@ import Skeleton from 'primevue/skeleton'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import PlatformIcon from '../components/PlatformIcon.vue'
+import PlatformCards from './settings/PlatformCards.vue'
 import { api } from '../api/client'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
@@ -17,12 +18,6 @@ const confirm = useConfirm()
 const toast = useToast()
 const { t } = useI18n()
 const busy = ref(false)
-
-const planned = [
-  { id: 'curseforge', name: 'CurseForge', text: 'connections.curseforgeText', phase: 4 },
-  { id: 'nexusmods', name: 'Nexus Mods', text: 'connections.nexusmodsText', phase: 4 },
-  { id: 'steam', name: 'Steam Workshop', text: 'connections.steamText', phase: 4 },
-]
 
 const gh = computed(() => app.github)
 const openTotal = computed(() => app.repos.reduce((n, r) => n + r.open, 0))
@@ -267,42 +262,7 @@ function disconnect() {
         </footer>
       </article>
 
-      <article
-        v-for="p in planned"
-        :key="p.id"
-        class="panel card planned"
-      >
-        <header class="card-head">
-          <PlatformIcon
-            :platform="p.id"
-            :size="48"
-            tile
-          />
-          <div class="card-title">
-            <div class="name">
-              {{ p.name }}
-            </div>
-            <div class="status off">
-              <span class="dot" /> {{ t('connections.planned') }}
-            </div>
-          </div>
-          <span class="phase-badge">{{ t('common.phase', { n: p.phase }) }}</span>
-        </header>
-        <p class="card-text">
-          {{ t(p.text) }}
-        </p>
-        <footer class="card-foot">
-          <span v-tooltip.top="t('common.comingSoon')">
-            <Button
-              :label="t('connections.connect')"
-              icon="pi pi-link"
-              severity="secondary"
-              outlined
-              disabled
-            />
-          </span>
-        </footer>
-      </article>
+      <PlatformCards />
     </div>
   </div>
 </template>
@@ -335,11 +295,6 @@ function disconnect() {
   display: flex;
   align-items: center;
   gap: 14px;
-}
-
-.card-head .phase-badge {
-  margin-left: auto;
-  align-self: flex-start;
 }
 
 .name {
@@ -386,10 +341,6 @@ function disconnect() {
 .card-text {
   margin: 0;
   color: var(--iw-muted);
-}
-
-.planned {
-  opacity: 0.85;
 }
 
 .account {

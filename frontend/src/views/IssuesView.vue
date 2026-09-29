@@ -16,7 +16,9 @@ import DispatchDialog from '../components/DispatchDialog.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { rowHeight } from '../lib/appearance'
 import { api } from '../api/client'
-import type { Issue, IssueQuery, IssueRowData as Row } from '../api/types'
+import type { Issue, IssueQuery, IssueRowData as Row, ItemKind } from '../api/types'
+import PlatformIcon from '../components/PlatformIcon.vue'
+import { ITEM_KINDS, PLATFORMS, platformName } from '../lib/platforms'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { typing } from '../lib/shortcuts'
@@ -40,6 +42,7 @@ const SKELETON_ROWS = 6
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const filters = computed(() => ({
   source: str(route.query.source),
+  kind: (ITEM_KINDS as string[]).includes(str(route.query.kind)) ? (str(route.query.kind) as ItemKind) : ('' as const),
   repo: Number(str(route.query.repo)) || 0,
   state: (['open', 'closed', 'all'].includes(str(route.query.state)) ? str(route.query.state) : 'open') as 'open' | 'closed' | 'all',
   label: str(route.query.label),
@@ -48,10 +51,10 @@ const filters = computed(() => ({
 }))
 const query = (): IssueQuery => {
   const f = filters.value
-  return { source: f.source, repo: f.repo, state: f.state, label: f.label, q: f.q, unread: f.unread }
+  return { source: f.source, kind: f.kind, repo: f.repo, state: f.state, label: f.label, q: f.q, unread: f.unread }
 }
 
-function setQuery(patch: Partial<Record<'source' | 'repo' | 'state' | 'label' | 'q' | 'unread', string | number | boolean | null>>) {
+function setQuery(patch: Partial<Record<'source' | 'kind' | 'repo' | 'state' | 'label' | 'q' | 'unread', string | number | boolean | null>>) {
   const q: LocationQueryRaw = { ...route.query }
   delete q.focus
   for (const [k, v] of Object.entries(patch)) {
@@ -215,14 +218,23 @@ watch(
   },
 )
 
+// Platforms with synced projects (or switched on) are offered; the rest stay listed, disabled.
 const sourceOptions = computed(() => [
-  { label: t('issues.allSources'), value: '' },
-  { label: 'GitHub', value: 'github' },
-  { label: t('common.soonSuffix', { name: 'CurseForge' }), value: 'curseforge', disabled: true },
-  { label: t('common.soonSuffix', { name: 'Nexus Mods' }), value: 'nexusmods', disabled: true },
-  { label: t('common.soonSuffix', { name: 'Steam Workshop' }), value: 'steam', disabled: true },
+  { label: t('platforms.allPlatforms'), value: '', disabled: false },
+  ...PLATFORMS.map((p) => ({
+    label: platformName(p),
+    value: p as string,
+    disabled: !app.repos.some((r) => r.platform === p) && !app.platforms.find((x) => x.id === p)?.enabled,
+  })),
 ])
-const repoOptions = computed(() => [{ label: t('issues.allProjects'), value: 0 }, ...app.repos.map((r) => ({ label: r.name, value: r.id }))])
+const kindOptions = computed(() => [
+  { label: t('platforms.allKinds'), value: '' },
+  ...ITEM_KINDS.map((k) => ({ label: t('platforms.kind.' + k), value: k })),
+])
+const repoOptions = computed(() => [
+  { label: t('issues.allProjects'), value: 0, platform: '' },
+  ...app.repos.filter((r) => !filters.value.source || r.platform === filters.value.source).map((r) => ({ label: r.name, value: r.id, platform: r.platform })),
+])
 const stateOptions = computed(() => [
   { label: t('issues.open'), value: 'open' },
   { label: t('issues.closed'), value: 'closed' },
@@ -235,7 +247,7 @@ const labelOptions = computed(() => {
 })
 const anyFilter = computed(() => {
   const f = filters.value
-  return !!(f.source || f.repo || f.label || f.q || f.unread || f.state !== 'open')
+  return !!(f.source || f.kind || f.repo || f.label || f.q || f.unread || f.state !== 'open')
 })
 function reset() {
   search.value = ''
@@ -243,7 +255,8 @@ function reset() {
 }
 
 const counts = computed(() => {
-  const repos = filters.value.repo ? app.repos.filter((r) => r.id === filters.value.repo) : app.repos
+  const f = filters.value
+  const repos = app.repos.filter((r) => (!f.repo || r.id === f.repo) && (!f.source || r.platform === f.source))
   return repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed, unread: a.unread + r.unread }), { open: 0, closed: 0, unread: 0 })
 })
 /** Counter above that already shows the list size for the current state filter (the total is then not repeated). */
@@ -353,7 +366,31 @@ onBeforeUnmount(() => {
           option-disabled="disabled"
           :aria-label="t('issues.source')"
           class="f-source"
-          @update:model-value="(v: string) => setQuery({ source: v })"
+          @update:model-value="(v: string) => setQuery({ source: v, repo: null })"
+        >
+          <template #value="{ value }">
+            <span class="opt"><PlatformIcon
+              v-if="value"
+              :platform="value"
+              :size="14"
+            />{{ value ? platformName(value) : t('platforms.allPlatforms') }}</span>
+          </template>
+          <template #option="{ option }">
+            <span class="opt"><PlatformIcon
+              v-if="option.value"
+              :platform="option.value"
+              :size="14"
+            />{{ option.label }}</span>
+          </template>
+        </Select>
+        <Select
+          :model-value="filters.kind"
+          :options="kindOptions"
+          option-label="label"
+          option-value="value"
+          :aria-label="t('platforms.kindFilter')"
+          class="f-kind"
+          @update:model-value="(v: string) => setQuery({ kind: v })"
         />
         <Select
           :model-value="filters.repo"
@@ -364,7 +401,15 @@ onBeforeUnmount(() => {
           :aria-label="t('issues.project')"
           class="f-repo"
           @update:model-value="(v: number) => setQuery({ repo: v })"
-        />
+        >
+          <template #option="{ option }">
+            <span class="opt"><PlatformIcon
+              v-if="option.platform"
+              :platform="option.platform"
+              :size="14"
+            />{{ option.label }}</span>
+          </template>
+        </Select>
         <Select
           :model-value="filters.label"
           :options="labelOptions"
@@ -614,7 +659,17 @@ onBeforeUnmount(() => {
 }
 
 .f-source {
-  width: 140px;
+  width: 170px;
+}
+
+.f-kind {
+  width: 150px;
+}
+
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .f-repo {

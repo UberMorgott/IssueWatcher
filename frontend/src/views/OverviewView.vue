@@ -8,7 +8,7 @@ import StatCard from '../components/StatCard.vue'
 import EChart, { type ChartTheme } from '../components/EChart.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
-import PlatformIcon from '../components/PlatformIcon.vue'
+import PlatformTiles from '../components/PlatformTiles.vue'
 import { api } from '../api/client'
 import type { Issue, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
@@ -119,7 +119,6 @@ const reposOption = computed(() => {
 
 const activityIcon: Record<string, string> = { 'item.new': 'pi pi-inbox', 'comment.new': 'pi pi-comment', 'item.closed': 'pi pi-check-circle' }
 const activityKey: Record<string, string> = { 'item.new': 'overview.activity.issue', 'comment.new': 'overview.activity.comment', 'item.closed': 'overview.activity.closed' }
-const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: 'Nexus Mods', steam: 'Steam Workshop' }
 </script>
 
 <template>
@@ -141,28 +140,7 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
 
     <template v-else-if="showHero">
       <ConnectHero />
-      <div class="platforms">
-        <div
-          v-for="p in ['curseforge', 'nexusmods', 'steam']"
-          :key="p"
-          class="platform-soon panel"
-        >
-          <PlatformIcon
-            :platform="p"
-            :size="36"
-            tile
-          />
-          <div>
-            <div class="ps-name">
-              {{ PLANNED[p] }}
-            </div>
-            <div class="muted ps-text">
-              {{ t('overview.plannedText') }}
-            </div>
-          </div>
-          <span class="phase-badge">{{ t('common.phase', { n: 4 }) }}</span>
-        </div>
-      </div>
+      <PlatformTiles />
     </template>
 
     <template v-else>
@@ -198,6 +176,8 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
           :hint="stats ? t('overview.closedAllTime', { n: stats.closed }) : undefined"
         />
       </div>
+
+      <PlatformTiles v-if="app.platforms.some((p) => p.id !== 'github' && p.enabled) || app.repos.some((r) => r.platform !== 'github')" />
 
       <div class="grid">
         <section class="panel chart-panel">
@@ -480,43 +460,12 @@ const PLANNED: Record<string, string> = { curseforge: 'CurseForge', nexusmods: '
   background: var(--iw-success);
 }
 
-.platforms {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.platform-soon {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
-}
-
-.ps-name {
-  font-weight: 600;
-}
-
-.ps-text {
-  font-size: calc(12.5px * var(--iw-fs, 1));
-}
-
-.platform-soon .phase-badge {
-  margin-left: auto;
-}
-
 @media (width <= 1279px) {
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (width <= 899px) {
-  .platforms {
     grid-template-columns: minmax(0, 1fr);
   }
 }

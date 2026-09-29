@@ -49,6 +49,10 @@ export interface Issue {
   repoId: number
   repo: string
   number: number
+  /** issue (GitHub) | comment (a mod page's comment thread) | bug (a mod bug report). */
+  kind: ItemKind
+  /** The project's platform: github | nexus | curseforge | steam. */
+  platform: string
   title: string
   url: string
   author: string
@@ -171,6 +175,7 @@ export interface Health {
 
 export interface IssueQuery {
   source?: string
+  kind?: ItemKind | ''
   repo?: number
   state?: 'open' | 'closed' | 'all'
   label?: string
@@ -213,6 +218,20 @@ export interface Settings {
   projects: { roots: string[]; exclude: string[]; scanDepth: number }
   updates: { channel: UpdateChannel; autoCheck: boolean; intervalHours: number }
   agents: Agents
+  providers: Providers
+}
+
+/** settings.providers: the MCP-backed mod platforms (internal/config Providers); apply live. */
+export interface Providers {
+  nexus: ModPlatform
+  curseforge: ModPlatform
+}
+
+export interface ModPlatform {
+  enabled: boolean
+  mcp: { command: string; args: string[] }
+  /** Nexus: the mod author name (required); CurseForge: CFWidget author override. */
+  author?: string
 }
 
 export type AgentCLI = 'claude' | 'codex'
@@ -669,4 +688,62 @@ export interface FolderSuggestion {
   name: string
   path: string
   remote: string
+}
+
+/** Provider capabilities (internal/provider Capabilities). */
+export interface Capabilities {
+  listProjects: boolean
+  syncItems: boolean
+  listComments: boolean
+  reply: boolean
+  setLabels: boolean
+  setStatus: boolean
+  createPR: boolean
+  auth: string
+  kinds: ItemKind[]
+  /** false: a reply is a new top-level comment (Steam «@author …»). */
+  replyThreaded: boolean
+}
+
+export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'unavailable' | 'error'
+
+/** GET /api/platforms row (internal/api PlatformStatus). */
+export interface PlatformStatus {
+  id: string
+  name: string
+  enabled: boolean
+  state: PlatformState
+  account?: string
+  error?: string
+  /** The platform's MCP server child is running. */
+  running: boolean
+  projects: number
+  lastSync?: string
+  checkedAt?: string
+  capabilities: Capabilities
+}
+
+/** GET/PUT /api/providers/steam (secrets are write-only). */
+export interface SteamStatus {
+  configured: boolean
+  steamId: string
+  appId: number
+  hasApiKey: boolean
+  hasCookies: boolean
+  session: 'none' | 'stored' | 'expired'
+  checkedAt?: string
+}
+
+export interface SteamUpdate {
+  steamId?: string
+  appId?: number
+  apiKey?: string
+  steamLoginSecure?: string
+  sessionid?: string
+}
+
+/** GET/PUT /api/projects/{id}/links. */
+export interface ProjectLinks {
+  linkedTo?: number
+  links?: number[]
 }

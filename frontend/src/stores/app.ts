@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '../api/client'
-import type { DataChange, LiveItemEvent, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
+import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
+import { fallbackCaps } from '../lib/platforms'
 import { t } from '../i18n'
 import { theme, type Theme } from '../lib/appearance'
 import { useSettingsStore } from './settings'
@@ -90,6 +91,20 @@ export const useAppStore = defineStore('app', () => {
     await loadAuth()
   }
 
+  // --- platforms (Settings › Платформы): state + capabilities per platform
+  const platforms = ref<PlatformStatus[]>([])
+  async function loadPlatforms() {
+    const r = await api.platforms()
+    if (r.ok) platforms.value = r.data ?? []
+  }
+  function setPlatform(p: PlatformStatus) {
+    platforms.value = platforms.value.some((x) => x.id === p.id) ? platforms.value.map((x) => (x.id === p.id ? p : x)) : [...platforms.value, p]
+  }
+  /** A platform's capabilities (labels, reply, threading); a fallback until loaded. */
+  function caps(platform: string): Capabilities {
+    return platforms.value.find((p) => p.id === platform)?.capabilities ?? fallbackCaps(platform)
+  }
+
   // --- sync (progress arrives as sync.status live events)
   const sync = ref<SyncStatus | null>(null)
   const syncRequested = ref(false)
@@ -125,6 +140,7 @@ export const useAppStore = defineStore('app', () => {
     }
     progress.value = null
     void loadRepos() // unread badge, per-project last sync
+    void loadPlatforms() // account state per platform
     const wasSignedIn = sync.value?.signedIn
     await loadSync()
     if (sync.value && sync.value.signedIn !== wasSignedIn) await loadAuth()
@@ -145,7 +161,7 @@ export const useAppStore = defineStore('app', () => {
   /** First run: nothing connected and nothing synced yet → pages show the Connect CTA. */
   const onboarding = computed(() => authLoaded.value && reposLoaded.value && !githubConnected.value && repos.value.length === 0)
   /** Signed out but earlier data is still in the local database. */
-  const offlineData = computed(() => authLoaded.value && !githubConnected.value && repos.value.length > 0)
+  const offlineData = computed(() => authLoaded.value && !githubConnected.value && repos.value.some((r) => r.platform === 'github'))
 
   /**
    * Bumped when stored data changed (data.changed, auth.changed, SSE reconnect);
@@ -186,7 +202,7 @@ export const useAppStore = defineStore('app', () => {
   async function init() {
     const h = await api.health()
     if (h.ok) version.value = h.data.version
-    await Promise.all([loadAuth(), loadSync(), loadRepos()])
+    await Promise.all([loadAuth(), loadSync(), loadRepos(), loadPlatforms()])
   }
 
   return {
@@ -204,6 +220,10 @@ export const useAppStore = defineStore('app', () => {
     loadAuth,
     connect,
     disconnect,
+    platforms,
+    loadPlatforms,
+    setPlatform,
+    caps,
     sync,
     loadSync,
     syncNow,

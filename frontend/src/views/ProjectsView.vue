@@ -13,6 +13,8 @@ import EmptyState from '../components/EmptyState.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import FolderDialog from '../components/FolderDialog.vue'
+import LinkDialog from '../components/LinkDialog.vue'
+import { isModPlatform, platformName } from '../lib/platforms'
 import { api } from '../api/client'
 import type { Repo, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
@@ -121,6 +123,22 @@ function mapFolder(r: Repo) {
   folderOpen.value = true
 }
 
+// «Площадки»: mod pages ↔ code project links.
+const linkOpen = ref(false)
+const linkProject = ref<Repo | null>(null)
+function openLinks(r: Repo) {
+  linkProject.value = app.repos.find((x) => x.id === r.id) ?? r // freshest links
+  linkOpen.value = true
+}
+const repoById = computed(() => new Map(app.repos.map((r) => [r.id, r])))
+/** A project's current links (the live repo list is fresher than the loaded chunk). */
+const linksOf = (r: Repo) => (repoById.value.get(r.id)?.links ?? r.links ?? []).map((id) => repoById.value.get(id)).filter((x): x is Repo => !!x)
+const codeOf = (r: Repo) => {
+  const id = repoById.value.get(r.id)?.linkedTo ?? r.linkedTo
+  return id ? repoById.value.get(id) : undefined
+}
+const hasMods = computed(() => app.repos.some((r) => isModPlatform(r.platform)))
+
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
 </script>
 
@@ -161,6 +179,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
       <FolderDialog
         v-model:visible="folderOpen"
         :project="folderProject"
+      />
+      <LinkDialog
+        v-model:visible="linkOpen"
+        :project="linkProject"
       />
 
       <div class="panel table-panel">
@@ -229,16 +251,60 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     :to="{ name: 'issues', query: { repo: String(data.id) } }"
                     class="name"
                   >
-                    {{ shortRepo(data.name) }}
+                    {{ isModPlatform(data.platform) ? data.name : shortRepo(data.name) }}
                   </RouterLink>
-                  <span class="owner">{{ repoOwner(data.name) }}</span>
+                  <span class="owner">{{ isModPlatform(data.platform) ? platformName(data.platform) : repoOwner(data.name) }}</span>
+                  <!-- «Площадки»: a code project's mod pages, a mod page's code project -->
+                  <span
+                    v-if="!isModPlatform(data.platform) && (linksOf(data).length || hasMods)"
+                    class="chips"
+                  >
+                    <RouterLink
+                      v-for="m in linksOf(data)"
+                      :key="m.id"
+                      v-tooltip.top="platformName(m.platform) + ' · ' + m.name"
+                      :to="{ name: 'issues', query: { repo: String(m.id), state: 'all' } }"
+                      class="chip"
+                    ><PlatformIcon
+                      :platform="m.platform"
+                      :size="12"
+                    /><span class="chip-name">{{ m.name }}</span></RouterLink>
+                    <button
+                      type="button"
+                      class="chip add"
+                      :aria-label="t('platforms.linkMods')"
+                      @click.stop="openLinks(data)"
+                    ><i class="pi pi-link" />{{ linksOf(data).length ? '' : t('platforms.mods') }}</button>
+                  </span>
+                  <span
+                    v-else-if="isModPlatform(data.platform)"
+                    class="chips"
+                  >
+                    <RouterLink
+                      v-if="codeOf(data)"
+                      :to="{ name: 'issues', query: { repo: String(codeOf(data)?.id), state: 'all' } }"
+                      class="chip"
+                    ><PlatformIcon
+                      platform="github"
+                      :size="12"
+                    /><span class="chip-name">{{ codeOf(data)?.name }}</span></RouterLink>
+                    <button
+                      type="button"
+                      class="chip add"
+                      :aria-label="t('platforms.linkedCode')"
+                      @click.stop="openLinks(data)"
+                    ><i :class="codeOf(data) ? 'pi pi-pencil' : 'pi pi-link'" />{{ codeOf(data) ? '' : t('platforms.linkShort') }}</button>
+                  </span>
                 </div>
               </div>
             </template>
           </Column>
           <Column class="actions-col">
             <template #body="{ data }: { data: Repo }">
-              <span v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')">
+              <span
+                v-if="!isModPlatform(data.platform)"
+                v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
+              >
                 <Button
                   :label="t('jobs.triage.run')"
                   icon="pi pi-sort-amount-down"
@@ -308,7 +374,24 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column :header="t('projects.colFolder')">
             <template #body="{ data }: { data: Repo }">
-              <div class="folder-cell">
+              <div
+                v-if="isModPlatform(data.platform)"
+                class="folder-cell"
+              >
+                <span
+                  v-if="codeOf(data)?.localPath"
+                  v-tooltip.top="codeOf(data)?.localPath"
+                  class="mapped mono"
+                ><i class="pi pi-folder-open" /> {{ t('platforms.viaCode', { name: codeOf(data)?.name }) }}</span>
+                <span
+                  v-else
+                  class="not-mapped"
+                ><i class="pi pi-folder" /> {{ codeOf(data) ? t('projects.notMapped') : t('platforms.notLinked') }}</span>
+              </div>
+              <div
+                v-else
+                class="folder-cell"
+              >
                 <span
                   v-if="data.localPath"
                   v-tooltip.top="data.localPath"
@@ -459,6 +542,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 .name-main {
   display: flex;
   flex-direction: column;
+  min-width: 220px;
   line-height: 1.3;
 }
 
@@ -474,6 +558,45 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 .owner {
   font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--iw-border-strong);
+  background: var(--iw-elevated);
+  font: inherit;
+  font-size: calc(11.5px * var(--iw-fs, 1));
+  color: var(--iw-text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--iw-primary);
+  color: var(--iw-text);
+}
+
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.add {
+  color: var(--iw-muted);
+  border-style: dashed;
 }
 
 .strong {

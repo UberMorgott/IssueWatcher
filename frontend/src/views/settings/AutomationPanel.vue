@@ -18,6 +18,7 @@ import type { Automation, AutomationEntry, AutomationRule } from '../../api/type
 import { relTime } from '../../lib/format'
 import { projectKeyLabel, projectKeyOptions } from '../../lib/projectKey'
 import { useSave } from '../../lib/save'
+import { ITEM_KINDS } from '../../lib/platforms'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
 
@@ -43,7 +44,16 @@ const editing = ref<Draft | null>(null)
 const editIndex = ref(-1) // -1 = new rule
 const savingRule = ref(false)
 
-const eventOptions = computed(() => (['new_issue', 'new_comment'] as const).map((v) => ({ label: t('settings.automation.event.' + v), value: v })))
+const eventOptions = computed(() => (['new_issue', 'new_item', 'new_comment'] as const).map((v) => ({ label: t('settings.automation.event.' + v), value: v })))
+const kindOptions = computed(() => ITEM_KINDS.map((v) => ({ label: t('platforms.kind.' + v), value: v })))
+// A new mod item (new_item) is never an issue: default its kinds to the mod ones.
+watch(
+  () => editing.value?.event,
+  (ev) => {
+    const e = editing.value
+    if (e && ev === 'new_item' && !e.kinds?.length) e.kinds = ['comment', 'bug']
+  },
+)
 const flowOptions = computed(() => (['label', 'reply', 'fix'] as const).map((v) => ({ label: t('jobs.flow.' + v), value: v })))
 const profileOptions = computed(() => [{ label: t('settings.automation.roleProfile'), value: '' }, ...profiles.value.map((p) => ({ label: p.name, value: p.id }))])
 const projectOptions = computed(() => projectKeyOptions(app.repos, (au.value?.rules ?? []).map((r) => r.project)))
@@ -75,6 +85,7 @@ async function saveRule() {
     labelsAny: [...new Set(labelsText.split(',').map((l) => l.trim()).filter(Boolean))],
     maxPerDay: rest.maxPerDay || 0,
   }
+  if (!rule.kinds?.length) delete rule.kinds // absent = issues only
   const oldId = editIndex.value >= 0 ? cur.rules[editIndex.value]?.id : undefined
   savingRule.value = true
   const ok = await saveRules((rules) => {
@@ -268,6 +279,7 @@ function reasonText(e: AutomationEntry): string {
           </div>
           <div class="muted small r-meta">
             <span>{{ r.labelsAny.length ? t('settings.automation.labelsAnyShort', { labels: r.labelsAny.join(', ') }) : t('settings.automation.anyItem') }}</span>
+            <span v-if="r.kinds?.length">{{ r.kinds.map((k) => t('platforms.kindOne.' + k)).join(', ') }}</span>
             <span>{{ profileName(r.profileId) }}</span>
             <span v-if="r.maxPerDay">{{ t('settings.automation.ruleCapShort', { n: r.maxPerDay }) }}</span>
           </div>
@@ -440,6 +452,17 @@ function reasonText(e: AutomationEntry): string {
             option-value="value"
             :allow-empty="false"
           />
+        </div>
+        <div class="field">
+          <span>{{ t('platforms.kinds') }}</span>
+          <SelectButton
+            v-model="editing.kinds"
+            :options="kindOptions"
+            option-label="label"
+            option-value="value"
+            multiple
+          />
+          <small class="muted">{{ t('platforms.kindsHint') }}</small>
         </div>
         <label class="field">
           <span>{{ t('settings.automation.labelsAny') }}</span>

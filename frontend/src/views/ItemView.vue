@@ -23,6 +23,7 @@ import { useAppStore } from '../stores/app'
 import { absTime, num, relTime } from '../lib/format'
 import { useCrumbs } from '../lib/crumbs'
 import { useChunks } from '../lib/chunks'
+import { isModPlatform, itemRef, platformName } from '../lib/platforms'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -48,6 +49,8 @@ async function load(quiet = false) {
   }
   item.value = r.data
   state.value = 'ok'
+  // Steam has no threads: a reply is a new comment addressed to the author.
+  if (!reply.value && !app.caps(r.data.platform || 'github').replyThreaded && r.data.author) reply.value = '@' + r.data.author + ' '
   if (r.data.unread) {
     const m = await api.markRead(r.data.id)
     if (m.ok) {
@@ -92,18 +95,33 @@ watch(
 )
 
 const repo = computed(() => app.repos.find((r) => r.id === item.value?.repoId))
-/** A fix runs in the project's mapped folder: without one it is disabled (the API refuses it too). */
-const noFolder = computed(() => !!repo.value && !repo.value.localPath)
+const platform = computed(() => item.value?.platform || 'github')
+const mod = computed(() => isModPlatform(platform.value))
+const caps = computed(() => app.caps(platform.value))
+const pname = computed(() => platformName(platform.value))
+/** The account replies go out as: the GitHub login, or the platform's checked account. */
+const account = computed(() => (mod.value ? (app.platforms.find((p) => p.id === platform.value)?.account ?? '') : (app.github?.login ?? '')))
+const canReply = computed(() => (mod.value ? caps.value.reply : app.githubConnected))
+/** A mod page's linked code project (its folder runs the mod's fixes). */
+const codeRepo = computed(() => (mod.value && repo.value?.linkedTo ? app.repos.find((r) => r.id === repo.value?.linkedTo) : undefined))
+/** The folder a fix runs in: the project's own, or for a mod page the linked code project's. */
+const fixRepo = computed(() => (mod.value ? codeRepo.value : repo.value))
+/** A fix without a folder is disabled (the API refuses it too). */
+const noFolder = computed(() => (mod.value ? !codeRepo.value?.localPath : !!repo.value && !repo.value.localPath))
+const fixHint = computed(() => {
+  if (!mod.value) return t('folder.needed')
+  return codeRepo.value ? t('platforms.fixNeedsCodeFolder', { name: codeRepo.value.name }) : t('platforms.fixNeedsLink')
+})
 const folderOpen = ref(false)
 /** Issue flows (a triage is per project: Projects › «Запустить проект»). */
-const ITEM_FLOWS = JOB_FLOWS.filter((f) => f !== 'triage')
+const ITEM_FLOWS = computed(() => JOB_FLOWS.filter((f) => f !== 'triage' && (f !== 'label' || caps.value.setLabels)))
 
 // The top bar is the page heading: Issues › owner/repo#12.
 useCrumbs(() => {
   const it = item.value
   return [
     { label: t('nav.issues'), to: '/issues' },
-    it ? { label: `${it.repo}#${it.number}` } : { label: props.id },
+    it ? { label: itemRef(it) } : { label: props.id },
   ]
 })
 
@@ -116,13 +134,14 @@ async function send() {
   const r = await api.reply(it.id, body)
   sending.value = false
   if (!r.ok) {
-    replyError.value = r.status === 409 ? t('item.notSignedIn') : r.error
+    const b = r.body as { code?: string; platform?: string } | undefined
+    replyError.value = r.status === 409 && b?.code ? t('replyErrors.' + b.code, { platform: platformName(b.platform || platform.value) }) : r.error
     return
   }
   item.value = { ...it, comments: it.comments + 1 }
   if (comments.done.value) void comments.loadTail()
   reply.value = ''
-  toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: `${it.repo}#${it.number}`, life: 3000 })
+  toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: itemRef(it), life: 3000 })
 }
 
 function onComposerKey(e: KeyboardEvent) {
@@ -185,7 +204,7 @@ function profileMenu(flow: JobFlow) {
 }
 
 const initials = (name: string) => (name || '?').slice(0, 2).toUpperCase()
-const avatar = (login: string) => (login ? `https://github.com/${encodeURIComponent(login)}.png?size=64` : '')
+const avatar = (login: string) => (login && !mod.value ? `https://github.com/${encodeURIComponent(login)}.png?size=64` : '')
 </script>
 
 <template>
@@ -236,7 +255,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
           :href="item.url"
           target="_blank"
           rel="noopener noreferrer"
-          :label="t('item.openOnGithub')"
+          :label="t('platforms.openOn', { platform: pname })"
           icon="pi pi-external-link"
           severity="secondary"
           outlined
@@ -298,7 +317,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 class="author-tag"
               >{{ t('item.authorTag') }}</span>
               <span
-                v-if="c.author && c.author === app.github?.login"
+                v-if="c.author && c.author === account"
                 class="you-tag"
               >{{ t('item.youTag') }}</span>
               <a
@@ -329,11 +348,12 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 
           <section class="composer panel">
             <div class="composer-head">
-              <i class="pi pi-reply" /> {{ t('item.replyOnGithub') }}
+              <i class="pi pi-reply" /> {{ t('platforms.replyOn', { platform: pname }) }}
               <span
-                v-if="app.github?.login"
+                v-if="account"
                 class="muted"
-              >{{ t('item.replyAs', { login: '@' + app.github.login }) }}</span>
+              >{{ t('item.replyAs', { login: (mod ? '' : '@') + account }) }}</span>
+              <span class="muted markup">{{ t('platforms.markupHint', { markup: t('platforms.markup.' + platform) }) }}</span>
             </div>
             <Textarea
               v-model="reply"
@@ -342,10 +362,22 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
               :maxlength="MAX_REPLY"
               :placeholder="t('item.replyPlaceholder')"
               :aria-label="t('item.replyAria')"
-              :disabled="!app.githubConnected"
+              :disabled="!canReply"
               fluid
               @keydown="onComposerKey"
             />
+            <small
+              v-if="!caps.replyThreaded && canReply"
+              class="muted"
+            ><i class="pi pi-info-circle" /> {{ t('platforms.replySteamHint', { author: item.author }) }}</small>
+            <Message
+              v-if="!canReply && mod"
+              severity="info"
+              size="small"
+              variant="simple"
+            >
+              {{ t('platforms.replyNoCap', { platform: pname }) }}
+            </Message>
             <Message
               v-if="replyError"
               severity="error"
@@ -360,7 +392,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 :label="t('item.sendReply')"
                 icon="pi pi-send"
                 :loading="sending"
-                :disabled="!reply.trim() || !app.githubConnected"
+                :disabled="!reply.trim() || !canReply"
                 @click="send"
               />
             </div>
@@ -378,12 +410,44 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             <dt>{{ t('item.metaSource') }}</dt>
             <dd class="src">
               <PlatformIcon
-                platform="github"
+                :platform="platform"
                 :size="16"
-              /> GitHub
+              /> {{ pname }}<template v-if="mod">
+                · {{ t('platforms.kindOne.' + (item.kind || 'comment')) }}
+              </template>
             </dd>
-            <dt>{{ t('item.metaLabels') }}</dt>
-            <dd class="labels">
+            <template v-if="mod">
+              <dt>{{ t('platforms.linkedCode') }}</dt>
+              <dd v-if="codeRepo">
+                <PlatformIcon
+                  platform="github"
+                  :size="14"
+                /> <RouterLink :to="{ name: 'issues', query: { repo: String(codeRepo.id), state: 'all' } }">
+                  {{ codeRepo.name }}
+                </RouterLink>
+              </dd>
+              <dd
+                v-else
+                class="muted"
+              >
+                {{ t('platforms.notLinked') }}
+                <Button
+                  as="router-link"
+                  to="/projects"
+                  :label="t('platforms.link')"
+                  size="small"
+                  link
+                  class="folder-link"
+                />
+              </dd>
+            </template>
+            <dt v-if="caps.setLabels || item.labels.length">
+              {{ t('item.metaLabels') }}
+            </dt>
+            <dd
+              v-if="caps.setLabels || item.labels.length"
+              class="labels"
+            >
               <LabelTag
                 v-for="l in item.labels"
                 :key="l"
@@ -404,10 +468,10 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             </template>
             <dt>{{ t('item.metaFolder') }}</dt>
             <dd
-              v-if="repo?.localPath"
+              v-if="fixRepo?.localPath"
               class="mono small"
             >
-              {{ repo.localPath }}
+              {{ fixRepo.localPath }}
             </dd>
             <dd
               v-else
@@ -415,7 +479,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             >
               {{ t('item.notMapped') }}
               <Button
-                v-if="repo"
+                v-if="fixRepo"
                 :label="t('folder.link')"
                 size="small"
                 link
@@ -521,7 +585,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 :model="profileMenu(f)"
                 :disabled="!!activeJob(f) || dispatching || (f === 'fix' && noFolder)"
                 :severity="f === 'fix' ? undefined : 'secondary'"
-                :title="activeJob(f) ? t('item.jobRunning') : f === 'fix' && noFolder ? t('folder.needed') : undefined"
+                :title="activeJob(f) ? t('item.jobRunning') : f === 'fix' && noFolder ? fixHint : undefined"
                 class="agent-btn"
                 @click="dispatch(f)"
               />
@@ -529,8 +593,9 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
                 v-if="f === 'fix' && noFolder"
                 class="folder-hint"
               >
-                <i class="pi pi-folder" /> {{ t('folder.needed') }}
+                <i class="pi pi-folder" /> {{ fixHint }}
                 <Button
+                  v-if="fixRepo"
                   :label="t('folder.link')"
                   size="small"
                   link
@@ -541,7 +606,7 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
             </template>
             <FolderDialog
               v-model:visible="folderOpen"
-              :project="repo ?? null"
+              :project="fixRepo ?? null"
             />
           </div>
         </aside>
@@ -660,6 +725,11 @@ const avatar = (login: string) => (login ? `https://github.com/${encodeURICompon
 
 .composer-head .muted {
   font-weight: 400;
+}
+
+.composer-head .markup {
+  margin-left: auto;
+  font-size: calc(12px * var(--iw-fs, 1));
 }
 
 .composer-foot {
