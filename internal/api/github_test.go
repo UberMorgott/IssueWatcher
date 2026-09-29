@@ -118,15 +118,15 @@ func TestGitHubSignInEndToEnd(t *testing.T) {
 	}
 
 	// 1. Start: no app yet → local manifest page.
-	var start map[string]string
-	e.call(t, http.MethodPost, "/api/auth/start", "", &start)
-	if start["step"] != "create_app" || !strings.HasPrefix(start["url"], "/auth/github/manifest?state=") {
+	var start struct{ Step, URL string }
+	e.call(t, http.MethodPost, "/api/auth/github/start", "", &start)
+	if start.Step != "create_app" || !strings.HasPrefix(start.URL, "/auth/github/manifest?state=") {
 		t.Fatalf("start %+v", start)
 	}
-	state := strings.TrimPrefix(start["url"], "/auth/github/manifest?state=")
+	state := strings.TrimPrefix(start.URL, "/auth/github/manifest?state=")
 
 	// 2. Manifest page auto-posts to github.com with our loopback URLs.
-	page := get(t, e.browser, e.s.BaseURL()+start["url"], "")
+	page := get(t, e.browser, e.s.BaseURL()+start.URL, "")
 	body := html.UnescapeString(page.body)
 	port := strconv.Itoa(e.s.Port())
 	for _, want := range []string{
@@ -139,7 +139,7 @@ func TestGitHubSignInEndToEnd(t *testing.T) {
 			t.Fatalf("manifest page lacks %s:\n%s", want, body)
 		}
 	}
-	if r := get(t, &http.Client{}, e.s.BaseURL()+start["url"], ""); r.status != http.StatusUnauthorized {
+	if r := get(t, &http.Client{}, e.s.BaseURL()+start.URL, ""); r.status != http.StatusUnauthorized {
 		t.Fatalf("manifest page without session: %d", r.status)
 	}
 
@@ -183,11 +183,11 @@ func TestGitHubSignInEndToEnd(t *testing.T) {
 	}
 
 	// 6. Start again → straight to authorize; logout keeps the app.
-	e.call(t, http.MethodPost, "/api/auth/start", "", &start)
-	if start["step"] != "authorize" || !strings.HasPrefix(start["url"], e.gh.URL+"/login/oauth/authorize?") {
+	e.call(t, http.MethodPost, "/api/auth/github/start", "", &start)
+	if start.Step != "authorize" || !strings.HasPrefix(start.URL, e.gh.URL+"/login/oauth/authorize?") {
 		t.Fatalf("second start %+v", start)
 	}
-	e.call(t, http.MethodPost, "/api/auth/logout", "", &st)
+	e.call(t, http.MethodPost, "/api/auth/github/logout", "", &st)
 	if st.SignedIn || !st.App {
 		t.Fatalf("after logout %+v", st)
 	}
@@ -246,9 +246,9 @@ func TestCallbackDeniedByUser(t *testing.T) {
 	if _, err := e.auth.ConvertManifest(t.Context(), githubtest.ManifestCode, e.s.Port()); err != nil {
 		t.Fatal(err)
 	}
-	var start map[string]string
-	e.call(t, http.MethodPost, "/api/auth/start", "", &start)
-	au, _ := url.Parse(start["url"])
+	var start struct{ Step, URL string }
+	e.call(t, http.MethodPost, "/api/auth/github/start", "", &start)
+	au, _ := url.Parse(start.URL)
 	code, _ := redirectFrom(t, e.s.BaseURL()+github.CallbackPath+"?error=access_denied&state="+au.Query().Get("state"))
 	if code != http.StatusForbidden {
 		t.Fatalf("denied: %d", code)

@@ -49,20 +49,20 @@ func syncedEnv(t *testing.T, extra ...func(*Options)) *env {
 func TestReposIssuesAndDetail(t *testing.T) {
 	e := syncedEnv(t)
 	var repos []store.Repo
-	if code := e.call(t, http.MethodGet, "/api/repos", "", &repos); code != http.StatusOK || len(repos) != 1 ||
+	if code := e.call(t, http.MethodGet, "/api/projects", "", &repos); code != http.StatusOK || len(repos) != 1 ||
 		repos[0].Name != "octo/app" || repos[0].Open != 1 || repos[0].Closed != 1 || repos[0].Unread != 1 {
 		t.Fatalf("repos %d %+v", code, repos)
 	}
 	cases := map[string][]int{
-		"/api/issues":                                            {1, 2},
-		"/api/issues?state=open":                                 {1},
-		"/api/issues?state=closed":                               {2},
-		"/api/issues?label=bug":                                  {1},
-		"/api/issues?q=dark":                                     {2},
-		"/api/issues?unread=1":                                   {1},
-		"/api/issues?repo=" + strconv.Itoa(99):                   {},
-		"/api/issues?limit=1&state=all":                          {1},
-		"/api/issues?repo=" + strconv.FormatInt(repos[0].ID, 10): {1, 2},
+		"/api/items":                                            {1, 2},
+		"/api/items?state=open":                                 {1},
+		"/api/items?state=closed":                               {2},
+		"/api/items?label=bug":                                  {1},
+		"/api/items?q=dark":                                     {2},
+		"/api/items?unread=1":                                   {1},
+		"/api/items?repo=" + strconv.Itoa(99):                   {},
+		"/api/items?limit=1&state=all":                          {1},
+		"/api/items?repo=" + strconv.FormatInt(repos[0].ID, 10): {1, 2},
 	}
 	for path, want := range cases {
 		var page store.IssueChunk
@@ -76,34 +76,34 @@ func TestReposIssuesAndDetail(t *testing.T) {
 			}
 		}
 	}
-	for _, bad := range []string{"/api/issues?state=weird", "/api/issues?limit=-1", "/api/issues?repo=x", "/api/issues?cursor=zz", "/api/issues?ids=1,x", "/api/projects?limit=5&sort=bogus"} {
+	for _, bad := range []string{"/api/items?state=weird", "/api/items?limit=-1", "/api/items?repo=x", "/api/items?cursor=zz", "/api/items?ids=1,x", "/api/projects?limit=5&sort=bogus"} {
 		if code := e.call(t, http.MethodGet, bad, "", nil); code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
 	}
 
 	var page store.IssueChunk
-	e.call(t, http.MethodGet, "/api/issues?q=%231", "", &page)
+	e.call(t, http.MethodGet, "/api/items?q=%231", "", &page)
 	id := strconv.FormatInt(page.Items[0].ID, 10)
 	var d store.IssueDetail
-	if code := e.call(t, http.MethodGet, "/api/issues/"+id, "", &d); code != http.StatusOK || d.Comments != 1 || !d.Unread {
+	if code := e.call(t, http.MethodGet, "/api/items/"+id, "", &d); code != http.StatusOK || d.Comments != 1 || !d.Unread {
 		t.Fatalf("detail %d %+v", code, d)
 	}
 	var cc store.CommentChunk
-	if code := e.call(t, http.MethodGet, "/api/issues/"+id+"/comments?limit=10", "", &cc); code != http.StatusOK ||
+	if code := e.call(t, http.MethodGet, "/api/items/"+id+"/comments?limit=10", "", &cc); code != http.StatusOK ||
 		len(cc.Items) != 1 || cc.Items[0].Author != "carol" || cc.More {
 		t.Fatalf("comments %d %+v", code, cc)
 	}
-	if code := e.call(t, http.MethodGet, "/api/issues/9999", "", nil); code != http.StatusNotFound {
+	if code := e.call(t, http.MethodGet, "/api/items/9999", "", nil); code != http.StatusNotFound {
 		t.Fatalf("missing issue: %d", code)
 	}
 
 	// Mark read → badge callback, unread gone.
-	if code := e.call(t, http.MethodPost, "/api/issues/"+id+"/read", "", nil); code != http.StatusNoContent {
+	if code := e.call(t, http.MethodPost, "/api/items/"+id+"/read", "", nil); code != http.StatusNoContent {
 		t.Fatalf("read: %d", code)
 	}
 	<-e.unread
-	e.call(t, http.MethodGet, "/api/issues/"+id, "", &d)
+	e.call(t, http.MethodGet, "/api/items/"+id, "", &d)
 	if d.Unread {
 		t.Fatal("still unread")
 	}
@@ -112,8 +112,8 @@ func TestReposIssuesAndDetail(t *testing.T) {
 func TestReplyPostsToGitHub(t *testing.T) {
 	e := syncedEnv(t)
 	var page store.IssueChunk
-	e.call(t, http.MethodGet, "/api/issues?q=%231", "", &page)
-	path := "/api/issues/" + strconv.FormatInt(page.Items[0].ID, 10) + "/comments"
+	e.call(t, http.MethodGet, "/api/items?q=%231", "", &page)
+	path := "/api/items/" + strconv.FormatInt(page.Items[0].ID, 10) + "/comments"
 
 	var c store.Comment
 	if code := e.call(t, http.MethodPost, path, `{"body":"fixed in 1.2"}`, &c); code != http.StatusCreated ||
@@ -129,7 +129,7 @@ func TestReplyPostsToGitHub(t *testing.T) {
 	if code := e.call(t, http.MethodPost, path, `{"body":"  "}`, nil); code != http.StatusBadRequest {
 		t.Fatalf("empty reply: %d", code)
 	}
-	if code := e.call(t, http.MethodPost, "/api/issues/9999/comments", `{"body":"x"}`, nil); code != http.StatusNotFound {
+	if code := e.call(t, http.MethodPost, "/api/items/9999/comments", `{"body":"x"}`, nil); code != http.StatusNotFound {
 		t.Fatalf("reply to missing: %d", code)
 	}
 	if err := e.auth.Logout(); err != nil {
@@ -214,7 +214,7 @@ func TestStatsAndSync(t *testing.T) {
 
 func TestDataEndpointsNeedSession(t *testing.T) {
 	e := newEnv(t)
-	for _, p := range []string{"/api/repos", "/api/issues", "/api/stats", "/api/sync", "/api/auth/status"} {
+	for _, p := range []string{"/api/projects", "/api/items", "/api/stats", "/api/sync", "/api/auth/status"} {
 		if r := get(t, &http.Client{}, e.s.BaseURL()+p, ""); r.status != http.StatusUnauthorized {
 			t.Errorf("%s without session: %d", p, r.status)
 		}

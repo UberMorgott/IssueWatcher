@@ -23,18 +23,14 @@ import (
 //	GET  /api/stats?project=&weeks=      totals + weekly opened/closed; per-project totals when project omitted
 //	GET  /api/sync   POST /api/sync       poller status / sync now
 //
-// Legacy aliases: /api/repos, /api/issues[/{id}[/read|/comments]], repo=.
+// Legacy query alias: repo= (= project=).
 func (s *Server) registerData(mux *http.ServeMux) {
-	for _, base := range []string{"/api/projects", "/api/repos"} {
-		mux.HandleFunc("GET "+base, s.handleRepos)
-	}
-	for _, base := range []string{"/api/items", "/api/issues"} {
-		mux.HandleFunc("GET "+base, s.handleIssues)
-		mux.HandleFunc("GET "+base+"/{id}", s.handleIssue)
-		mux.HandleFunc("GET "+base+"/{id}/comments", s.handleComments)
-		mux.HandleFunc("POST "+base+"/{id}/read", s.handleRead)
-		mux.HandleFunc("POST "+base+"/{id}/comments", s.handleReply)
-	}
+	mux.HandleFunc("GET /api/projects", s.handleRepos)
+	mux.HandleFunc("GET /api/items", s.handleIssues)
+	mux.HandleFunc("GET /api/items/{id}", s.handleIssue)
+	mux.HandleFunc("GET /api/items/{id}/comments", s.handleComments)
+	mux.HandleFunc("POST /api/items/{id}/read", s.handleRead)
+	mux.HandleFunc("POST /api/items/{id}/comments", s.handleReply)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/sync", s.handleSyncStatus)
 	mux.HandleFunc("POST /api/sync", s.handleSyncNow)

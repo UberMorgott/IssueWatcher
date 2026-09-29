@@ -104,7 +104,7 @@ Sources:
 
 ## HTTP API
 
-JSON over the loopback server; session cookie or bearer required (except the GitHub redirect paths above). Legacy aliases stay until the SPA drops them: `/api/repos` = `/api/projects`, `/api/issues…` = `/api/items…`, `repo=` = `project=`, `POST /api/auth/{start,logout,device}` (start there only returns the URL). Page/offset pagination is gone: lists load as keyset chunks (infinite scroll).
+JSON over the loopback server; session cookie or bearer required (except the GitHub redirect paths above). Legacy path aliases (`/api/repos`, `/api/issues…`, `POST /api/auth/{start,logout,device}`) are gone; only the `repo=` = `project=` query alias remains. Page/offset pagination is gone: lists load as keyset chunks (infinite scroll).
 
 - `GET /api/auth/status` → `{providers:[{id, name, connected, login, avatarUrl, setupNeeded, state, error?}], …legacy GitHub fields (app, appSlug, installUrl, signedIn, login, device{pending,userCode,verificationUri,error})}`.
   `state`: `not_configured` (no GitHub App yet; first start creates it) · `disconnected` · `connecting` (browser round trip or device poll pending) · `connected` · `error` · `unavailable` (curseforge, nexus, steam: listed, not implemented).

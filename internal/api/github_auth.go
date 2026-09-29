@@ -66,10 +66,6 @@ func (s *Server) registerGitHub(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/{provider}/start", s.handleProviderStart)
 	mux.HandleFunc("POST /api/auth/{provider}/logout", s.handleProviderLogout)
 	mux.HandleFunc("POST /api/auth/github/device", s.handleDeviceStart)
-	// Legacy aliases (github only; start returns the URL without opening it).
-	mux.HandleFunc("POST /api/auth/start", s.handleAuthStart)
-	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
-	mux.HandleFunc("POST /api/auth/device", s.handleDeviceStart)
 	mux.HandleFunc("GET /auth/github/manifest", s.handleManifestPage)
 	mux.HandleFunc("GET "+github.AppCreatedPath, s.handleAppCreated)
 	mux.HandleFunc("GET "+github.SetupPath, s.handleSetup)
@@ -243,17 +239,6 @@ func (s *Server) handleProviderStart(w http.ResponseWriter, r *http.Request) {
 	s.opts.Open(open)
 	s.authChanged()
 	writeJSON(w, http.StatusOK, map[string]any{"step": step, "url": u, "opened": true})
-}
-
-// handleAuthStart is the legacy POST /api/auth/start: the page navigates itself.
-func (s *Server) handleAuthStart(w http.ResponseWriter, _ *http.Request) {
-	step, u, _, err := s.startURL()
-	if err != nil {
-		s.opts.Log.Error("auth start: read app", "err", err)
-		errJSON(w, http.StatusInternalServerError, "cannot read GitHub app credentials")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"step": step, "url": u})
 }
 
 // knownProvider accepts github; future providers answer 501, others 404.
