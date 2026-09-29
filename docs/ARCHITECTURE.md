@@ -106,6 +106,7 @@ Sources:
 
 JSON over the loopback server; session cookie or bearer required (except the GitHub redirect paths above). Legacy path aliases (`/api/repos`, `/api/issues…`, `POST /api/auth/{start,logout,device}`) are gone; only the `repo=` = `project=` query alias remains. Page/offset pagination is gone: lists load as keyset chunks (infinite scroll).
 
+- `GET /api/platforms` → every platform (GitHub first) `{id, name, enabled, state, account?, error?, running, projects, lastSync?, checkedAt?, capabilities}`; `state`: `disabled|unknown|connected|signed_out|relogin|unavailable|error`. `POST /api/platforms/{id}/check` (nexus | curseforge | steam) runs a live account check. `providers.<id>` settings apply live (syncer added/removed, server restarted on a new command).
 - `GET /api/auth/status` → `{providers:[{id, name, connected, login, avatarUrl, setupNeeded, state, error?}], …legacy GitHub fields (app, appSlug, installUrl, signedIn, login, device{pending,userCode,verificationUri,error})}`.
   `state`: `not_configured` (no GitHub App yet; first start creates it) · `disconnected` · `connecting` (browser round trip or device poll pending) · `connected` · `error` · `unavailable` (curseforge, nexus, steam: listed, not implemented).
 - `POST /api/auth/{provider}/start` → `{step: create_app|authorize, url, opened: true}`; the server opens the default browser. Non-github: 501 (known) / 404.
