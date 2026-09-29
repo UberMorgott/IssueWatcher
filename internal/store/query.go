@@ -227,6 +227,16 @@ type IssueChunk struct {
 	NextCursor string  `json:"nextCursor"`      // cursor of the last row (Cursor for the next chunk), "" when empty
 	More       bool    `json:"more"`            // Cursor/first chunk: older rows follow; After: more than Limit newer rows
 	Total      *int    `json:"total,omitempty"` // rows matching the filter (first chunk and After only)
+	// Counts (first chunk and After): open / closed / unread rows matching every
+	// filter except state and unread — the list's header counters.
+	Counts *IssueCounts `json:"counts,omitempty"`
+}
+
+// IssueCounts are the header counters of a filtered issue list.
+type IssueCounts struct {
+	Open   int `json:"open"`
+	Closed int `json:"closed"`
+	Unread int `json:"unread"`
 }
 
 // MaxIDs bounds IssueFilter.IDs.
@@ -265,14 +275,8 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	if f.Kind != "" {
 		where, args = append(where, "i.kind = ?"), append(args, f.Kind)
 	}
-	if f.State == "open" || f.State == "closed" {
-		where, args = append(where, "i.status = ?"), append(args, f.State)
-	}
 	if f.Label != "" {
 		where, args = append(where, "EXISTS (SELECT 1 FROM json_each(i.labels) WHERE value = ?)"), append(args, f.Label)
-	}
-	if f.Unread {
-		where = append(where, "i.unread = 1")
 	}
 	if t := strings.TrimSpace(f.Text); t != "" {
 		if n, err := strconv.Atoi(strings.TrimPrefix(t, "#")); err == nil {
@@ -284,6 +288,20 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 		}
 	}
 	chunk := IssueChunk{Items: []Issue{}}
+	if len(f.IDs) == 0 && f.Cursor == "" { // header counters (first chunk, head refresh): every filter but state and unread
+		var n IssueCounts
+		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1)"+
+			" FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).Scan(&n.Open, &n.Closed, &n.Unread); err != nil { //nolint:gosec // G202: constant fragments, bound values
+			return chunk, fmt.Errorf("store: count issues: %w", err)
+		}
+		chunk.Counts = &n
+	}
+	if f.State == "open" || f.State == "closed" {
+		where, args = append(where, "i.status = ?"), append(args, f.State)
+	}
+	if f.Unread {
+		where = append(where, "i.unread = 1")
+	}
 	if len(f.IDs) > 0 {
 		ids := f.IDs[:min(len(f.IDs), MaxIDs)]
 		where = append(where, "i.id IN (?"+strings.Repeat(",?", len(ids)-1)+")")

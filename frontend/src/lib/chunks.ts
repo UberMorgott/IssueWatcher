@@ -8,6 +8,14 @@ export interface Chunk<T> {
   more: boolean
   total?: number
   headCursor?: string
+  /** Header counters (issue list, first chunk). */
+  counts?: ChunkCounts
+}
+
+export interface ChunkCounts {
+  open: number
+  closed: number
+  unread: number
 }
 
 /**
@@ -18,6 +26,7 @@ export interface Chunk<T> {
 export function useChunks<T extends { id: number | string }>(fetch: (cursor: string) => Promise<Result<Chunk<T>>>) {
   const items = shallowRef<T[]>([])
   const total = ref<number | null>(null)
+  const counts = ref<ChunkCounts | null>(null)
   const loading = ref(false)
   const done = ref(false)
   const error = ref('')
@@ -44,6 +53,7 @@ export function useChunks<T extends { id: number | string }>(fetch: (cursor: str
     if (!items.value.length && r.data.headCursor) head.value = r.data.headCursor
     items.value = items.value.concat(fresh)
     if (r.data.total !== undefined) total.value = r.data.total
+    if (r.data.counts) counts.value = r.data.counts
     if (r.data.nextCursor) cursor = r.data.nextCursor
     done.value = !r.data.more
   }
@@ -69,6 +79,7 @@ export function useChunks<T extends { id: number | string }>(fetch: (cursor: str
     inflight = null
     items.value = []
     total.value = null
+    counts.value = null
     head.value = ''
     cursor = ''
     done.value = false
@@ -77,5 +88,5 @@ export function useChunks<T extends { id: number | string }>(fetch: (cursor: str
     status.value = 0
   }
 
-  return { items, total, loading, done, error, status, head, loadMore, loadTail, reset }
+  return { items, total, counts, loading, done, error, status, head, loadMore, loadTail, reset }
 }

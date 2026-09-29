@@ -141,6 +141,11 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           class="l-more"
           :title="item.labels.slice(2).join(', ')"
         >+{{ item.labels.length - 2 }}</span>
+        <span
+          v-if="mod && !item.labels.length"
+          class="l-none"
+          :title="t('issues.noLabels')"
+        >—</span>
       </span>
       <span
         class="c-num"
@@ -317,7 +322,8 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
   overflow: hidden;
 }
 
-.l-more {
+.l-more,
+.l-none {
   font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
 }

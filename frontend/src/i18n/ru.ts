@@ -184,6 +184,7 @@ const ru: Messages = {
     allProjects: 'Все проекты',
     label: 'Метка',
     anyLabel: 'Любая метка',
+    noLabels: 'На этой платформе нет меток',
     state: 'Статус',
     open: 'Открытые',
     closed: 'Закрытые',

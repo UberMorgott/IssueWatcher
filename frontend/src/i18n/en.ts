@@ -183,6 +183,7 @@ const en = {
     allProjects: 'All projects',
     label: 'Label',
     anyLabel: 'Any label',
+    noLabels: 'This platform has no labels',
     state: 'State',
     open: 'Open',
     closed: 'Closed',

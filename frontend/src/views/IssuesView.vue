@@ -198,6 +198,7 @@ async function refreshLive() {
     selected.value = selected.value.filter((s) => byId.has(s.id)).map((s) => byId.get(s.id) as Issue)
     if (added && (scroller()?.scrollTop ?? 0) >= ROW.value / 2) newAbove.value += added
     await keepAnchor(added - removedAbove)
+    await refreshCounts()
   } finally {
     refreshing = false
   }
@@ -231,10 +232,26 @@ const kindOptions = computed(() => [
   { label: t('platforms.allKinds'), value: '' },
   ...ITEM_KINDS.map((k) => ({ label: t('platforms.kind.' + k), value: k })),
 ])
-const repoOptions = computed(() => [
-  { label: t('issues.allProjects'), value: 0, platform: '' },
-  ...app.repos.filter((r) => !filters.value.source || r.platform === filters.value.source).map((r) => ({ label: r.name, value: r.id, platform: r.platform })),
-])
+// One option per project as on the Projects page: a code project stands for its
+// linked mod pages too (its items include theirs); a platform filter keeps the
+// projects with a channel on that platform. A linked mod page picked elsewhere
+// (old link) stays selectable so the field never renders empty.
+const repoById = computed(() => new Map(app.repos.map((r) => [r.id, r])))
+const repoOptions = computed(() => {
+  const src = filters.value.source
+  const heads = app.repos.filter((r) => !r.linkedTo || !repoById.value.has(r.linkedTo))
+  const onSource = (r: (typeof heads)[number]) => !src || r.platform === src || !!r.links?.some((id) => repoById.value.get(id)?.platform === src)
+  const opts = heads.filter(onSource).map((r) => ({ label: r.name, value: r.id, platform: r.platform }))
+  const cur = repoById.value.get(filters.value.repo)
+  if (cur && !opts.some((o) => o.value === cur.id)) opts.push({ label: cur.name, value: cur.id, platform: cur.platform })
+  return [{ label: t('issues.allProjects'), value: 0, platform: '' }, ...opts]
+})
+/** Keeps the project filter when it has a channel on the new platform. */
+function setSource(v: string) {
+  const r = repoById.value.get(filters.value.repo)
+  const keep = !!r && (!v || r.platform === v || !!r.links?.some((id) => repoById.value.get(id)?.platform === v))
+  setQuery({ source: v, repo: keep ? filters.value.repo : null })
+}
 const stateOptions = computed(() => [
   { label: t('issues.open'), value: 'open' },
   { label: t('issues.closed'), value: 'closed' },
@@ -254,11 +271,13 @@ function reset() {
   void router.replace({ query: {} })
 }
 
-const counts = computed(() => {
-  const f = filters.value
-  const repos = app.repos.filter((r) => (!f.repo || r.id === f.repo) && (!f.source || r.platform === f.source))
-  return repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed, unread: a.unread + r.unread }), { open: 0, closed: 0, unread: 0 })
-})
+/** Header counters from the server for the active filters (all but state / unread). */
+const counts = computed(() => list.counts.value ?? { open: 0, closed: 0, unread: 0 })
+/** Re-reads the counters (a read or a sync changed them; the head refresh may not run). */
+async function refreshCounts() {
+  const r = await api.issues({ ...query(), limit: 1 })
+  if (r.ok && r.data.counts) list.counts.value = r.data.counts
+}
 /** Counter above that already shows the list size for the current state filter (the total is then not repeated). */
 const stateCount = computed(() => {
   const c = counts.value
@@ -366,7 +385,7 @@ onBeforeUnmount(() => {
           option-disabled="disabled"
           :aria-label="t('issues.source')"
           class="f-source"
-          @update:model-value="(v: string) => setQuery({ source: v, repo: null })"
+          @update:model-value="setSource"
         >
           <template #value="{ value }">
             <span class="opt"><PlatformIcon
@@ -398,6 +417,7 @@ onBeforeUnmount(() => {
           option-label="label"
           option-value="value"
           filter
+          :placeholder="t('issues.allProjects')"
           :aria-label="t('issues.project')"
           class="f-repo"
           @update:model-value="(v: number) => setQuery({ repo: v })"

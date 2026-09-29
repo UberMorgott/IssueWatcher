@@ -123,6 +123,8 @@ export interface IssueChunk {
   more: boolean
   /** Rows matching the filter (first chunk and `after` only). */
   total?: number
+  /** First chunk: open / closed / unread rows for every filter but state and unread (header counters). */
+  counts?: { open: number; closed: number; unread: number }
 }
 
 export interface CommentChunk {

@@ -232,6 +232,16 @@ func TestIssuesFiltersAndDetail(t *testing.T) {
 			t.Errorf("filter %+v: got %v want %v", c.f, got, c.want)
 		}
 	}
+	// Header counters follow every filter but state and unread.
+	if pg, err := s.Issues(ctx, IssueFilter{State: "open"}); err != nil || pg.Counts == nil || *pg.Counts != (IssueCounts{Open: 1, Closed: 1}) {
+		t.Fatalf("counts open: %+v %v", pg.Counts, err)
+	}
+	if pg, err := s.Issues(ctx, IssueFilter{State: "open", Label: "feature", Unread: true}); err != nil || pg.Counts == nil || *pg.Counts != (IssueCounts{Closed: 1}) {
+		t.Fatalf("counts label: %+v %v", pg.Counts, err)
+	}
+	if pg, err := s.Issues(ctx, IssueFilter{Platform: "nexus"}); err != nil || pg.Counts == nil || *pg.Counts != (IssueCounts{}) {
+		t.Fatalf("counts other platform: %+v %v", pg.Counts, err)
+	}
 	page, _ := s.Issues(ctx, IssueFilter{Text: "#1"})
 	d, err := s.Issue(ctx, page.Items[0].ID)
 	if err != nil || d.Body != "body I1" || d.Comments != 2 || d.Labels[0] != "bug" || d.Repo != "o/app" {
