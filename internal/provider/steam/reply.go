@@ -87,32 +87,32 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	case err != nil:
 		// The request may have reached Steam: look for it instead of retrying.
 		p.opts.Log.Warn("steam: post failed, reading back", "item", fileID, "err", err)
-		return p.readBack(context.WithoutCancel(ctx), creator, fileID, s.SteamID, text, sent)
+		return p.readBack(context.WithoutCancel(ctx), creator, fileID, s, text, sent)
 	case a.Status == http.StatusUnauthorized || a.Status == http.StatusForbidden || (a.URL != nil && strings.Contains(a.URL.Path, "/login")):
-		return provider.Comment{}, p.expire()
+		return provider.Comment{}, p.expire(s)
 	case a.Status != http.StatusOK:
 		return provider.Comment{}, fmt.Errorf("steam: post comment: HTTP %d", a.Status)
 	}
 	var r postAnswer
 	if err := json.Unmarshal(a.Body, &r); err != nil {
 		if strings.Contains(strings.ToLower(string(a.Body)), "login") { // an HTML sign-in page
-			return provider.Comment{}, p.expire()
+			return provider.Comment{}, p.expire(s)
 		}
 		return provider.Comment{}, fmt.Errorf("steam: post comment: %w", err)
 	}
 	if !r.Success {
 		if notLoggedIn(r.Error) {
-			return provider.Comment{}, p.expire()
+			return provider.Comment{}, p.expire(s)
 		}
 		return provider.Comment{}, fmt.Errorf("steam: post comment refused: %s", cmpStr(r.Error, "success=false"))
 	}
-	p.sessionOK()
+	p.sessionOK(s)
 	if cs, err := parseComments(r.HTML); err == nil {
 		if c, ok := match(cs, s.SteamID, text, sent); ok {
 			return p.comment(fileID, c, s.SteamID), nil
 		}
 	}
-	return p.readBack(ctx, creator, fileID, s.SteamID, text, sent)
+	return p.readBack(ctx, creator, fileID, s, text, sent)
 }
 
 // findComment reads the thread until comment id (the @author of the reply).
@@ -140,7 +140,8 @@ func (p *Provider) findComment(ctx context.Context, creator, fileID, id string) 
 }
 
 // readBack looks for the just-posted comment on the thread's first page.
-func (p *Provider) readBack(ctx context.Context, creator, fileID, self, text string, sent time.Time) (provider.Comment, error) {
+func (p *Provider) readBack(ctx context.Context, creator, fileID string, s Settings, text string, sent time.Time) (provider.Comment, error) {
+	self := s.SteamID
 	r, err := p.render(ctx, creator, fileID, 0, 10)
 	if err != nil {
 		return provider.Comment{}, fmt.Errorf("%w (%w)", ErrOutcomeUnknown, err)
@@ -150,7 +151,7 @@ func (p *Provider) readBack(ctx context.Context, creator, fileID, self, text str
 		return provider.Comment{}, fmt.Errorf("%w (%w)", ErrOutcomeUnknown, err)
 	}
 	if c, ok := match(cs, self, text, sent); ok {
-		p.sessionOK()
+		p.sessionOK(s)
 		return p.comment(fileID, c, self), nil
 	}
 	return provider.Comment{}, ErrOutcomeUnknown
@@ -185,17 +186,26 @@ func notLoggedIn(msg string) bool {
 	return false
 }
 
-// expire marks the stored cookies refused and returns ErrSessionExpired.
-func (p *Provider) expire() error {
-	p.setSession(true)
+// expire marks the cookies used (seen) refused and returns ErrSessionExpired.
+func (p *Provider) expire(seen Settings) error {
+	p.setSession(seen, true)
 	return ErrSessionExpired
 }
 
-func (p *Provider) sessionOK() { p.setSession(false) }
+func (p *Provider) sessionOK(seen Settings) { p.setSession(seen, false) }
 
-func (p *Provider) setSession(expired bool) {
+// setSession records the session state of the cookies the request used. New
+// cookies pasted meanwhile are left alone (neither flagged by an old refusal
+// nor overwritten on disk by the old ones).
+func (p *Provider) setSession(seen Settings, expired bool) {
+	p.save.Lock()
+	defer p.save.Unlock()
 	p.mu.Lock()
 	s := p.settings
+	if s.LoginSecure != seen.LoginSecure || s.SessionID != seen.SessionID {
+		p.mu.Unlock()
+		return
+	}
 	s.SessionExpired, s.CheckedAt = expired, p.opts.Now().UTC()
 	p.settings = s
 	p.mu.Unlock()

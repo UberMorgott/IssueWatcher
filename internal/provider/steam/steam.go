@@ -53,6 +53,7 @@ type Options struct {
 type Provider struct {
 	opts Options
 
+	save     sync.Mutex // serialises settings writes (Save, the session flag): read-apply-write-swap is one step
 	mu       sync.Mutex
 	settings Settings
 	loaded   bool
@@ -129,6 +130,8 @@ func (p *Provider) Status() (Status, error) {
 // Save applies u and stores the settings (DPAPI). A changed SteamID drops the
 // creator cache.
 func (p *Provider) Save(u Update) (Status, error) {
+	p.save.Lock()
+	defer p.save.Unlock()
 	cur, err := p.current()
 	if err != nil {
 		return Status{}, err

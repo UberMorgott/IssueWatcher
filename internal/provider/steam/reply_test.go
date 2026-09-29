@@ -174,3 +174,32 @@ func TestReplyLostAnswerReadBack(t *testing.T) {
 		})
 	}
 }
+
+// L1: a refusal of the old cookies must neither flag nor overwrite cookies
+// pasted meanwhile (in memory and on disk).
+func TestSessionFlagKeepsNewCookies(t *testing.T) {
+	f := newFake(t)
+	p := f.provider(t)
+	f.signedIn(t, p)
+	old, err := p.current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls2, sid2 := "76561197996210591%7C%7CeyJhbGciOi.new", "fedcba9876543210fedcba98"
+	if _, err := p.Save(Update{LoginSecure: &ls2, SessionID: &sid2}); err != nil {
+		t.Fatal(err)
+	}
+	_ = p.expire(old)
+	if cur, _ := p.current(); cur.LoginSecure != ls2 || cur.SessionExpired {
+		t.Fatalf("memory: %q expired=%v", cur.LoginSecure, cur.SessionExpired)
+	}
+	disk, err := loadSettings(p.opts.Dir)
+	if err != nil || disk.LoginSecure != ls2 || disk.SessionExpired {
+		t.Fatalf("disk: %q expired=%v %v", disk.LoginSecure, disk.SessionExpired, err)
+	}
+	cur, _ := p.current()
+	_ = p.expire(cur)
+	if c, _ := p.current(); !c.SessionExpired {
+		t.Fatal("a refusal of the current cookies must flag them")
+	}
+}
