@@ -23,7 +23,7 @@ type Queued struct {
 	ItemID int64      `json:"itemId"`
 	Job    *store.Job `json:"job,omitempty"`
 	// Error: "exists" (an unfinished job of this flow; Job is that one),
-	// "not_found", or a message.
+	// "not_found", "no_folder" (fix without a usable local folder; no job), or a message.
 	Error string `json:"error,omitempty"`
 }
 
@@ -54,13 +54,30 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 	}
 	out := make([]Queued, 0, len(itemIDs))
 	seen := map[int64]bool{}
+	noFolder := 0
 	for _, id := range itemIDs {
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
-		j, err := r.opts.Store.CreateJob(ctx, id, flow, profileID, store.OriginManual, "")
 		q := Queued{ItemID: id}
+		if flow == flowFix { // a fix runs in the mapped folder: without one the job could only fail
+			it, err := r.opts.Store.AutomationItemFacts(ctx, id)
+			switch {
+			case errors.Is(err, store.ErrNotFound):
+				q.Error = "not_found"
+			case err != nil:
+				return out, err
+			case folderError("", it.LocalPath, it.ProjectURL) != nil:
+				q.Error = CodeNoFolder
+				noFolder++
+			}
+			if q.Error != "" {
+				out = append(out, q)
+				continue
+			}
+		}
+		j, err := r.opts.Store.CreateJob(ctx, id, flow, profileID, store.OriginManual, "")
 		switch {
 		case err == nil:
 			q.Job = &j
@@ -73,6 +90,9 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 			return out, err
 		}
 		out = append(out, q)
+	}
+	if noFolder > 0 && noFolder == len(out) {
+		return out, ErrNoFolder // nothing queued: every item lacks a usable folder
 	}
 	r.kick()
 	return out, nil

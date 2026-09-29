@@ -109,6 +109,9 @@ var (
 	ErrUnavailable = errors.New("runner: publishing is not available")
 	// ErrBadRequest: invalid flow, profile or input.
 	ErrBadRequest = errors.New("runner: bad request")
+	// ErrNoFolder: a fix job was asked for items whose project has no usable
+	// local folder (CodeNoFolder); no job was created.
+	ErrNoFolder = errors.New("no usable local folder is mapped to the project; map it in Settings › Projects and folders")
 )
 
 // New prepares a runner; Start runs it.
@@ -423,6 +426,21 @@ func (r *Runner) worktreePath(j store.Job) string {
 	return filepath.Join(r.opts.DataDir, "worktrees", dirSlug(j.Repo), strconv.FormatInt(j.ID, 10))
 }
 
+// folderError is the CodeNoFolder error of a fix job whose project has no usable
+// local folder (folders.Check), nil when the folder is usable. Enqueue rejects
+// such items up front; runFix checks again (the mapping may change meanwhile).
+func folderError(project, localPath, projectURL string) error {
+	st := folders.Check(localPath, projectURL)
+	if st == folders.StatusOK {
+		return nil
+	}
+	msg := "no local folder is mapped to " + project
+	if localPath != "" {
+		msg = fmt.Sprintf("the local folder %s of %s is not usable (%s)", localPath, project, st)
+	}
+	return coded(CodeNoFolder, errors.New(msg+"; map it in Settings › Projects and folders"))
+}
+
 // runFix: worktree from the mapped clone → agent → diff → verify → review.
 func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *jobLog) (string, error) {
 	prof, cfg, err := r.profileFor(*j)
@@ -433,12 +451,8 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	if err != nil {
 		return "", err
 	}
-	if st := folders.Check(in.LocalPath, in.ProjectURL); st != folders.StatusOK {
-		msg := "no local folder is mapped to " + in.ProjectName
-		if in.LocalPath != "" {
-			msg = fmt.Sprintf("the local folder %s of %s is not usable (%s)", in.LocalPath, in.ProjectName, st)
-		}
-		return "", coded(CodeNoFolder, errors.New(msg+"; map it in Settings › Projects and folders"))
+	if err := folderError(in.ProjectName, in.LocalPath, in.ProjectURL); err != nil {
+		return "", err
 	}
 	if _, err := r.resolveExe(prof); err != nil {
 		return "", coded(CodeNoCLI, err)

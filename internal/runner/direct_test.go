@@ -272,7 +272,15 @@ func TestDirectOneJobPerFolder(t *testing.T) {
 	if err := e.st.SetLocalPath(t.Context(), e.proj[1].ID, e.local+string(filepath.Separator)); err != nil {
 		t.Fatal(err)
 	}
-	jobs := e.enqueue("fix", e.items[0], e.items[1])
+	// octo/other's folder is octo/demo's clone: Enqueue refuses it, so its job
+	// goes straight into the store (as if the mapping changed after queueing).
+	jobs := e.enqueue("fix", e.items[0])
+	second, err := e.st.CreateJob(t.Context(), e.items[1], "fix", "claude", store.OriginManual, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs = append(jobs, second)
+	e.r.Refresh()
 	e.waitRunning(1)
 	if j, _ := e.st.Job(t.Context(), jobs[1].ID); j.State != store.JobQueued {
 		t.Fatalf("second job in the same folder started: %+v", j)

@@ -14,7 +14,9 @@ import (
 // Agent jobs (docs/ARCHITECTURE.md → HTTP API, Runner):
 //
 //	GET  /api/jobs?state=&flow=&origin=&project=&item=&cursor=&limit=  keyset chunk, newest first
-//	POST /api/jobs {itemIds[], flow: fix|reply, profileId?}    one job per item → 201 {jobs:[{itemId, job?, error?}]}
+//	POST /api/jobs {itemIds[], flow: fix|reply, profileId?}    one job per item → 201 {jobs:[{itemId, job?, error?}]};
+//	                                     fix items without a usable local folder get error "no_folder" (no job);
+//	                                     when that is every item → 409 {error, code: "no_folder", jobs}
 //	GET  /api/jobs/{id}                  job
 //	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
 //	GET  /api/jobs/{id}/diff?attempt=    unified diff (text/plain)
@@ -120,6 +122,10 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, runner.ErrUnavailable) {
 		errJSON(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, runner.ErrNoFolder) { // fix for items without a usable folder: nothing was queued
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": runner.CodeNoFolder, "jobs": out})
 		return
 	}
 	if err != nil {

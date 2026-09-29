@@ -16,7 +16,9 @@ import (
 
 func TestJobsAPI(t *testing.T) {
 	var r *runner.Runner
+	var st *store.Store
 	e := syncedEnv(t, func(o *Options) {
+		st = o.Store
 		r = runner.New(runner.Options{Store: o.Store, DataDir: filepath.Join(t.TempDir(), "data"), Settings: config.Defaults,
 			LookPath: func(string) (string, error) { return "", context.Canceled }})
 		o.Runner = r
@@ -43,16 +45,30 @@ func TestJobsAPI(t *testing.T) {
 			t.Errorf("POST %s: %d, want %d", body, code, want)
 		}
 	}
-	var created struct {
-		Jobs []runner.Queued `json:"jobs"`
+	// The project has no local folder: a fix is refused up front, no job is created.
+	var refused struct {
+		Error string          `json:"error"`
+		Code  string          `json:"code"`
+		Jobs  []runner.Queued `json:"jobs"`
 	}
-	if code := e.call(t, http.MethodPost, "/api/jobs", `{"itemIds":[`+id+`],"flow":"fix"}`, &created); code != http.StatusCreated ||
-		len(created.Jobs) != 1 || created.Jobs[0].Job == nil || created.Jobs[0].Job.ProfileID != "claude" {
-		t.Fatalf("create %d %+v", code, created)
+	if code := e.callAny(t, http.MethodPost, "/api/jobs", `{"itemIds":[`+id+`],"flow":"fix"}`, &refused); code != http.StatusConflict ||
+		refused.Code != runner.CodeNoFolder || len(refused.Jobs) != 1 || refused.Jobs[0].Job != nil || refused.Jobs[0].Error != runner.CodeNoFolder ||
+		!strings.Contains(refused.Error, "Projects and folders") {
+		t.Fatalf("fix without a folder: %d %+v", code, refused)
 	}
-	jid := strconv.FormatInt(created.Jobs[0].Job.ID, 10)
+	var none store.JobChunk
+	if e.call(t, http.MethodGet, "/api/jobs?flow=fix", "", &none); len(none.Items) != 0 {
+		t.Fatalf("a refused fix created a job: %+v", none.Items)
+	}
 
-	// The project has no local folder: the job fails with a code the UI links.
+	// A fix queued before its folder went away (here: straight into the store)
+	// still fails at run time with the code the UI links.
+	fj, err := st.CreateJob(t.Context(), items.Items[0].ID, "fix", "claude", store.OriginManual, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Refresh()
+	jid := strconv.FormatInt(fj.ID, 10)
 	var j store.Job
 	for deadline := time.Now().Add(10 * time.Second); j.State != store.JobFailed; {
 		if time.Now().After(deadline) {

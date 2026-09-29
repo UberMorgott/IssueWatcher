@@ -478,7 +478,30 @@ func TestNoFolderMapping(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, nil)
 	other := e.items[1] // octo/other is not mapped
-	j := e.wait(e.enqueue("fix", other)[0].ID, store.JobFailed)
+	// Refused up front: no job at all.
+	q, err := e.r.Enqueue(t.Context(), []int64{other}, "fix", "")
+	if !errors.Is(err, ErrNoFolder) || len(q) != 1 || q[0].Job != nil || q[0].Error != CodeNoFolder {
+		t.Fatalf("fix without a folder: %+v %v", q, err)
+	}
+	if c, _ := e.st.Jobs(t.Context(), store.JobFilter{ItemID: other}); len(c.Items) != 0 {
+		t.Fatalf("refused fix created a job: %+v", c.Items)
+	}
+	// A mixed batch queues the mapped item only; reply needs no folder.
+	q, err = e.r.Enqueue(t.Context(), []int64{e.items[0], other}, "fix", "")
+	if err != nil || len(q) != 2 || q[0].Job == nil || q[1].Job != nil || q[1].Error != CodeNoFolder {
+		t.Fatalf("mixed batch: %+v %v", q, err)
+	}
+	if q, err := e.r.Enqueue(t.Context(), []int64{other}, "reply", ""); err != nil || q[0].Job == nil {
+		t.Fatalf("reply without a folder: %+v %v", q, err)
+	}
+	e.wait(q[0].Job.ID, store.JobNeedsReview)
+	// A fix queued before the mapping went away still fails at run time.
+	j, err := e.st.CreateJob(t.Context(), other, "fix", "claude", store.OriginManual, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.r.Refresh()
+	j = e.wait(j.ID, store.JobFailed)
 	if r := result(t, j); r.ErrorCode != CodeNoFolder || !strings.Contains(j.Error, "Projects and folders") {
 		t.Fatalf("no folder: %q %+v", j.Error, r)
 	}
