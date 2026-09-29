@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -160,6 +161,15 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 			nums[i] = "#" + strconv.Itoa(p.Number)
 		}
 		log.addf(StepInfo, "dropped picks (not open in %s, repeated or over %d): %s", t.ProjectName, triageMaxPicks, strings.Join(nums, ", "))
+	}
+	// A fix job runs in the mapped folder: without one each would fail at once.
+	if st := folders.Check(t.LocalPath, t.ProjectURL); st != folders.StatusOK {
+		why := fmt.Sprintf("not queued: no usable local folder (%s); map it in Settings › Projects and folders", st)
+		for i := range tr.Picks[:min(tr.TopN, len(tr.Picks))] {
+			tr.Picks[i].Queue = why
+		}
+		log.add(StepInfo, "no fix job queued: "+t.ProjectName+" has no usable local folder ("+string(st)+")")
+		return store.JobDone, nil
 	}
 	r.queueFixes(ctx, *j, coder, tr, log)
 	return store.JobDone, nil

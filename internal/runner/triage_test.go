@@ -134,6 +134,28 @@ func TestTriageAcceptsOpenIssueBeyondPromptList(t *testing.T) {
 	}
 }
 
+// A project without a usable local folder: the ranking is kept, no fix job is
+// queued (it would fail at once), each top pick says why.
+func TestTriageNoFolderQueuesNothing(t *testing.T) {
+	mode(t, "ok")
+	t.Setenv("FAKECLI_PICKS", "2:high,1:low")
+	e := setup(t, 2, nil)
+	j, err := e.r.Triage(t.Context(), e.proj[1].ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j = e.wait(j.ID, store.JobDone, store.JobFailed)
+	tr := result(t, j).Triage
+	if j.State != store.JobDone || tr == nil || len(tr.Picks) != 2 {
+		t.Fatalf("triage: %+v %+v", j, tr)
+	}
+	for _, p := range tr.Picks {
+		if p.JobID != 0 || !strings.Contains(p.Queue, "local folder") {
+			t.Fatalf("pick #%d: %+v", p.Number, p)
+		}
+	}
+}
+
 // A project without open issues: done, no agent run, nothing queued.
 func TestTriageNoOpenIssues(t *testing.T) {
 	mode(t, "ok")
