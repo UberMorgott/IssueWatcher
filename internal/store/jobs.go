@@ -148,7 +148,7 @@ func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
 // JobFilter selects jobs for the Jobs page (newest first).
 type JobFilter struct {
 	State     string // a job state, "active" (queued/running/needs_review) or "" (all)
-	Flow      string // fix | reply | verify | label | ""
+	Flow      string // fix | reply | label | ""
 	Origin    string // manual | rule | ""
 	ProjectID int64
 	ItemID    int64

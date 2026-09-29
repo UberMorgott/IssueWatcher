@@ -123,12 +123,15 @@ func TestMigration006KeepsJobs(t *testing.T) {
 	if j, err := s.CreateJob(ctx, a, "fix", "claude", "", ""); !errors.Is(err, ErrJobExists) || j.ID != 10 {
 		t.Fatalf("second active fix: %+v %v", j, err)
 	}
-	j, err := s.CreateJob(ctx, a, "verify", "claude", OriginRule, "r1")
-	if err != nil || j.Flow != "verify" || j.Origin != OriginRule || j.RuleID != "r1" {
-		t.Fatalf("rule verify job: %+v %v", j, err)
+	j, err := s.CreateJob(ctx, a, "label", "claude", OriginRule, "r1")
+	if err != nil || j.Flow != "label" || j.Origin != OriginRule || j.RuleID != "r1" {
+		t.Fatalf("rule label job: %+v %v", j, err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, origin) VALUES (?, ?, 'label', 'bogus')`, a, pid); err == nil {
 		t.Fatal("origin CHECK not enforced")
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (item_id, project_id, flow) VALUES (?, ?, 'verify')`, a, pid); err == nil {
+		t.Fatal("flow CHECK accepts verify")
 	}
 	chunk, err := s.Jobs(ctx, JobFilter{Origin: OriginRule})
 	if err != nil || len(chunk.Items) != 1 || chunk.Items[0].ID != j.ID {

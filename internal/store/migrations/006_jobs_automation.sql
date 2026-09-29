@@ -1,11 +1,11 @@
--- Phase 3 automation: new flows (verify, label) and job origin (manual | rule).
+-- Phase 3 automation: new flow label and job origin (manual | rule).
 -- SQLite cannot alter a CHECK, and jobs now hold real rows, so the table is
 -- rebuilt by copying every row (ids, attempts, results kept).
 CREATE TABLE jobs_new (
     id          INTEGER PRIMARY KEY,
     item_id     INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
     project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    flow        TEXT NOT NULL CHECK (flow IN ('fix', 'reply', 'verify', 'label')),
+    flow        TEXT NOT NULL CHECK (flow IN ('fix', 'reply', 'label')),
     state       TEXT NOT NULL DEFAULT 'queued'
                 CHECK (state IN ('queued', 'running', 'needs_review', 'done', 'failed', 'cancelled')),
     origin      TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual', 'rule')),
