@@ -85,7 +85,16 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 		item := fs.Int64("item", 0, "")
 		project := fs.Int64("project", 0, "")
-		if pos, err := flags(fs, args[1:]); err != nil || len(pos) > 0 || *item < 0 || *project < 0 || (*item > 0 && *project > 0) {
+		pos, err := flags(fs, args[1:])
+		// A scope flag that is present must carry a positive ID: a zero would
+		// otherwise widen a scoped session to the full (publishing) server.
+		scopes := 0
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "item" || f.Name == "project" {
+				scopes++
+			}
+		})
+		if err != nil || len(pos) > 0 || scopes > 1 || (scopes == 1 && *item <= 0 && *project <= 0) || *item < 0 || *project < 0 {
 			return fail(exitUsage, errors.New("usage: mcp [--item ID | --project ID]"))
 		}
 		if err := runMCP(dataDir, *item, *project); err != nil {

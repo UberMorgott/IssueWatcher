@@ -117,6 +117,20 @@ func TestCLIExitCodes(t *testing.T) {
 	}
 }
 
+// TestCLIMCPScopeFlags: a scope flag given with a non-positive ID is a usage
+// error, never the full (publishing) MCP server.
+func TestCLIMCPScopeFlags(t *testing.T) {
+	t.Setenv(paths.EnvDataDir, t.TempDir())
+	for _, args := range [][]string{
+		{"mcp", "--item", "0"}, {"mcp", "--project", "0"}, {"mcp", "--item", "-1"},
+		{"mcp", "--item", "1", "--project", "2"}, {"mcp", "--item", "0", "--project", "2"},
+	} {
+		if code, _, stderr := cliRun("", args...); code != exitUsage || !strings.Contains(stderr, "usage: mcp") {
+			t.Fatalf("%v: %d %q", args, code, stderr)
+		}
+	}
+}
+
 func TestCLIActionCommands(t *testing.T) {
 	calls := fakeAPI(t, map[string]string{
 		"POST /api/sync":             `202 `,
