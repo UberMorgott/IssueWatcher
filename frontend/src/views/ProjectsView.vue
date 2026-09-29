@@ -25,8 +25,10 @@ import { useChunks } from '../lib/chunks'
 import type { DataTableSortEvent } from 'primevue/datatable'
 import { useTriage } from '../lib/jobs'
 import { useSettingsStore } from '../stores/settings'
+import { useToast } from 'primevue/usetoast'
 
 const app = useAppStore()
+const toast = useToast()
 const settings = useSettingsStore()
 const triage = useTriage()
 /** Fix jobs a triage of project queues (per-project override over the global value). */
@@ -139,6 +141,18 @@ const codeOf = (r: Repo) => {
   return id ? repoById.value.get(id) : undefined
 }
 const hasMods = computed(() => app.repos.some((r) => isModPlatform(r.platform)))
+/** Name-match suggestions of an unlinked mod page (store.AutoLink links the certain ones itself). */
+const suggestionsOf = (r: Repo) =>
+  codeOf(r) ? [] : (repoById.value.get(r.id)?.suggest ?? r.suggest ?? []).map((id) => repoById.value.get(id)).filter((x): x is Repo => !!x)
+async function acceptSuggestion(mod: Repo, code: Repo) {
+  const r = await api.setLinks(code.id, [...new Set([...(code.links ?? []), mod.id])])
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: r.error, life: 4000 })
+    return
+  }
+  toast.add({ severity: 'success', summary: t('platforms.linkedTo', { name: code.name }), life: 2500 })
+  await app.loadRepos()
+}
 
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
 </script>
@@ -295,6 +309,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                       :aria-label="t('platforms.linkedCode')"
                       @click.stop="openLinks(data)"
                     ><i :class="codeOf(data) ? 'pi pi-pencil' : 'pi pi-link'" />{{ codeOf(data) ? '' : t('platforms.linkShort') }}</button>
+                    <button
+                      v-for="s in suggestionsOf(data)"
+                      :key="'s' + s.id"
+                      v-tooltip.top="t('platforms.suggestHint')"
+                      type="button"
+                      class="chip suggest"
+                      @click.stop="acceptSuggestion(data, s)"
+                    ><PlatformIcon
+                      platform="github"
+                      :size="12"
+                    /><span class="chip-name">{{ t('platforms.suggestLink', { name: s.name }) }}</span></button>
                   </span>
                 </div>
               </div>
@@ -598,6 +623,12 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 .chip.add {
   color: var(--iw-muted);
   border-style: dashed;
+}
+
+.chip.suggest {
+  color: var(--iw-primary);
+  border-style: dashed;
+  border-color: var(--iw-primary);
 }
 
 .strong {

@@ -27,6 +27,7 @@ import type {
   AutomationChunk,
   PlatformStatus,
   SteamStatus,
+  LoginStatus,
   SteamUpdate,
   ProjectLinks,
 } from './types'
@@ -231,6 +232,9 @@ export const api = {
   // --- platforms (Settings › Платформы) and mod page links
   platforms: () => call<PlatformStatus[]>('GET', '/api/platforms'),
   checkPlatform: (id: string) => call<PlatformStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/check`),
+  login: (id: string) => call<LoginStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/login`),
+  loginStatus: (id: string) => call<LoginStatus>('GET', `/api/platforms/${encodeURIComponent(id)}/login`),
+  cancelLogin: (id: string) => call<LoginStatus>('DELETE', `/api/platforms/${encodeURIComponent(id)}/login`),
   steam: () => call<SteamStatus>('GET', '/api/providers/steam'),
   saveSteam: (u: SteamUpdate) => call<SteamStatus>('PUT', '/api/providers/steam', u),
   links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
@@ -8,24 +9,31 @@ import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
+import { encode } from 'uqr'
 import PlatformIcon from '../../components/PlatformIcon.vue'
 import { api } from '../../api/client'
-import type { ModPlatform, PlatformStatus, SteamStatus } from '../../api/types'
+import type { LoginStatus, ModPlatform, PlatformStatus, SteamStatus } from '../../api/types'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
 import { absTime, relTime } from '../../lib/format'
 
-// Settings › Платформы: one card per mod platform. Nexus / CurseForge run
-// through the owner's MCP servers (settings.providers, applied live); Steam is
-// native, its secrets go to PUT /api/providers/steam and are never echoed back.
+// Settings › Платформы: one card per mod platform. «Подключить» is the whole
+// setup: Steam shows a QR code from Steam's own sign-in service (scan it in
+// the Steam app), Nexus / CurseForge switch on and their MCP server imports a
+// browser session or opens its sign-in window. Accounts are detected; the
+// manual fields (author, MCP command, Steam id/key/cookies) sit under
+// «Дополнительно». A tray card «войдите снова» opens /connections?login=<id>.
 type ModId = 'nexus' | 'curseforge'
+type CardId = ModId | 'steam'
 const app = useAppStore()
 const settings = useSettingsStore()
 const confirm = useConfirm()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
 
-const cards: { id: ModId | 'steam'; text: string }[] = [
+const cards: { id: CardId; text: string }[] = [
   { id: 'nexus', text: 'platforms.nexusText' },
   { id: 'curseforge', text: 'platforms.curseforgeText' },
   { id: 'steam', text: 'platforms.steamText' },
@@ -35,6 +43,90 @@ const status = (id: string): PlatformStatus | undefined => app.platforms.find((p
 const cfg = (id: ModId): ModPlatform | undefined => settings.doc?.settings.providers?.[id]
 const tone = (s?: PlatformStatus) =>
   !s || s.state === 'disabled' ? 'off' : s.state === 'connected' ? 'ok' : s.state === 'unknown' ? 'busy' : 'error'
+const platformName = (id: string) => status(id)?.name ?? id
+
+// --- «Подключить»: start, then poll the sign-in until connected / closed.
+const login = reactive<Record<string, LoginStatus | null>>({})
+const starting = reactive<Record<string, boolean>>({})
+const timers: Record<string, number> = {}
+const active = (id: string) => ['qr', 'scanned', 'window'].includes(login[id]?.state ?? '')
+const connectLabel = (id: string) => t(status(id)?.state === 'relogin' ? 'platforms.reconnect' : 'platforms.connect')
+const showConnect = (id: CardId) => {
+  const s = status(id)
+  if (!s || active(id)) return false
+  if (id === 'steam') return s.state !== 'connected' || !steam.value?.signedIn || steam.value.session === 'expired'
+  return s.state !== 'connected'
+}
+
+async function connect(id: CardId) {
+  errors[id] = ''
+  starting[id] = true
+  const r = await api.login(id)
+  starting[id] = false
+  if (!r.ok) {
+    errors[id] = `${t('platforms.loginFailed')}: ${r.error}`
+    return
+  }
+  if (id !== 'steam') void Promise.all([settings.load(), app.loadPlatforms()]) // switched on server-side
+  onLogin(id, r.data)
+}
+
+function onLogin(id: CardId, s: LoginStatus) {
+  clearTimeout(timers[id])
+  login[id] = s
+  switch (s.state) {
+    case 'connected':
+      void connected(id, s)
+      return
+    case 'qr':
+    case 'scanned':
+    case 'window':
+      timers[id] = window.setTimeout(() => void poll(id), id === 'steam' ? 2000 : 3000)
+      return
+    case 'failed':
+      errors[id] = `${t('platforms.loginFailed')}${s.error ? ': ' + s.error : ''}`
+      login[id] = null
+      return
+    case 'idle':
+      if (id !== 'steam') errors[id] = t('platforms.windowClosed')
+      login[id] = null
+  }
+}
+
+async function poll(id: CardId) {
+  if (!login[id]) return
+  const r = await api.loginStatus(id)
+  if (!login[id]) return // cancelled meanwhile
+  if (r.ok) onLogin(id, r.data)
+  else timers[id] = window.setTimeout(() => void poll(id), 5000) // server busy: keep waiting
+}
+
+async function connected(id: CardId, s: LoginStatus) {
+  login[id] = null
+  toast.add({ severity: 'success', summary: t('platforms.connected', { platform: platformName(id), account: s.account ?? '' }), life: 3500 })
+  await Promise.all([settings.load(), app.loadPlatforms(), id === 'steam' ? loadSteam() : Promise.resolve()])
+  window.setTimeout(() => void app.loadPlatforms(), 4000) // the server-side check lands a moment later
+}
+
+function cancelLogin(id: CardId) {
+  clearTimeout(timers[id])
+  login[id] = null
+  void api.cancelLogin(id)
+}
+onBeforeUnmount(() => {
+  for (const id of Object.keys(timers)) clearTimeout(timers[id])
+  if (active('steam')) void api.cancelLogin('steam')
+})
+
+// The QR code of Steam's challenge URL, drawn as one SVG path (no v-html).
+const qr = computed(() => {
+  const url = login.steam?.challengeUrl
+  if (!url) return null
+  const { data, size } = encode(url, { border: 2 })
+  let d = ''
+  data.forEach((row, y) => row.forEach((on, x) => { if (on) d += `M${x} ${y}h1v1h-1z` }))
+  return { d, size }
+})
 
 // --- MCP platforms: switch, author, server command (drafts saved on demand)
 const drafts = reactive<Record<ModId, { author: string; command: string; args: string }>>({
@@ -66,6 +158,7 @@ async function toggle(id: ModId, on: boolean) {
   toast.add({ severity: 'success', summary: t(on ? 'platforms.enabled' : 'platforms.disabled'), life: 2500 })
   await app.loadPlatforms()
   if (on) void check(id)
+  else cancelLogin(id)
 }
 
 const dirty = (id: ModId) => {
@@ -112,9 +205,15 @@ async function loadSteam() {
     steamDraft.steamId = r.data.steamId
   }
 }
-onMounted(() => {
-  void loadSteam()
+onMounted(async () => {
   void app.loadPlatforms()
+  await loadSteam()
+  // Tray card «войдите снова» → /connections?login=<id>: start that sign-in.
+  const want = route.query.login
+  if (typeof want === 'string' && cards.some((c) => c.id === want)) {
+    void router.replace({ query: { ...route.query, login: undefined } })
+    void connect(want as CardId)
+  }
 })
 const steamDirty = computed(
   () => steamDraft.steamId.trim() !== (steam.value?.steamId ?? '') || !!steamDraft.apiKey || !!steamDraft.loginSecure || !!steamDraft.sessionid,
@@ -211,26 +310,64 @@ function clearSteam() {
         v-tooltip.top="absTime(status(c.id)?.lastSync ?? '')"
       >{{ t('platforms.lastSync', { time: relTime(status(c.id)?.lastSync ?? '') }) }}</span>
       <span v-if="status(c.id)?.running"><i class="pi pi-server" /> {{ t('platforms.serverRunning') }}</span>
+      <span v-if="c.id === 'steam' && steam?.signedIn && steam.session !== 'expired'"><i class="pi pi-qrcode" /> {{ t('platforms.signedInQr') }}</span>
     </div>
 
     <p
-      v-if="status(c.id)?.error && status(c.id)?.state !== 'connected'"
+      v-if="status(c.id)?.error && status(c.id)?.state !== 'connected' && !active(c.id)"
       class="err"
     >
       <i class="pi pi-exclamation-triangle" /> {{ status(c.id)?.error }}
     </p>
 
-    <!-- Nexus / CurseForge: author + MCP server -->
-    <template v-if="c.id !== 'steam' && cfg(c.id)">
-      <label class="field">
-        <span class="label">{{ t(c.id === 'nexus' ? 'platforms.nexusAuthor' : 'platforms.curseforgeAuthor') }}</span>
-        <InputText
-          v-model="drafts[c.id as ModId].author"
-          :placeholder="c.id === 'nexus' ? 'Morgott' : ''"
-          fluid
+    <!-- Sign-in in progress: Steam QR code / the platform's sign-in window -->
+    <div
+      v-if="c.id === 'steam' && active('steam')"
+      class="qr-box"
+      role="group"
+      :aria-label="t('platforms.qrTitle')"
+    >
+      <svg
+        v-if="qr"
+        class="qr"
+        :viewBox="`0 0 ${qr.size} ${qr.size}`"
+        role="img"
+        :aria-label="t('platforms.qrAlt')"
+        shape-rendering="crispEdges"
+      >
+        <rect
+          :width="qr.size"
+          :height="qr.size"
+          fill="#fff"
         />
-        <small class="muted">{{ t(c.id === 'nexus' ? 'platforms.nexusAuthorHint' : 'platforms.curseforgeAuthorHint') }}</small>
-      </label>
+        <path
+          :d="qr.d"
+          fill="#000"
+        />
+      </svg>
+      <div class="qr-text">
+        <b>{{ t('platforms.qrTitle') }}</b>
+        <span>{{ t(login.steam?.state === 'scanned' ? 'platforms.qrScanned' : 'platforms.qrScan') }}</span>
+        <span class="muted small"><i class="pi pi-spin pi-spinner" /> {{ t('platforms.connecting') }}</span>
+      </div>
+    </div>
+    <Message
+      v-if="c.id === 'steam' && login.steam?.state === 'expired'"
+      severity="warn"
+      size="small"
+    >
+      {{ t('platforms.qrExpired') }}
+    </Message>
+    <Message
+      v-if="c.id !== 'steam' && login[c.id]?.state === 'window'"
+      severity="info"
+      size="small"
+    >
+      <i class="pi pi-spin pi-spinner" /> {{ t('platforms.windowOpen', { platform: platformName(c.id) }) }}
+    </Message>
+
+    <!-- Nexus / CurseForge: author + MCP server (all optional) -->
+    <template v-if="c.id !== 'steam' && cfg(c.id)">
       <button
         type="button"
         class="adv-toggle"
@@ -244,7 +381,15 @@ function clearSteam() {
         class="adv"
       >
         <label class="field">
-          <span class="label">{{ t('platforms.command') }}</span>
+          <span class="label">{{ t(c.id === 'nexus' ? 'platforms.nexusAuthor' : 'platforms.curseforgeAuthor') }}</span>
+          <InputText
+            v-model="drafts[c.id as ModId].author"
+            fluid
+          />
+          <small class="muted">{{ t(c.id === 'nexus' ? 'platforms.nexusAuthorHint' : 'platforms.curseforgeAuthorHint') }}</small>
+        </label>
+        <label class="field">
+          <span class="label">{{ t('platforms.mcpServer') }} · {{ t('platforms.command') }}</span>
           <InputText
             v-model="drafts[c.id as ModId].command"
             class="mono"
@@ -265,50 +410,8 @@ function clearSteam() {
       </div>
     </template>
 
-    <!-- Steam: SteamID, API key, cookies (write-only) -->
+    <!-- Steam: manual SteamID, API key, cookies (write-only), all optional -->
     <template v-if="c.id === 'steam'">
-      <label class="field">
-        <span class="label">{{ t('platforms.steamId') }}</span>
-        <InputText
-          v-model="steamDraft.steamId"
-          placeholder="7656119…"
-          class="mono"
-          fluid
-        />
-      </label>
-      <label class="field">
-        <span class="label">{{ t('platforms.apiKey') }}</span>
-        <InputText
-          v-model="steamDraft.apiKey"
-          type="password"
-          autocomplete="off"
-          :placeholder="steam?.hasApiKey ? t('platforms.savedSecret') : ''"
-          fluid
-        />
-        <small class="muted">{{ t('platforms.apiKeyHint') }}</small>
-      </label>
-      <div class="field">
-        <span class="label">{{ t('platforms.cookies') }}</span>
-        <div class="pair">
-          <InputText
-            v-model="steamDraft.loginSecure"
-            type="password"
-            autocomplete="off"
-            :placeholder="steam?.hasCookies ? 'steamLoginSecure · ' + t('platforms.savedSecret') : 'steamLoginSecure'"
-            aria-label="steamLoginSecure"
-            fluid
-          />
-          <InputText
-            v-model="steamDraft.sessionid"
-            type="password"
-            autocomplete="off"
-            :placeholder="steam?.hasCookies ? 'sessionid · ' + t('platforms.savedSecret') : 'sessionid'"
-            aria-label="sessionid"
-            fluid
-          />
-        </div>
-        <small class="muted">{{ t('platforms.cookiesHint') }}</small>
-      </div>
       <Message
         v-if="steam?.session === 'expired'"
         severity="warn"
@@ -320,6 +423,61 @@ function clearSteam() {
         v-if="status('steam') && !status('steam')?.capabilities.reply"
         class="muted"
       ><i class="pi pi-info-circle" /> {{ t('platforms.steamReplyOff') }}</small>
+      <button
+        type="button"
+        class="adv-toggle"
+        :aria-expanded="!!advanced.steam"
+        @click="advanced.steam = !advanced.steam"
+      >
+        <i :class="advanced.steam ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" /> {{ t('platforms.manual') }}
+      </button>
+      <div
+        v-if="advanced.steam"
+        class="adv"
+      >
+        <label class="field">
+          <span class="label">{{ t('platforms.steamId') }}</span>
+          <InputText
+            v-model="steamDraft.steamId"
+            placeholder="7656119…"
+            class="mono"
+            fluid
+          />
+        </label>
+        <label class="field">
+          <span class="label">{{ t('platforms.apiKey') }}</span>
+          <InputText
+            v-model="steamDraft.apiKey"
+            type="password"
+            autocomplete="off"
+            :placeholder="steam?.hasApiKey ? t('platforms.savedSecret') : ''"
+            fluid
+          />
+          <small class="muted">{{ t('platforms.apiKeyHint') }}</small>
+        </label>
+        <div class="field">
+          <span class="label">{{ t('platforms.cookies') }}</span>
+          <div class="pair">
+            <InputText
+              v-model="steamDraft.loginSecure"
+              type="password"
+              autocomplete="off"
+              :placeholder="steam?.hasCookies ? 'steamLoginSecure · ' + t('platforms.savedSecret') : 'steamLoginSecure'"
+              aria-label="steamLoginSecure"
+              fluid
+            />
+            <InputText
+              v-model="steamDraft.sessionid"
+              type="password"
+              autocomplete="off"
+              :placeholder="steam?.hasCookies ? 'sessionid · ' + t('platforms.savedSecret') : 'sessionid'"
+              aria-label="sessionid"
+              fluid
+            />
+          </div>
+          <small class="muted">{{ t('platforms.cookiesHint') }}</small>
+        </div>
+      </div>
     </template>
 
     <p
@@ -337,6 +495,21 @@ function clearSteam() {
 
     <footer class="card-foot">
       <Button
+        v-if="showConnect(c.id)"
+        :label="c.id === 'steam' && login.steam?.state === 'expired' ? t('platforms.qrRetry') : connectLabel(c.id)"
+        :icon="c.id === 'steam' ? 'pi pi-qrcode' : 'pi pi-sign-in'"
+        :loading="starting[c.id]"
+        @click="connect(c.id)"
+      />
+      <Button
+        v-if="active(c.id)"
+        :label="t('common.cancel')"
+        icon="pi pi-times"
+        severity="secondary"
+        outlined
+        @click="cancelLogin(c.id)"
+      />
+      <Button
         v-if="c.id !== 'steam' && dirty(c.id as ModId)"
         :label="t('platforms.save')"
         icon="pi pi-check"
@@ -351,11 +524,12 @@ function clearSteam() {
         @click="saveSteam()"
       />
       <Button
+        v-if="status(c.id)?.enabled"
         :label="t('platforms.check')"
         icon="pi pi-refresh"
         severity="secondary"
         outlined
-        :disabled="!status(c.id)?.enabled || !!checks[c.id]"
+        :disabled="!!checks[c.id]"
         :loading="!!checks[c.id]"
         @click="check(c.id)"
       />
@@ -539,6 +713,36 @@ function clearSteam() {
 @media (width <= 767px) {
   .pair {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+.qr-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px;
+  border-radius: var(--iw-radius);
+  background: var(--iw-bg);
+  border: 1px solid var(--iw-border);
+}
+
+.qr {
+  flex: none;
+  width: 168px;
+  height: 168px;
+  border-radius: 6px;
+}
+
+.qr-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (width <= 767px) {
+  .qr-box {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

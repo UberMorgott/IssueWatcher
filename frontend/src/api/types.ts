@@ -34,6 +34,8 @@ export interface Repo {
   /** A mod page's linked code project id; a code project's mod page ids (project_links). */
   linkedTo?: number
   links?: number[]
+  /** Code projects an unlinked mod page may belong to (name match): one click links it. */
+  suggest?: number[]
   open: number
   closed: number
   unread: number
@@ -730,8 +732,19 @@ export interface SteamStatus {
   appId: number
   hasApiKey: boolean
   hasCookies: boolean
-  session: 'none' | 'stored' | 'expired'
+  session: 'none' | 'stored' | 'verified' | 'expired'
+  signedIn: boolean // signed in by QR: the session renews itself
   checkedAt?: string
+}
+
+// «Подключить»: POST/GET/DELETE /api/platforms/{id}/login.
+export type LoginState = 'idle' | 'qr' | 'scanned' | 'window' | 'connected' | 'expired' | 'failed'
+export interface LoginStatus {
+  platform: string
+  state: LoginState
+  challengeUrl?: string // Steam: the QR code's content
+  account?: string
+  error?: string
 }
 
 export interface SteamUpdate {
