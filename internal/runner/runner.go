@@ -74,6 +74,9 @@ type Options struct {
 	Shell []string
 	// Now is the automation clock (24 h caps); default time.Now.
 	Now func() time.Time
+	// Exe is the app's own executable: agent runs get `<Exe> mcp --item <id>`
+	// as a per-run MCP server (agents.jobMcp); "" = none.
+	Exe string
 }
 
 // Runner owns the queue.
@@ -467,7 +470,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	r.phase(ctx, j, "agent")
 	pin := promptInput{in: in, branch: branch}
 	system, task := prompts(cfg, flowFix, pin)
-	agent, err := r.runAgent(ctx, agentSpec{profile: prof, flow: flowFix, dir: wt, workDir: files, system: system, task: task}, log)
+	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowFix, dir: wt, workDir: files, system: system, task: task}, log)
 	res.Agent = &agent
 	if err != nil {
 		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {
@@ -504,7 +507,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 			r.phase(ctx, j, "review")
 			pin.diff = diff
 			system, task := prompts(cfg, flowReview, pin)
-			rev, err := r.runAgent(ctx, agentSpec{profile: vp, flow: flowReview, dir: wt, workDir: files, system: system, task: task, readOnly: true}, log)
+			rev, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: vp, flow: flowReview, dir: wt, workDir: files, system: system, task: task, readOnly: true}, log)
 			if err != nil {
 				if errors.Is(err, ErrCancelled) {
 					return "", err
@@ -557,7 +560,7 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowReply, promptInput{in: in})
-	agent, err := r.runAgent(ctx, agentSpec{profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
+	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {
 		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {

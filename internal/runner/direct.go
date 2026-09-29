@@ -93,7 +93,7 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 	// Claude: our whole prompt is appended to the user's own system prompt; the
 	// user turn only starts the task. Codex gets both in its input.
 	kickoff := "Handle the IssueWatcher task described in the appended instructions: issue #" + strconv.Itoa(in.Number) + " of " + in.ProjectName + "."
-	agent, agentErr := r.runAgent(ctx, agentSpec{profile: prof, flow: flowFixDirect, dir: dir, workDir: files,
+	agent, agentErr := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowFixDirect, dir: dir, workDir: files,
 		system: system + "\n\n" + task, task: kickoff}, log)
 	res.Agent = &agent
 
@@ -145,7 +145,7 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 		if vp, ok := cfg.Profile(vid); ok {
 			r.phase(ctx, j, "review")
 			system, task := prompts(cfg, flowReview, promptInput{in: in, diff: diff})
-			rev, err := r.runAgent(ctx, agentSpec{profile: vp, flow: flowReview, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
+			rev, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: vp, flow: flowReview, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 			if err != nil {
 				if errors.Is(err, ErrCancelled) {
 					return "", err

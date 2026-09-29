@@ -231,6 +231,8 @@ export interface ProjectAgent {
   prompt: string
   verify: string
   noAegis: boolean
+  /** Overrides Agents.jobMcp; missing = inherit. */
+  jobMcp?: boolean
   /** Missing or "" = 'direct'. */
   mode?: RunMode | ''
   /** Overrides of the global automation defaults; a missing field = inherit. */
@@ -308,6 +310,8 @@ export interface Agents {
   /** Keyed by project name (owner/repo). */
   projects: Record<string, ProjectAgent>
   automation: Automation
+  /** Each job's agent run gets IssueWatcher's MCP server for its issue (per run only). */
+  jobMcp: boolean
 }
 
 // --- agent jobs (internal/store Job, internal/runner Result) -----------------

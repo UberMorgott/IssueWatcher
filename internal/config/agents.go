@@ -18,6 +18,10 @@ type Agents struct {
 	Projects map[string]ProjectAgent `json:"projects"`
 	// Automation holds the rules and their global defaults (per-project overrides in Projects).
 	Automation Automation `json:"automation"`
+	// JobMCP attaches IssueWatcher's MCP server, scoped to the job's issue, to
+	// every agent run of a job (claude --mcp-config / codex -c mcp_servers); it
+	// is never registered in the CLIs' own config. Per-project override in Projects.
+	JobMCP bool `json:"jobMcp"`
 }
 
 // CLI kinds.
@@ -79,6 +83,8 @@ type ProjectAgent struct {
 	Verify string `json:"verify"`
 	// NoAegis turns off `aegis verify` for a folder that has Aegis enabled.
 	NoAegis bool `json:"noAegis"`
+	// JobMCP overrides Agents.JobMCP for this project; nil = inherit.
+	JobMCP *bool `json:"jobMcp,omitempty"`
 	// Automation overrides the global automation defaults for this project.
 	Automation ProjectAutomation `json:"automation,omitzero"`
 }
@@ -169,7 +175,16 @@ func defaultAgents() Agents {
 		},
 		Projects:   map[string]ProjectAgent{},
 		Automation: defaultAutomation(),
+		JobMCP:     true,
 	}
+}
+
+// JobMCPFor reports whether project's (owner/repo) agent runs get the scoped MCP server.
+func (a Agents) JobMCPFor(project string) bool {
+	if o := a.Projects[project].JobMCP; o != nil {
+		return *o
+	}
+	return a.JobMCP
 }
 
 // blankDefaultPrompts stores prompts equal to the built-in text as "" in the

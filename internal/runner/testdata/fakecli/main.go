@@ -13,7 +13,7 @@
 //	sleep sleep (the child of hang)
 //
 // The label flow answers the comma-separated FAKECLI_LABELS as its picks.
-// FAKECLI_RECORD (a file) receives {args, stdin, ghToken} for assertions.
+// FAKECLI_RECORD (a file) receives {args, stdin, ghToken, mcpConfig} for assertions.
 package main
 
 import (
@@ -43,7 +43,12 @@ func main() {
 	codex := len(args) > 0 && args[0] == "exec"
 	stdin, _ := io.ReadAll(os.Stdin)
 	if rec := os.Getenv("FAKECLI_RECORD"); rec != "" {
-		b, _ := json.Marshal(map[string]any{"args": args, "stdin": string(stdin), "ghToken": os.Getenv("GH_TOKEN")})
+		var mcpConfig string // claude's per-run --mcp-config file, read while it exists
+		if i := slices.Index(args, "--mcp-config"); i >= 0 && i+1 < len(args) {
+			b, _ := os.ReadFile(args[i+1])
+			mcpConfig = string(b)
+		}
+		b, _ := json.Marshal(map[string]any{"args": args, "stdin": string(stdin), "ghToken": os.Getenv("GH_TOKEN"), "mcpConfig": mcpConfig})
 		_ = os.WriteFile(rec, b, 0o600)
 	}
 	flow := "fix"

@@ -122,7 +122,7 @@ func (r *Runner) runLabel(ctx context.Context, j *store.Job, res *Result, log *j
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowLabel, promptInput{in: in, labels: repo})
-	agent, err := r.runAgent(ctx, agentSpec{profile: prof, flow: flowLabel, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
+	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowLabel, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {
 		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {

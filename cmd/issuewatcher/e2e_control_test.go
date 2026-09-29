@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -61,7 +62,8 @@ func startControlApp(t *testing.T) *controlApp {
 	e := &e2e{t: t}
 	t.Cleanup(e.killAll)
 	cmd := exec.Command(exe) //nolint:gosec,noctx // our test build
-	cmd.Env = append(os.Environ(), "IW_HEADLESS=1", "IW_DATA_DIR="+a.data, "IW_PORT=", "IW_GITHUB_API="+gh.URL, "FAKECLI_MODE=ok")
+	cmd.Env = append(os.Environ(), "IW_HEADLESS=1", "IW_DATA_DIR="+a.data, "IW_PORT=", "IW_GITHUB_API="+gh.URL, "FAKECLI_MODE=ok",
+		"FAKECLI_RECORD="+filepath.Join(root, "fakecli-record.json"))
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +117,9 @@ type mcpProc struct {
 	nextID int
 }
 
-func (c *controlApp) mcp(t *testing.T) *mcpProc {
+func (c *controlApp) mcp(t *testing.T, args ...string) *mcpProc {
 	t.Helper()
-	cmd := exec.Command(c.exe, "mcp") //nolint:gosec,noctx // our test build; ended by stdin EOF in Cleanup (t.Context is cancelled first)
+	cmd := exec.Command(c.exe, append([]string{"mcp"}, args...)...) //nolint:gosec,noctx // our test build; ended by stdin EOF in Cleanup (t.Context is cancelled first)
 	cmd.Env = append(os.Environ(), "IW_DATA_DIR="+c.data)
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -269,6 +271,84 @@ func TestMCPE2E(t *testing.T) {
 	}
 	if r := m.tool("send_job_reply", map[string]any{"id": jobID, "body": "again"}); !r.IsError || !strings.Contains(r.Content[0].Text, "HTTP 409") {
 		t.Fatalf("second send_job_reply: %+v", r)
+	}
+}
+
+// A job's agent run gets `<exe> mcp --item <id>` through a per-run
+// --mcp-config file (removed after the run), and that server reads only the
+// job's issue.
+func TestJobMCPE2E(t *testing.T) {
+	c := startControlApp(t)
+	c.useFakeCLI(t)
+	patchSettings(t, c.app, map[string]any{"agents": map[string]any{"roles": map[string]any{"responder": "claude"}}})
+	var list struct{ Items []struct{ ID int64 } }
+	c.ok(t, "", &list, "items")
+	if len(list.Items) != 1 {
+		t.Fatalf("items %+v", list)
+	}
+	itemID := list.Items[0].ID
+	var queued struct {
+		Jobs []struct{ Job struct{ ID int64 } }
+	}
+	c.ok(t, "", &queued, "jobs", "create", "--flow", "reply", strconv.FormatInt(itemID, 10))
+	if len(queued.Jobs) != 1 {
+		t.Fatalf("jobs create: %+v", queued)
+	}
+	var j struct{ State string }
+	waitFor(t, "reply job needs_review", func() bool {
+		c.ok(t, "", &j, "job", strconv.FormatInt(queued.Jobs[0].Job.ID, 10))
+		return j.State == "needs_review"
+	})
+	b, err := os.ReadFile(filepath.Join(c.dir, "fakecli-record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Args      []string `json:"args"`
+		MCPConfig string   `json:"mcpConfig"`
+	}
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(rec.Args, "--mcp-config")
+	if i < 0 || slices.Contains(rec.Args, "--strict-mcp-config") {
+		t.Fatalf("agent args %q", rec.Args)
+	}
+	if _, err := os.Stat(rec.Args[i+1]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mcp config %s after the run: %v", rec.Args[i+1], err)
+	}
+	var cfg struct {
+		MCPServers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(rec.MCPConfig), &cfg); err != nil {
+		t.Fatalf("mcp config %q: %v", rec.MCPConfig, err)
+	}
+	srv := cfg.MCPServers["issuewatcher"]
+	if srv.Command != c.exe || len(srv.Args) != 3 || srv.Args[0] != "mcp" || srv.Env["IW_DATA_DIR"] != c.data {
+		t.Fatalf("mcp config %s", rec.MCPConfig)
+	}
+
+	// The configured server itself: two read tools of that item.
+	m := c.mcp(t, srv.Args[1:]...)
+	var init map[string]any
+	m.call("initialize", map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{},
+		"clientInfo": map[string]any{"name": "e2e", "version": "0"}}, &init)
+	m.send("notifications/initialized", map[string]any{}, true)
+	var tools struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	m.call("tools/list", map[string]any{}, &tools)
+	if len(tools.Tools) != 2 {
+		t.Fatalf("scoped tools/list: %+v", tools)
+	}
+	if r := m.tool("get_item", map[string]any{}); r.IsError || !strings.Contains(r.Content[0].Text, "Crash on start") {
+		t.Fatalf("get_item: %+v", r)
 	}
 }
 

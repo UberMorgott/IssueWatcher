@@ -40,7 +40,8 @@ for shells; issuewatcher.exe takes the same commands through pipes (agents, MCP)
 JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running.
 
   help
-  mcp                 MCP server on stdin/stdout (register: claude mcp add issuewatcher -- <exe> mcp)
+  mcp [--item ID]     MCP server on stdin/stdout, for one session only (claude --mcp-config FILE);
+                      don't register it globally. --item: only that issue's read tools (agent jobs)
 
   status
   projects
@@ -79,10 +80,12 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(exitAPI, err)
 	}
 	if args[0] == "mcp" {
-		if len(args) > 1 {
-			return fail(exitUsage, errors.New("mcp takes no arguments"))
+		fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+		item := fs.Int64("item", 0, "")
+		if pos, err := flags(fs, args[1:]); err != nil || len(pos) > 0 || *item < 0 {
+			return fail(exitUsage, errors.New("usage: mcp [--item ID]"))
 		}
-		if err := runMCP(dataDir); err != nil {
+		if err := runMCP(dataDir, *item); err != nil {
 			return fail(exitAPI, err)
 		}
 		return exitOK
@@ -379,8 +382,9 @@ func (c *cli) job(args []string) (json.RawMessage, error) {
 }
 
 // runMCP serves the MCP tools over stdio until the client disconnects. stdout
-// carries only JSON-RPC: logs go to data\logs\mcp.log.
-func runMCP(dataDir string) error {
+// carries only JSON-RPC: logs go to data\logs\mcp.log. item > 0 is a job's
+// server: only that issue's read tools.
+func runMCP(dataDir string, item int64) error {
 	logDir := filepath.Join(dataDir, "logs")
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return err
@@ -391,7 +395,12 @@ func runMCP(dataDir string) error {
 	}
 	defer func() { _ = f.Close() }()
 	log := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn})).With("pid", os.Getpid())
-	s := control.NewMCPServer(control.New(dataDir), Version, log)
+	var s *mcp.Server
+	if item > 0 {
+		s = control.NewItemMCPServer(control.New(dataDir), item, Version, log.With("item", item))
+	} else {
+		s = control.NewMCPServer(control.New(dataDir), Version, log)
+	}
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Error("mcp: stopped", "err", err)
 		return err

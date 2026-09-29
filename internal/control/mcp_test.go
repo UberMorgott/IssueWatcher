@@ -12,10 +12,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func mcpSession(t *testing.T, c *Client) *mcp.ClientSession {
+func mcpSession(t *testing.T, s *mcp.Server) *mcp.ClientSession {
 	t.Helper()
 	st, ct := mcp.NewInMemoryTransports()
-	s := NewMCPServer(c, "test", slog.New(slog.DiscardHandler))
 	if _, err := s.Connect(t.Context(), st, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestMCPTools(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	cs := mcpSession(t, c)
+	cs := mcpSession(t, NewMCPServer(c, "test", slog.New(slog.DiscardHandler)))
 
 	tools, err := cs.ListTools(t.Context(), nil)
 	if err != nil {
@@ -120,5 +119,55 @@ func TestMCPTools(t *testing.T) {
 	}
 	if r := call("start_jobs", map[string]any{"flow": "fix", "item_ids": []int64{}}); !r.IsError {
 		t.Fatal("start_jobs without ids succeeded")
+	}
+}
+
+// A job's server (mcp --item) reads only its own issue; no write tools.
+func TestItemMCPTools(t *testing.T) {
+	var got []string
+	c, _ := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r) {
+			return
+		}
+		got = append(got, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		switch r.URL.Path {
+		case "/api/items/7":
+			_, _ = w.Write([]byte(`{"id":7,"comments":{"items":[],"more":false}}`))
+		case "/api/items/7/comments":
+			_, _ = w.Write([]byte(`{"items":[],"nextCursor":"","more":false}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	cs := mcpSession(t, NewItemMCPServer(c, 7, "test", slog.New(slog.DiscardHandler)))
+	tools, err := cs.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, tl := range tools.Tools {
+		names = append(names, tl.Name)
+		if tl.Annotations == nil || !tl.Annotations.ReadOnlyHint {
+			t.Errorf("%s is not read-only", tl.Name)
+		}
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"get_item", "list_item_comments"}) {
+		t.Fatalf("tools %v", names)
+	}
+	// No id argument: the item is fixed by the job.
+	for name, args := range map[string]map[string]any{
+		"get_item":           {"comments": 5},
+		"list_item_comments": {"cursor": "c1"},
+	} {
+		r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil || r.IsError {
+			t.Fatalf("%s: %v %+v", name, err, r)
+		}
+	}
+	slices.Sort(got)
+	want := []string{"GET /api/items/7/comments?cursor=c1&limit=20", "GET /api/items/7/comments?limit=5", "GET /api/items/7?"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("requests %q", got)
 	}
 }

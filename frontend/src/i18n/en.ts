@@ -771,6 +771,8 @@ const en = {
       noVerifier: 'None',
       maxParallel: 'Jobs at once',
       maxParallelText: 'Across all projects; one project never runs two jobs at once.',
+      jobMcp: 'IssueWatcher MCP in jobs',
+      jobMcpText: 'Each job’s agent gets read-only tools for its issue (full discussion), for that run only; nothing is added to the Claude Code / Codex settings.',
       promptsTitle: 'Prompts',
       promptsText: 'The system prompt goes before every run; the flow prompt is the task. Clearing a prompt restores its default.',
       prompt: { system: 'System', fixDirect: 'Fix · in folder', fix: 'Fix · worktree', reply: 'Reply', review: 'Review', label: 'Labels' },
@@ -809,6 +811,7 @@ const en = {
       verifyPlaceholder: 'e.g. go test ./...',
       noAegis: 'Do not use aegis verify',
       noAegisText: 'For a folder with Aegis enabled: skip its automatic check.',
+      projectJobMcpText: 'Read-only tools for the job’s issue in this project’s agent runs.',
     },
     automation: {
       id: 'Rule ID',

@@ -252,6 +252,23 @@ function patchProject(field: 'prompt' | 'verify') {
   const name = projectName.value
   return (v: string): SettingsPatch => ({ agents: { projects: { [name]: { [field]: v } } } })
 }
+// jobMcp: inherit (unset) / on / off; null in a merge patch removes the field.
+const jobMcpOptions = computed(() => [
+  {
+    label: t('settings.automation.inherit', { value: t(ag.value?.jobMcp ? 'settings.automation.on' : 'settings.automation.off') }),
+    value: 'inherit',
+  },
+  { label: t('settings.automation.on'), value: 'on' },
+  { label: t('settings.automation.off'), value: 'off' },
+])
+const projJobMcp = computed(() => {
+  const v = proj.value?.jobMcp
+  return v === undefined || v === null ? 'inherit' : v ? 'on' : 'off'
+})
+function setProjJobMcp(v: string) {
+  const value = v === 'inherit' ? null : v === 'on'
+  void save({ agents: { projects: { [projectName.value]: { jobMcp: value } } } } as unknown as SettingsPatch)
+}
 </script>
 
 <template>
@@ -367,6 +384,16 @@ function patchProject(field: 'prompt' | 'verify') {
           @update:model-value="(v: number | null) => v && save.later('agentsParallel', { agents: { maxParallel: v } })"
         />
       </SettingRow>
+      <SettingRow
+        :title="t('settings.agents.jobMcp')"
+        :text="t('settings.agents.jobMcpText')"
+      >
+        <ToggleSwitch
+          :model-value="ag.jobMcp"
+          :aria-label="t('settings.agents.jobMcp')"
+          @update:model-value="(v: boolean) => save({ agents: { jobMcp: v } })"
+        />
+      </SettingRow>
     </SettingsPanel>
 
     <SettingsPanel
@@ -475,6 +502,20 @@ function patchProject(field: 'prompt' | 'verify') {
             :model-value="proj?.noAegis ?? false"
             :aria-label="t('settings.agents.noAegis')"
             @update:model-value="(v: boolean) => save({ agents: { projects: { [projectName]: { noAegis: v } } } })"
+          />
+        </SettingRow>
+        <SettingRow
+          :title="t('settings.agents.jobMcp')"
+          :text="t('settings.agents.projectJobMcpText')"
+        >
+          <Select
+            :model-value="projJobMcp"
+            :options="jobMcpOptions"
+            option-label="label"
+            option-value="value"
+            :aria-label="t('settings.agents.jobMcp')"
+            class="role-select"
+            @update:model-value="setProjJobMcp"
           />
         </SettingRow>
       </template>

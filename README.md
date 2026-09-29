@@ -51,10 +51,14 @@ error, 2 usage, 3 app not running. `issuewatcher help` lists the flags.
 | `jobs create --flow fix\|reply\|label <itemId>...` | queue agent jobs |
 | `job cancel\|retry\|dismiss\|push\|pr <id>` · `job reply <id> (--body-file f \| -)` · `job labels <id> <name>...` | the job page buttons |
 
-Register the MCP server (stdio) in Claude Code:
+MCP server (stdio): **don't register it globally or per project** (`claude mcp add`,
+`~/.codex/config.toml`) — every other session in that folder would carry its
+tools. Agent jobs get it on their own (below). For manual use, attach it to one
+session only:
 
 ```powershell
-claude mcp add issuewatcher -- "C:\path\to\issuewatcher.exe" mcp
+'{"mcpServers":{"issuewatcher":{"command":"C:\\path\\to\\issuewatcher.exe","args":["mcp"]}}}' | Set-Content iw-mcp.json
+claude --mcp-config iw-mcp.json
 ```
 
 Tools: `list_projects, list_items, get_item, list_item_comments, list_jobs, get_job, get_job_log,
@@ -62,6 +66,14 @@ sync_now, reply_item, start_jobs, cancel_job, retry_job, send_job_reply,
 apply_job_labels, push_job, create_pr` (local ids, pages ≤ 50; logs in
 `data\logs\mcp.log`). Publishing tools (comment, push, PR) have no extra gate:
 approve them in your MCP client.
+
+Agent jobs: each agent run of a job gets `issuewatcher.exe mcp --item <id>`, a
+read-only server for that job's issue only (`get_item`, `list_item_comments`),
+passed on the command line — claude `--mcp-config <temp file>` (deleted after
+the run; your own MCP servers still load), codex `-c mcp_servers.issuewatcher=…`.
+Nothing is written to the CLIs' config. Settings › Агенты › «MCP IssueWatcher в
+задачах» (`agents.jobMcp`, default on), per project in «По проектам»
+(`agents.projects["owner/repo"].jobMcp`, unset = inherit).
 
 In a shell use `issuewatcher-cli.exe`: the app writes it next to itself on
 every start (a console build of the same exe, refreshed by updates). Shells

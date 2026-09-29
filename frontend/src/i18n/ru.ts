@@ -772,6 +772,8 @@ const ru: Messages = {
       noVerifier: 'Нет',
       maxParallel: 'Задач одновременно',
       maxParallelText: 'По всем проектам; в одном проекте две задачи сразу не идут.',
+      jobMcp: 'MCP IssueWatcher в задачах',
+      jobMcpText: 'Агент задачи получает инструменты чтения её issue (всё обсуждение) только на этот запуск; в настройки Claude Code / Codex ничего не добавляется.',
       promptsTitle: 'Промпты',
       promptsText: 'Системный промпт идёт перед каждым запуском, промпт сценария — это задание. Очищенный промпт возвращается к стандартному.',
       prompt: { system: 'Системный', fixDirect: 'Исправление · в папке', fix: 'Исправление · worktree', reply: 'Ответ', review: 'Проверка', label: 'Метки' },
@@ -810,6 +812,7 @@ const ru: Messages = {
       verifyPlaceholder: 'например, go test ./...',
       noAegis: 'Не использовать aegis verify',
       noAegisText: 'Для папки с включённым Aegis: пропустить его автоматическую проверку.',
+      projectJobMcpText: 'Инструменты чтения issue задачи в запусках агентов этого проекта.',
     },
     automation: {
       id: 'ID правила',
