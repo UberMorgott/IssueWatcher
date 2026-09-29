@@ -85,7 +85,7 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"response": map[string]any{"refresh_token": f.refresh, "access_token": "a", "account_name": "owner"}})
 		}
 	case "/jwt/finalizelogin":
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
+		if err := r.ParseMultipartForm(1 << 20); err != nil { // #nosec G120 -- test fake; body capped by MaxBytesReader at the top of serve
 			http.Error(w, "multipart expected", http.StatusBadRequest)
 			return
 		}
@@ -99,14 +99,14 @@ func (f *fakeAuth) serve(w http.ResponseWriter, r *http.Request) {
 			{"url": f.base + "/login/settoken", "params": map[string]any{"nonce": "n1", "auth": "a1"}},
 		}})
 	case "/login/settoken":
-		if err := r.ParseMultipartForm(1 << 20); err != nil || r.FormValue("steamID") != ownerID || r.FormValue("nonce") != "n1" || r.FormValue("auth") != "a1" {
+		if err := r.ParseMultipartForm(1 << 20); /* #nosec G120 -- test fake; body capped above */ err != nil || r.FormValue("steamID") != ownerID || r.FormValue("nonce") != "n1" || r.FormValue("auth") != "a1" {
 			http.Error(w, "bad transfer", http.StatusBadRequest)
 			return
 		}
 		f.issued++
 		v := ownerID + "%7C%7C" + fakeJWT(f.exp.Add(time.Duration(f.issued)*time.Second))
 		f.valid = append(f.valid, v)
-		http.SetCookie(w, &http.Cookie{Name: "steamLoginSecure", Value: v, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode})
+		http.SetCookie(w, &http.Cookie{Name: "steamLoginSecure", Value: v, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 		writeJSON(w, map[string]any{"result": 1})
 	case "/my/":
 		if f.accepts(r) {
