@@ -75,6 +75,26 @@ func TestFixInFolderWithoutGit(t *testing.T) {
 		t.Fatalf("PR of a folder fix: %v", err)
 	}
 
+	// «Изменено в папке» is done but unpublished: Retry runs a new attempt in
+	// the same folder, Dismiss drops it and leaves the folder alone.
+	if err := os.Remove(filepath.Join(plain, "fixed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.r.Retry(t.Context(), j.ID); err != nil {
+		t.Fatalf("retry of a folder fix: %v", err)
+	}
+	j = e.wait(j.ID, store.JobDone)
+	if res := result(t, j); j.Attempt != 2 || res.Mode != ModeFolder || res.Local == nil || res.Local.Dir != plain ||
+		!slices.Equal(res.Local.Changed, []string{"A fixed.txt"}) {
+		t.Fatalf("retried folder fix: attempt %d %+v", j.Attempt, res.Local)
+	}
+	if j, err = e.r.Dismiss(t.Context(), j.ID); err != nil || j.State != store.JobCancelled {
+		t.Fatalf("dismiss of a folder fix: %+v %v", j.State, err)
+	}
+	if !exists(filepath.Join(plain, "fixed.txt")) || !exists(filepath.Join(plain, "keep.txt")) {
+		t.Fatal("dismiss touched the folder")
+	}
+
 	// A clone of another repository: in place too, and nothing is committed there.
 	head := run(t, e.local, "rev-parse", "HEAD")
 	if err := e.st.SetLocalPath(t.Context(), other.ID, e.local); err != nil {

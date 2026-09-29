@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,14 +130,18 @@ func (r *Runner) Cancel(ctx context.Context, id int64) (store.Job, error) {
 	return j, err
 }
 
-// Dismiss («Отклонить») drops a result under review (or a failed attempt):
-// state cancelled, worktree and branch removed.
+// Dismiss («Отклонить») drops a result under review (or a failed attempt, or
+// a finished folder-mode fix): state cancelled, worktree and branch removed.
 func (r *Runner) Dismiss(ctx context.Context, id int64) (store.Job, error) {
 	j, err := r.opts.Store.Job(ctx, id)
 	if err != nil {
 		return j, err
 	}
-	if j.State != store.JobNeedsReview && j.State != store.JobFailed {
+	from := []string{store.JobNeedsReview, store.JobFailed}
+	if folderDone(j) {
+		from = append(from, store.JobDone)
+	}
+	if !slices.Contains(from, j.State) {
 		return j, ErrNotAllowed
 	}
 	res := parseResult(j)
@@ -147,7 +152,7 @@ func (r *Runner) Dismiss(ctx context.Context, id int64) (store.Job, error) {
 		c.Worktree, res.CleanupError = new(""), ""
 	}
 	c.Result = encode(res)
-	nj, err := r.opts.Store.UpdateJob(ctx, id, []string{store.JobNeedsReview, store.JobFailed}, c)
+	nj, err := r.opts.Store.UpdateJob(ctx, id, from, c)
 	if errors.Is(err, store.ErrJobState) {
 		return nj, ErrNotAllowed
 	}
@@ -158,14 +163,19 @@ func (r *Runner) Dismiss(ctx context.Context, id int64) (store.Job, error) {
 }
 
 // Retry queues a new attempt of a failed, cancelled or unpublished job from a
-// clean start (the old worktree is removed). Published (done) jobs cannot be retried.
+// clean start (the old worktree is removed). Published (done) jobs cannot be
+// retried, except a folder-mode fix: nothing was published, the new attempt
+// runs in the same folder.
 func (r *Runner) Retry(ctx context.Context, id int64) (store.Job, error) {
 	j, err := r.opts.Store.Job(ctx, id)
 	if err != nil {
 		return j, err
 	}
 	from := []string{store.JobFailed, store.JobCancelled, store.JobNeedsReview}
-	if j.State != store.JobFailed && j.State != store.JobCancelled && j.State != store.JobNeedsReview {
+	if folderDone(j) {
+		from = append(from, store.JobDone)
+	}
+	if !slices.Contains(from, j.State) {
 		return j, ErrNotAllowed
 	}
 	if err := r.cleanup(ctx, j); err != nil {
@@ -187,6 +197,13 @@ func (r *Runner) Retry(ctx context.Context, id int64) (store.Job, error) {
 	r.opts.OnJob(nj)
 	r.kick()
 	return nj, nil
+}
+
+// folderDone: a fix that ran in a folder without the project's git and ended
+// done («Изменено в папке»). Nothing was published, so it can be retried or
+// dismissed like a result under review.
+func folderDone(j store.Job) bool {
+	return j.Flow == flowFix && j.State == store.JobDone && parseResult(j).Mode == ModeFolder
 }
 
 // lockPublish moves a needs_review job of flow into running/publish so two

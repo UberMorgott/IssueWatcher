@@ -162,11 +162,13 @@ const showDiff = computed(() => job.value?.flow === 'fix' && !isFolderRun(job.va
 const can = computed(() => {
   const j = job.value
   if (!j) return { cancel: false, retry: false, dismiss: false, pr: false, push: false, reply: false, labels: false }
+  // A folder run that ended «Изменено в папке» is done but unpublished: it can be rerun or dropped.
+  const folderDone = j.state === 'done' && isFolderRun(j)
   return {
     labels: j.flow === 'label' && j.state === 'needs_review',
     cancel: j.state === 'queued' || j.state === 'running',
-    retry: j.state === 'failed' || j.state === 'cancelled' || j.state === 'needs_review',
-    dismiss: j.state === 'needs_review' || j.state === 'failed',
+    retry: j.state === 'failed' || j.state === 'cancelled' || j.state === 'needs_review' || folderDone,
+    dismiss: j.state === 'needs_review' || j.state === 'failed' || folderDone,
     pr: j.flow === 'fix' && j.state === 'needs_review' && !isDirect(j),
     push: canPush(j),
     reply: j.flow === 'reply' && j.state === 'needs_review',
@@ -208,7 +210,7 @@ function ask(action: 'dismiss' | 'pr' | 'reply' | 'labels') {
   if (!j) return
   confirm.require({
     header: t('job.confirm.' + action + 'Title'),
-    message: t('job.confirm.' + (action === 'dismiss' && isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}`, labels: picked.value.join(', ') }),
+    message: t('job.confirm.' + (action !== 'dismiss' ? action : isFolderRun(j) ? 'dismissFolder' : isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}`, labels: picked.value.join(', ') }),
     icon: action === 'dismiss' ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
     acceptProps: { label: t('job.actions.' + action), severity: action === 'dismiss' ? 'danger' : undefined },

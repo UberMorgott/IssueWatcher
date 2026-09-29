@@ -127,6 +127,13 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 	if res := result(t, j); j.State != store.JobDone || !res.Local.Pushed || res.Local.Outcome != OutcomePushed {
 		t.Fatalf("after push: %+v %s", j, j.Result)
 	}
+	// Published: no retry, no dismiss (only a folder-mode fix allows them when done).
+	if _, err := e.r.Retry(t.Context(), j.ID); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("retry of a pushed job: %v", err)
+	}
+	if _, err := e.r.Dismiss(t.Context(), j.ID); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("dismiss of a pushed job: %v", err)
+	}
 	if got := run(t, e.bare, "rev-parse", "main"); got != loc.HeadSHA {
 		t.Fatalf("remote main %s, want %s", got, loc.HeadSHA)
 	}

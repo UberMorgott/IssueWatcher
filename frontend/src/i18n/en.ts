@@ -432,6 +432,7 @@ const en = {
       dismissTitle: 'Reject the result?',
       dismiss: 'The result of {ref} is dropped and its worktree removed.',
       dismissDirect: 'The job {ref} is closed without push. The folder is left as it is: the agent’s commits stay there.',
+      dismissFolder: 'The job {ref} is closed. The folder is left as it is: the agent’s changes stay there.',
       pushTitle: 'Push to GitHub?',
       push: 'The commit(s) of {ref} are pushed from {path} to GitHub.',
       prTitle: 'Create a draft PR?',
