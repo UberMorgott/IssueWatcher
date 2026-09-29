@@ -185,6 +185,31 @@ func TestDirectNoFixesRefAndClose(t *testing.T) {
 	}
 }
 
+// Pushing job B carries the earlier job A's commit (same folder, A's head is
+// B's ancestor): A is marked pushed and done too, although origin's refs never
+// see the push (it goes to the project URL).
+func TestDirectPushCarriesEarlierJob(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 2, nil)
+	jobs := e.enqueue("fix", e.items[0], e.items[1])
+	a := e.wait(jobs[0].ID, store.JobNeedsReview)
+	b := e.wait(jobs[1].ID, store.JobNeedsReview)
+	aHead, bHead := result(t, a).Local.HeadSHA, result(t, b).Local.HeadSHA
+	if aHead == bHead || run(t, e.local, "rev-parse", bHead+"^") != aHead {
+		t.Fatalf("B %s should sit on A %s", bHead, aHead)
+	}
+	if _, err := e.r.Push(t.Context(), b.ID); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = e.st.Job(t.Context(), a.ID)
+	if r := result(t, a); a.State != store.JobDone || !r.Local.Pushed || r.Local.Outcome != OutcomePushed || a.FinishedAt == "" {
+		t.Fatalf("carried job A: %s %+v", a.State, r.Local)
+	}
+	if _, err := e.r.Push(t.Context(), a.ID); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("push of carried A: %v", err)
+	}
+}
+
 // An issue closed after the owner pushed the commit by hand ends the job.
 func TestDirectPushedByHandThenClosed(t *testing.T) {
 	mode(t, "ok")

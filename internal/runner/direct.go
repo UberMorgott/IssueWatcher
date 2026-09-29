@@ -312,7 +312,43 @@ func (r *Runner) Push(ctx context.Context, id int64) (store.Job, error) {
 		}
 		log.addf(StepInfo, "pushed %s to %s", shortSHA(res.Local.HeadSHA), res.Local.Branch)
 	}
-	return r.unlockPublish(ctx, j, res, perr)
+	nj, err := r.unlockPublish(ctx, j, res, perr)
+	if perr == nil {
+		r.markCarried(context.WithoutCancel(ctx), j.ID, res.Local, log)
+	}
+	return nj, err
+}
+
+// markCarried ends the other direct fixes in the same folder whose commits went
+// along with a push (their head is an ancestor of the pushed one). The push
+// targets the project URL, not origin, so the remote-tracking refs that
+// onRemote / closeResolved read never learn about it.
+func (r *Runner) markCarried(ctx context.Context, pushedID int64, pushed *LocalResult, log *jobLog) {
+	jobs, err := r.opts.Store.JobsInState(ctx, store.JobNeedsReview)
+	if err != nil {
+		r.opts.Log.Error("runner: carried pushes", "err", err)
+		return
+	}
+	for _, j := range jobs {
+		res := parseResult(j)
+		loc := res.Local
+		if j.ID == pushedID || j.Flow != flowFix || res.Mode != config.ModeDirect || loc == nil || len(loc.Commits) == 0 ||
+			loc.Pushed || folderKey(loc.Dir) != folderKey(pushed.Dir) ||
+			!r.gitOK(ctx, pushed.Dir, "merge-base", "--is-ancestor", loc.HeadSHA, pushed.HeadSHA) {
+			continue
+		}
+		loc.Pushed, loc.PushedAt = true, pushed.PushedAt
+		if loc.Outcome == OutcomeFixedLocal {
+			loc.Outcome = OutcomePushed
+		}
+		nj, err := r.opts.Store.UpdateJob(ctx, j.ID, []string{store.JobNeedsReview},
+			store.JobChange{State: new(store.JobDone), Finished: true, Result: encode(res)})
+		if err != nil {
+			continue // changed meanwhile (pushing, dismissed)
+		}
+		log.addf(StepInfo, "job %d: its commit %s went along with this push", j.ID, shortSHA(loc.HeadSHA))
+		r.opts.OnJob(nj)
+	}
 }
 
 // pushLocal pushes to url (the project's own push URL), not to origin: the
