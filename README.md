@@ -34,6 +34,40 @@ Download `issuewatcher-windows-amd64.exe` from
 [Releases](https://github.com/UberMorgott/IssueWatcher/releases), put it in a
 folder of its own and start it. Windows 10/11, amd64.
 
+## CLI and MCP (control an agent can use)
+
+The same exe, called with a subcommand, talks to the **running** app of its
+`data\` folder over the loopback API (it never starts the app, and needs no
+sign-in of its own). JSON on stdout, errors on stderr; exit code 0 ok, 1 API
+error, 2 usage, 3 app not running. `issuewatcher help` lists the flags.
+
+| Command | Does |
+|---|---|
+| `status` · `projects` | app version + sync state · projects with counts |
+| `items [--project --state --label --q --unread --limit --cursor]` | one page of issues (`nextCursor` for the next) |
+| `item <id>` · `jobs [--state --flow --origin --project --item]` · `job <id>` · `job log <id> [--attempt]` | issue + comments · agent jobs · one job · its log |
+| `sync` | sync now |
+| `reply <itemId> (--body-file f \| -)` | post a comment on GitHub (`-` = stdin) |
+| `jobs create --flow fix\|reply\|label <itemId>...` | queue agent jobs |
+| `job cancel\|retry\|dismiss\|push\|pr <id>` · `job reply <id> (--body-file f \| -)` · `job labels <id> <name>...` | the job page buttons |
+
+Register the MCP server (stdio) in Claude Code:
+
+```powershell
+claude mcp add issuewatcher -- "C:\path\to\issuewatcher.exe" mcp
+```
+
+Tools: `list_projects, list_items, get_item, list_jobs, get_job, get_job_log,
+sync_now, reply_item, start_jobs, cancel_job, retry_job, send_job_reply,
+apply_job_labels, push_job, create_pr` (local ids, pages ≤ 50; logs in
+`data\logs\mcp.log`). Publishing tools (comment, push, PR) have no extra gate:
+approve them in your MCP client.
+
+The release exe is a windowed app: Windows shells do not wait for it. Pipe its
+output so they do — `issuewatcher status | Out-String` in PowerShell (also sets
+`$LASTEXITCODE`). Agents and MCP
+clients read through pipes and need nothing extra.
+
 ## Build
 
 Needs Go 1.27+ and Node.js (npm).
