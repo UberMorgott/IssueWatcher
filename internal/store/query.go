@@ -291,7 +291,7 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	if len(f.IDs) == 0 && f.Cursor == "" { // header counters (first chunk, head refresh): every filter but state and unread
 		var n IssueCounts
 		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1)"+
-			" FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).Scan(&n.Open, &n.Closed, &n.Unread); err != nil { //nolint:gosec // G202: constant fragments, bound values
+			" FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).Scan(&n.Open, &n.Closed, &n.Unread); err != nil {
 			return chunk, fmt.Errorf("store: count issues: %w", err)
 		}
 		chunk.Counts = &n
