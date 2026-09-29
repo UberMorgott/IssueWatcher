@@ -24,6 +24,7 @@ import { useAppStore } from '../stores/app'
 import { absTime, num, relTime } from '../lib/format'
 import { useCrumbs } from '../lib/crumbs'
 import { useChunks } from '../lib/chunks'
+import { commentsCache, itemCache, itemJobsCache } from '../lib/cache'
 import { isModPlatform, itemRef, platformName } from '../lib/platforms'
 
 const props = defineProps<{ id: string }>()
@@ -42,7 +43,9 @@ const replyError = ref('')
 
 async function load(quiet = false) {
   if (!quiet) state.value = 'loading'
-  const r = await api.issue(props.id)
+  const id = props.id
+  const r = await api.issue(id)
+  if (id !== props.id) return // moved on to another item meanwhile
   if (!r.ok) {
     state.value = r.status === 404 ? (r.error === 'not found' ? 'missing' : 'unavailable') : r.status === 400 ? 'missing' : 'error'
     errorText.value = r.error
@@ -64,8 +67,14 @@ async function load(quiet = false) {
 // Comments arrive in chunks while the reader scrolls towards the end (sentinel
 // ~2 screens ahead); skeleton posts mark the loading tail.
 const comments = useChunks((cursor) => api.comments(Number(props.id), cursor))
-const commentItems = comments.items
-const commentsLoading = comments.loading
+// A revisit shows the comments seen last time until the first fresh chunk lands.
+const commentItems = computed(() =>
+  comments.items.value.length || !comments.loading.value ? comments.items.value : (commentsCache.get(props.id) ?? []),
+)
+const commentsLoading = computed(() => comments.loading.value && !(!comments.items.value.length && commentsCache.get(props.id)))
+watch(comments.loading, (loading) => {
+  if (!loading && !comments.error.value) commentsCache.set(props.id, comments.items.value)
+})
 const sentinel = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | undefined
 watch(sentinel, (el) => {
@@ -82,11 +91,20 @@ watch(
   () => props.id,
   () => {
     comments.reset()
-    void load()
+    // A page seen before renders from the cache at once and refreshes quietly.
+    const cached = itemCache.get(props.id)
+    if (cached) {
+      item.value = cached
+      state.value = 'ok'
+    }
+    void load(!!cached)
     void comments.loadMore()
   },
   { immediate: true },
 )
+watch(item, (it) => {
+  if (it) itemCache.set(it.id, it)
+})
 watch(
   () => app.dataVersion,
   () => {
@@ -159,13 +177,15 @@ function onComposerKey(e: KeyboardEvent) {
 // --- agent jobs of this item (newest first), live from job.changed
 const itemJobs = ref<Job[]>([])
 async function loadJobs() {
-  const r = await api.jobs({ item: Number(props.id), limit: 5 })
-  if (r.ok) itemJobs.value = r.data.items
+  const id = props.id
+  const r = await api.jobs({ item: Number(id), limit: 5 })
+  if (r.ok && id === props.id) itemJobs.value = r.data.items
 }
 watch(() => props.id, () => {
-  itemJobs.value = []
+  itemJobs.value = itemJobsCache.get(props.id) ?? []
   void loadJobs()
 }, { immediate: true })
+watch(itemJobs, (list) => itemJobsCache.set(props.id, list), { deep: true })
 useJobEvents({
   job: (j) => {
     if (j.itemId !== Number(props.id)) return

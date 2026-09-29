@@ -4,6 +4,7 @@ import InputNumber from 'primevue/inputnumber'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import Select from 'primevue/select'
+import Skeleton from 'primevue/skeleton'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
@@ -13,6 +14,7 @@ import AutomationProjectPanel from './AutomationProjectPanel.vue'
 import { useSettingsStore } from '../../stores/settings'
 import { useAppStore } from '../../stores/app'
 import { useSave } from '../../lib/save'
+import { cachedRef } from '../../lib/cache'
 import { api } from '../../api/client'
 import type { FolderRow, FolderSuggestion, RunMode } from '../../api/types'
 
@@ -45,8 +47,9 @@ function removeExclude(x: string) {
 }
 
 // --- mappings
-const rows = ref<FolderRow[]>([])
-const loaded = ref(false)
+// Cached across visits: a revisit shows the last mapping at once and refetches.
+const rows = cachedRef<FolderRow[]>('settings.folders', [])
+const loaded = cachedRef('settings.foldersLoaded', false)
 const edits = ref<Record<number, string>>({})
 async function loadRows() {
   const r = await api.folders()
@@ -269,8 +272,16 @@ async function acceptAll() {
       :title="t('settings.folders.mapping', { n: mapped, total: rows.length })"
       :text="t('settings.folders.modeHint')"
     >
+      <template v-if="!loaded">
+        <Skeleton
+          v-for="i in 3"
+          :key="i"
+          height="44px"
+          class="map-skel"
+        />
+      </template>
       <p
-        v-if="loaded && !rows.length"
+        v-else-if="!rows.length"
         class="hint"
       >
         {{ t('settings.folders.noProjects') }}
@@ -403,6 +414,10 @@ async function acceptAll() {
 .accept-all {
   align-self: flex-start;
   margin-top: 12px;
+}
+
+.map-skel {
+  margin: 4px 0;
 }
 
 .map-row {

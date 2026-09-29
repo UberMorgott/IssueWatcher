@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { safeUrl } from '../lib/safeUrl'
+import { jobCache } from '../lib/cache'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
@@ -48,7 +49,9 @@ const pickedDirty = ref(false)
 
 async function load(quiet = false) {
   if (!quiet) state.value = 'loading'
-  const r = await api.job(props.id)
+  const id = props.id
+  const r = await api.job(id)
+  if (id !== props.id) return // moved on to another job meanwhile
   if (!r.ok) {
     state.value = r.status === 404 || r.status === 400 ? 'missing' : 'error'
     errorText.value = r.error
@@ -79,10 +82,19 @@ watch(
     job.value = null
     draftDirty.value = false
     pickedDirty.value = false
-    void load()
+    // A job seen before renders from the cache at once and refreshes quietly.
+    const cached = jobCache.get(props.id)
+    if (cached) {
+      setJob(cached)
+      state.value = 'ok'
+    }
+    void load(!!cached)
   },
   { immediate: true },
 )
+watch(job, (j) => {
+  if (j) jobCache.set(j.id, j)
+})
 watch(
   () => route.query.attempt,
   () => {

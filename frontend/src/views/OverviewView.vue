@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
@@ -14,17 +14,19 @@ import type { Issue, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, shortDay, shortRepo } from '../lib/format'
+import { cachedRef } from '../lib/cache'
 
 const app = useAppStore()
 const { t } = useI18n()
 
-const stats = ref<Stats | null>(null)
-const statsState = ref<'loading' | 'ok' | 'unavailable' | 'error'>('loading')
-const chartRepo = ref<number | null>(null)
-const repoStats = ref<Stats | null>(null)
-const attention = ref<Issue[]>([])
-const recent = ref<Issue[]>([])
-const listsLoading = ref(true)
+// Cached across visits: a revisit shows the last numbers at once and refetches quietly.
+const stats = cachedRef<Stats | null>('overview.stats', null)
+const statsState = cachedRef<'loading' | 'ok' | 'unavailable' | 'error'>('overview.statsState', 'loading')
+const chartRepo = cachedRef<number | null>('overview.chartRepo', null)
+const repoStats = cachedRef<Stats | null>('overview.repoStats', null)
+const attention = cachedRef<Issue[]>('overview.attention', [])
+const recent = cachedRef<Issue[]>('overview.recent', [])
+const listsLoading = cachedRef('overview.listsLoading', true)
 
 async function loadStats() {
   const r = await api.stats()
