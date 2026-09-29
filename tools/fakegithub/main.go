@@ -8,7 +8,11 @@
 // <dataDir>\secrets, so the instance starts signed in. Control endpoints:
 //
 //	POST /_fake/issues  {"repo":"o/r","title":"...","labels":["bug"],"author":"x"} → the new issue
+//	POST /_fake/issues/{n}/close?repo=o/r  closes an issue (as a pushed `Fixes #N` would)
 //	GET  /_fake/state   issues, repo labels, label add count, every call received
+//
+// -git <dir> serves <dir>\<owner>\<repo>.git (bare) over smart HTTP through
+// git http-backend: clone, fetch and push (no auth check) at <url>/<owner>/<repo>.git.
 package main
 
 import (
@@ -19,9 +23,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/cgi" //nolint:gosec // G504 (httpoxy) affects Go < 1.6.3 only; dev tool on loopback
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +42,7 @@ func main() {
 	repos := flag.String("repo", "octo/demo", "comma-separated owner/name repos of installation 1")
 	labels := flag.String("labels", "bug,enhancement,question,documentation", "repo labels (every repo)")
 	seed := flag.String("seed", "", "IssueWatcher data dir to sign in (writes secrets)")
+	gitRoot := flag.String("git", "", "folder of <owner>/<repo>.git bare repos served over smart HTTP")
 	flag.Parse()
 
 	s := githubtest.NewUnstarted()
@@ -50,10 +58,18 @@ func main() {
 	}
 	s.Listener = ln
 	fake := s.Config.Handler
+	gitHTTP, err := gitBackend(*gitRoot)
+	if err != nil {
+		log.Fatal(err)
+	}
 	s.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/_fake/issues":
 			addIssue(s, w, r)
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/_fake/issues/") && strings.HasSuffix(r.URL.Path, "/close"):
+			closeIssue(s, w, r)
+		case gitHTTP != nil && strings.Contains(r.URL.Path, ".git/"):
+			gitHTTP.ServeHTTP(w, r)
 		case r.Method == http.MethodGet && r.URL.Path == "/_fake/state":
 			state(s, w)
 		default:
@@ -135,4 +151,47 @@ func issuesJSON(list []*githubtest.Issue) []map[string]any {
 		out = append(out, issueJSON(is))
 	}
 	return out
+}
+
+// gitBackend runs git http-backend as CGI over root ("" = no git serving).
+func gitBackend(root string) (http.Handler, error) {
+	if root == "" {
+		return nil, nil
+	}
+	out, err := exec.CommandContext(context.Background(), "git", "--exec-path").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git --exec-path: %w", err)
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	return &cgi.Handler{
+		Path: filepath.Join(strings.TrimSpace(string(out)), "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + abs, "GIT_HTTP_EXPORT_ALL=1", "REMOTE_USER=" + githubtest.Login},
+	}, nil
+}
+
+func closeIssue(s *githubtest.Server, w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/_fake/issues/"), "/close"))
+	if err != nil {
+		http.Error(w, "bad issue number", http.StatusBadRequest)
+		return
+	}
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+	repo := r.URL.Query().Get("repo")
+	if repo == "" {
+		repo = s.Repos[0]
+	}
+	for _, is := range s.Issues {
+		if is.Repo == repo && is.Number == n {
+			now := time.Now().UTC().Truncate(time.Second)
+			is.Open, is.ClosedAt, is.UpdatedAt = false, now, now
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(issueJSON(is))
+			return
+		}
+	}
+	http.NotFound(w, r)
 }
