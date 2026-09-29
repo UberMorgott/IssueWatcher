@@ -27,6 +27,10 @@ type PollState struct {
 	ETags         map[string]string `json:"etags,omitempty"`        // exact URL → ETag
 	IssuesSince   time.Time         `json:"issuesSince,omitzero"`   // newest item update seen
 	CommentsSince time.Time         `json:"commentsSince,omitzero"` // newest comment update seen
+	// FullAt is the last full read of the project (a reconcile or an overflow
+	// re-read), set by the syncer: a page fingerprint taken before it is
+	// superseded by that read (mcpbridge.PageChanged).
+	FullAt time.Time `json:"fullAt,omitzero"`
 }
 
 // Changes is the result of one cheap change check.

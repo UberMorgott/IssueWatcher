@@ -383,7 +383,15 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 			items, err := p.SyncItems(cctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, pr.Cursor)
 			var evs []store.Event
 			if err == nil {
-				evs, err = s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
+				full := s.now()
+				evs, err = s.opts.Store.ApplyReconciled(ctx, src, pr.ID, items, login, full)
+				if err == nil {
+					s.mu.Lock()
+					if t := s.targets[pr.ID]; t != nil {
+						t.poll.FullAt = full
+					}
+					s.mu.Unlock()
+				}
 				if err != nil {
 					mu.Lock()
 					halt(err)

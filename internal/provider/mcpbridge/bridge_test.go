@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -252,5 +253,30 @@ func TestTitle(t *testing.T) {
 	}
 	if got := []rune(mcpbridge.Title(long)); len(got) != 80 {
 		t.Fatalf("len %d", len(got))
+	}
+}
+
+// A fingerprint missing or taken before the last full read is adopted as the
+// baseline (that read stored everything); a legacy fingerprint of unknown age
+// still reconciles.
+func TestPageChangedAdoptsAfterFullRead(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	st := provider.PollState{FullAt: now}
+	if mcpbridge.PageChanged(&st, "k", "a", now.Add(time.Minute), time.Hour) {
+		t.Fatal("no fingerprint yet after a full read must be adopted")
+	}
+	st.FullAt = now.Add(2 * time.Minute) // a reconcile after that check
+	if mcpbridge.PageChanged(&st, "k", "b", now.Add(3*time.Minute), time.Hour) {
+		t.Fatal("a fingerprint older than the full read must be adopted")
+	}
+	if !mcpbridge.PageChanged(&st, "k", "c", now.Add(4*time.Minute), time.Hour) {
+		t.Fatal("a change after the full read must reconcile")
+	}
+	legacy := provider.PollState{ETags: map[string]string{"k": "a", "k@full": strconv.FormatInt(now.Unix(), 10)}}
+	if !mcpbridge.PageChanged(&legacy, "k", "b", now.Add(time.Minute), time.Hour) {
+		t.Fatal("a legacy fingerprint (age unknown) that changed must reconcile")
+	}
+	if _, ok := legacy.ETags["k@full"]; ok || !legacy.FullAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("legacy state not migrated: %+v", legacy)
 	}
 }

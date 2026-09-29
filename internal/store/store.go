@@ -169,7 +169,15 @@ func activeProjects(ctx context.Context, tx *sql.Tx, sourceID int64) (map[string
 // notifying about. The first sync of a project is a silent baseline. Items and
 // comments authored by self never notify.
 func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string) ([]Event, error) {
-	return s.applyItems(ctx, sourceID, projectID, items, self, nil, time.Time{})
+	return s.applyItems(ctx, sourceID, projectID, items, self, nil, time.Time{}, time.Time{})
+}
+
+// ApplyReconciled is ApplyItems for a project's full read at fullAt: the
+// project's poll state records it (provider.PollState.FullAt) in the same
+// transaction, so the next change check adopts its page fingerprint instead
+// of asking for another full read.
+func (s *Store) ApplyReconciled(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string, fullAt time.Time) ([]Event, error) {
+	return s.applyItems(ctx, sourceID, projectID, items, self, nil, time.Time{}, fullAt)
 }
 
 // ApplyChecked is ApplyItems for a change check's findings: the items, the
@@ -179,11 +187,11 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 func (s *Store) ApplyChecked(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string,
 	poll provider.PollState, checked time.Time,
 ) ([]Event, error) {
-	return s.applyItems(ctx, sourceID, projectID, items, self, &poll, checked)
+	return s.applyItems(ctx, sourceID, projectID, items, self, &poll, checked, time.Time{})
 }
 
 func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items []provider.Item, self string,
-	poll *provider.PollState, checked time.Time,
+	poll *provider.PollState, checked, fullAt time.Time,
 ) ([]Event, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -225,6 +233,12 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET sync_cursor = ?, synced_at = ? WHERE id = ?`,
 		cursor, ts(time.Now()), projectID); err != nil {
 		return nil, fmt.Errorf("store: update cursor: %w", err)
+	}
+	if !fullAt.IsZero() {
+		if _, err := tx.ExecContext(ctx, `UPDATE projects SET poll_state = json_set(CASE WHEN json_valid(poll_state) THEN poll_state ELSE '{}' END,
+			'$.fullAt', ?) WHERE id = ?`, fullAt.UTC().Format(time.RFC3339Nano), projectID); err != nil {
+			return nil, fmt.Errorf("store: mark full read: %w", err)
+		}
 	}
 	if poll != nil {
 		b, err := json.Marshal(poll)

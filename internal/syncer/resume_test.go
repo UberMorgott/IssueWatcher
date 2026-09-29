@@ -14,6 +14,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
+	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -336,5 +337,73 @@ func TestReconcileStopsOnRateLimit(t *testing.T) {
 	}
 	if src, _, _ := st.LastSource(t.Context(), "nexus", "me"); !src.ReconciledAt.IsZero() {
 		t.Fatalf("a stopped reconcile was stamped complete: %+v", src)
+	}
+}
+
+// pageFake is a mod-platform poller: a page-1 fingerprint (sig) checked with
+// mcpbridge.PageChanged, full reads counted.
+type pageFake struct {
+	fakeProvider
+	sig          string
+	checks, full atomic.Int32
+	now          func() time.Time
+}
+
+func (f *pageFake) Scheduling() provider.Scheduling { return provider.Scheduling{} }
+
+func (f *pageFake) DetectChanges(_ context.Context, _ provider.Project, st *provider.PollState) (provider.Changes, error) {
+	f.checks.Add(1)
+	return provider.Changes{Requests: 1, Overflow: mcpbridge.PageChanged(st, "fake:page1", f.sig, f.now(), time.Hour)}, nil
+}
+
+func (f *pageFake) FetchChanged(ctx context.Context, p provider.Project, _ []int) ([]provider.Item, error) {
+	return f.SyncItems(ctx, p, time.Time{})
+}
+
+func (f *pageFake) FullReconcile(ctx context.Context, p provider.Project, _ time.Time) ([]provider.Item, error) {
+	f.full.Add(1)
+	return f.SyncItems(ctx, p, time.Time{})
+}
+
+// A reconcile stamps the change-check baseline: the next checks read page 1
+// only (the fingerprint taken after the reconcile is adopted), and FullEvery
+// still forces one full read an hour after it.
+func TestReconcileStampsPageBaseline(t *testing.T) {
+	st := openStore(t)
+	clk := &clock{t: t0}
+	fp := &pageFake{platform: "nexus", account: "me", item: "x", sig: "a", now: clk.Now}
+	plan := plan5()
+	plan.Reconcile = 3 * time.Hour // FullEvery (1 h), not the scheduled reconcile, must force the full read
+	s := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Now: clk.Now, Plan: plan})
+	s.Step(t.Context()) // bootstrap reconcile
+	for range 3 {       // checks at +6, +12, +18 min
+		clk.Add(6 * time.Minute)
+		s.Step(t.Context())
+	}
+	if c, f := fp.checks.Load(), fp.full.Load(); c != 3 || f != 0 {
+		t.Fatalf("after a reconcile: %d checks, %d full reads; want 3 page-1 checks and no full read", c, f)
+	}
+	// A restart resumes the baseline from SQLite too.
+	r := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Now: clk.Now, Plan: plan})
+	clk.Add(6 * time.Minute)
+	for range 3 {
+		r.Step(t.Context())
+		clk.Add(20 * time.Second)
+	}
+	if f := fp.full.Load(); f != 0 {
+		t.Fatalf("full reads after a restart: %d", f)
+	}
+	fp.sig = "b" // page 1 changed
+	clk.Add(6 * time.Minute)
+	r.Step(t.Context())
+	if f := fp.full.Load(); f != 1 {
+		t.Fatalf("a changed page 1: %d full reads, want 1", f)
+	}
+	for range 12 { // 72 min more: over an hour since that full read
+		clk.Add(6 * time.Minute)
+		r.Step(t.Context())
+	}
+	if f := fp.full.Load(); f < 2 {
+		t.Fatalf("FullEvery did not force a full read: %d", f)
 	}
 }

@@ -69,22 +69,36 @@ func Signature(parts ...string) string {
 }
 
 // PageChanged stores sig as the page-1 fingerprint under key and reports
-// whether the project must be reconciled: no fingerprint yet (a comment may
-// have landed since the last full read: after a restart, a new target, a
-// toggle), a different one, or the last reconcile asked for longer ago than
-// every (a reply on a thread past page 1 may not change page 1; 0 = never).
+// whether the project must be reconciled: a different fingerprint, none yet
+// with no full read on record (a comment may have landed since), or the last
+// full read (st.FullAt) longer ago than every (a reply on a thread past page 1
+// may not change page 1; 0 = never). A fingerprint missing or taken before the
+// last full read is adopted as the new baseline instead: that read (the
+// syncer's reconcile) already stored everything, so no second full read
+// follows it. Asking for a reconcile stamps FullAt (the syncer restores the
+// state when the reconcile fails).
 func PageChanged(st *provider.PollState, key, sig string, now time.Time, every time.Duration) bool {
 	if st.ETags == nil {
 		st.ETags = map[string]string{}
 	}
 	prev := st.ETags[key]
 	st.ETags[key] = sig
-	last, _ := strconv.ParseInt(st.ETags[key+"@full"], 10, 64)
-	due := every > 0 && now.Sub(time.Unix(last, 0)) >= every
-	if prev != "" && prev == sig && !due {
-		return false
+	full := st.FullAt
+	if last, err := strconv.ParseInt(st.ETags[key+"@full"], 10, 64); err == nil && full.IsZero() {
+		full = time.Unix(last, 0) // state written before FullAt
 	}
-	st.ETags[key+"@full"] = strconv.FormatInt(now.Unix(), 10)
+	delete(st.ETags, key+"@full")
+	sigAt, sigErr := strconv.ParseInt(st.ETags[key+"@at"], 10, 64)
+	st.ETags[key+"@at"] = strconv.FormatInt(now.Unix(), 10)
+	due := every > 0 && now.Sub(full) >= every
+	switch {
+	case due:
+	case prev != "" && prev == sig:
+		return false
+	case !full.IsZero() && (prev == "" || (sigErr == nil && time.Unix(sigAt, 0).Before(full))):
+		return false // the fingerprint predates the last full read: adopt it
+	}
+	st.FullAt = now
 	return true
 }
 
