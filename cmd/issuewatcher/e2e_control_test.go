@@ -105,6 +105,30 @@ func (c *controlApp) ok(t *testing.T, stdin string, out any, args ...string) {
 	}
 }
 
+// comments counts the fake issue's comments.
+func (c *controlApp) comments(number int) int {
+	c.gh.Mu.Lock()
+	defer c.gh.Mu.Unlock()
+	for _, is := range c.gh.Issues {
+		if is.Number == number {
+			return len(is.Comments)
+		}
+	}
+	return -1
+}
+
+// useFakeCLI points both agent profiles at fakecli.
+func (c *controlApp) useFakeCLI(t *testing.T) {
+	t.Helper()
+	profile := func(id, cli string) map[string]any {
+		return map[string]any{"id": id, "name": id, "cli": cli, "path": c.fakecli, "model": "", "args": []string{},
+			"timeoutMinutes": 5, "maxParallel": 1, "maxBudgetUsd": 0}
+	}
+	patchSettings(t, c.app, map[string]any{"agents": map[string]any{
+		"profiles": []any{profile("claude", "claude"), profile("codex", "codex")},
+	}})
+}
+
 func TestControlE2E(t *testing.T) {
 	c := startControlApp(t)
 
@@ -150,6 +174,39 @@ func TestControlE2E(t *testing.T) {
 	if code, _, _ := c.cli(t, "", "items", "--bogus"); code != exitUsage {
 		t.Fatalf("usage: exit %d", code)
 	}
+
+	// Actions: direct reply, then a reply job's draft sent with `job reply`.
+	c.ok(t, "Looking into it.", nil, "reply", itemID, "-")
+	if n := c.comments(1); n != 1 {
+		t.Fatalf("fake comments after reply: %d", n)
+	}
+	c.useFakeCLI(t)
+	var queued struct {
+		Jobs []struct {
+			Job   struct{ ID int64 }
+			Error string
+		}
+	}
+	c.ok(t, "", &queued, "jobs", "create", "--flow", "reply", itemID)
+	if len(queued.Jobs) != 1 || queued.Jobs[0].Job.ID == 0 {
+		t.Fatalf("jobs create: %+v", queued)
+	}
+	jobID := strconv.FormatInt(queued.Jobs[0].Job.ID, 10)
+	var j struct{ State string }
+	waitFor(t, "reply job needs_review", func() bool {
+		c.ok(t, "", &j, "job", jobID)
+		return j.State == "needs_review"
+	})
+	c.ok(t, "", nil, "job", "log", jobID)
+	c.ok(t, "Edited draft.", &j, "job", "reply", jobID, "-")
+	if j.State != "done" || c.comments(1) != 2 {
+		t.Fatalf("job reply: state %s, fake comments %d", j.State, c.comments(1))
+	}
+	if code, _, stderr := c.cli(t, "again", "job", "reply", jobID, "-"); code != exitAPI || !strings.Contains(stderr, "HTTP 409") {
+		t.Fatalf("second job reply: %d %s", code, stderr)
+	}
+	c.ok(t, "", nil, "sync")
+
 	cmd := exec.CommandContext(t.Context(), c.exe, "status") //nolint:gosec // our test build
 	cmd.Env = append(os.Environ(), "IW_DATA_DIR="+t.TempDir())
 	if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != exitNotRunning {

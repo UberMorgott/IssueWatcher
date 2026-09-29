@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,6 +114,74 @@ func TestCLIExitCodes(t *testing.T) {
 	t.Setenv(paths.EnvDataDir, t.TempDir()) // no runtime.json
 	if code, out, stderr := cliRun("", "projects"); code != exitNotRunning || out != "" || !strings.Contains(stderr, "not running") {
 		t.Fatalf("not running: %d %q %q", code, out, stderr)
+	}
+}
+
+func TestCLIActionCommands(t *testing.T) {
+	calls := fakeAPI(t, map[string]string{
+		"POST /api/sync":             `202 `,
+		"POST /api/items/4/comments": `201 {"id":10}`,
+		"POST /api/jobs":             `201 {"jobs":[]}`,
+		"POST /api/jobs/9/cancel":    `200 {"id":9}`,
+		"POST /api/jobs/9/retry":     `200 {"id":9}`,
+		"POST /api/jobs/9/dismiss":   `200 {"id":9}`,
+		"POST /api/jobs/9/push":      `200 {"id":9}`,
+		"POST /api/jobs/9/pr":        `200 {"id":9}`,
+		"POST /api/jobs/9/reply":     `200 {"id":9}`,
+		"POST /api/jobs/9/labels":    `200 {"id":9}`,
+	})
+	bodyFile := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(bodyFile, []byte("from file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		stdin string
+		args  []string
+		want  apiCall
+		out   string
+	}{
+		{"", []string{"sync"}, apiCall{"POST", "/api/sync", "", ""}, `"ok": true`},
+		{"hi\n", []string{"reply", "4", "-"}, apiCall{"POST", "/api/items/4/comments", "", `{"body":"hi\n"}`}, `"id": 10`},
+		{"", []string{"reply", "--body-file", bodyFile, "4"}, apiCall{"POST", "/api/items/4/comments", "", `{"body":"from file"}`}, `"id": 10`},
+		{"", []string{"jobs", "create", "--flow", "reply", "4", "5"}, apiCall{"POST", "/api/jobs", "", `{"flow":"reply","itemIds":[4,5],"profileId":""}`}, `"jobs"`},
+		{"", []string{"job", "cancel", "9"}, apiCall{"POST", "/api/jobs/9/cancel", "", ""}, `"id": 9`},
+		{"", []string{"job", "retry", "9"}, apiCall{"POST", "/api/jobs/9/retry", "", ""}, `"id": 9`},
+		{"", []string{"job", "dismiss", "9"}, apiCall{"POST", "/api/jobs/9/dismiss", "", ""}, `"id": 9`},
+		{"", []string{"job", "push", "9"}, apiCall{"POST", "/api/jobs/9/push", "", ""}, `"id": 9`},
+		{"", []string{"job", "pr", "9"}, apiCall{"POST", "/api/jobs/9/pr", "", ""}, `"id": 9`},
+		{"draft", []string{"job", "reply", "9", "-"}, apiCall{"POST", "/api/jobs/9/reply", "", `{"body":"draft"}`}, `"id": 9`},
+		{"", []string{"job", "labels", "9", "bug", "ui"}, apiCall{"POST", "/api/jobs/9/labels", "", `{"labels":["bug","ui"]}`}, `"id": 9`},
+	} {
+		code, out, stderr := cliRun(tc.stdin, tc.args...)
+		if code != exitOK || !strings.Contains(out, tc.out) {
+			t.Fatalf("%v: %d %q %q", tc.args, code, out, stderr)
+		}
+		if got := (*calls)[len(*calls)-1]; got != tc.want {
+			t.Fatalf("%v: request %+v, want %+v", tc.args, got, tc.want)
+		}
+	}
+	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}} {
+		if code, _, stderr := cliRun("", args...); code != exitUsage {
+			t.Fatalf("%v: %d %q", args, code, stderr)
+		}
+	}
+}
+
+func TestCLIActionErrors(t *testing.T) {
+	fakeAPI(t, map[string]string{
+		"POST /api/jobs":             `400 {"error":"runner: bad flow"}`,
+		"POST /api/jobs/9/push":      `409 {"error":"runner: not allowed in state done"}`,
+		"POST /api/items/4/comments": `502 {"error":"posting the comment failed: boom"}`,
+	})
+	for args, want := range map[string]string{
+		"jobs create --flow nope 4": "runner: bad flow (HTTP 400)",
+		"job push 9":                "not allowed in state done (HTTP 409)",
+		"reply 4 -":                 "posting the comment failed: boom (HTTP 502)",
+	} {
+		code, out, stderr := cliRun("x", strings.Fields(args)...)
+		if code != exitAPI || out != "" || !strings.Contains(stderr, want) {
+			t.Fatalf("%s: %d %q %q", args, code, out, stderr)
+		}
 	}
 }
 

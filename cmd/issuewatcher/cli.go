@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,12 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   jobs [--state S] [--flow F] [--origin manual|rule] [--project ID] [--item ID] [--limit N] [--cursor C]
   job <id>
   job log <id> [--attempt N]
+  sync
+  reply <itemId> (--body-file FILE | -)
+  jobs create --flow fix|reply|label [--profile ID] <itemId>...
+  job cancel|retry|dismiss|push|pr <id>
+  job reply <id> (--body-file FILE | -)
+  job labels <id> <name>...
 `
 
 // isCLI reports whether args start with a subcommand (a word, not a flag):
@@ -160,6 +167,17 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 			return nil, err
 		}
 		return c.c.Projects(c.ctx)
+	case "sync":
+		if _, err := flags(flag.NewFlagSet(cmd, flag.ContinueOnError), rest); err != nil {
+			return nil, err
+		}
+		return nil, c.c.Sync(c.ctx)
+	case "reply":
+		id, body, err := c.idAndBody("reply", rest)
+		if err != nil {
+			return nil, err
+		}
+		return c.c.Reply(c.ctx, id, body)
 	case "items":
 		return c.items(rest)
 	case "item":
@@ -208,7 +226,63 @@ func (c *cli) item(args []string) (json.RawMessage, error) {
 	return c.c.Item(c.ctx, id, *comments)
 }
 
+// idAndBody parses `<id> (--body-file f | -)`: the body from the file or stdin.
+func (c *cli) idAndBody(cmd string, args []string) (int64, string, error) {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	file := fs.String("body-file", "", "file with the comment body")
+	pos, err := flags(fs, args)
+	if err != nil {
+		return 0, "", err
+	}
+	stdin := len(pos) == 2 && pos[1] == "-"
+	if stdin {
+		pos = pos[:1]
+	}
+	if stdin == (*file != "") {
+		return 0, "", usagef("%s: give the body with --body-file FILE or - (stdin)", cmd)
+	}
+	id, err := oneID(cmd, pos)
+	if err != nil {
+		return 0, "", err
+	}
+	var b []byte
+	if stdin {
+		b, err = io.ReadAll(io.LimitReader(c.stdin, 1<<20))
+	} else {
+		b, err = os.ReadFile(*file)
+	}
+	if err != nil {
+		return 0, "", fmt.Errorf("read body: %w", err)
+	}
+	return id, string(b), nil
+}
+
+func (c *cli) jobsCreate(args []string) (json.RawMessage, error) {
+	fs := flag.NewFlagSet("jobs create", flag.ContinueOnError)
+	flow := fs.String("flow", "", "fix|reply|label")
+	profile := fs.String("profile", "", "agent profile id (default: the flow's role)")
+	pos, err := flags(fs, args)
+	if err != nil {
+		return nil, err
+	}
+	if *flow == "" || len(pos) == 0 {
+		return nil, usagef("jobs create: want --flow and item ids")
+	}
+	ids := make([]int64, 0, len(pos))
+	for _, p := range pos {
+		id, err := parseID(p)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return c.c.CreateJobs(c.ctx, *flow, ids, *profile)
+}
+
 func (c *cli) jobs(args []string) (json.RawMessage, error) {
+	if len(args) > 0 && args[0] == "create" {
+		return c.jobsCreate(args[1:])
+	}
 	fs := flag.NewFlagSet("jobs", flag.ContinueOnError)
 	var q control.JobQuery
 	fs.StringVar(&q.State, "state", "", "queued|running|needs_review|done|failed|cancelled")
@@ -229,7 +303,42 @@ func (c *cli) jobs(args []string) (json.RawMessage, error) {
 }
 
 func (c *cli) job(args []string) (json.RawMessage, error) {
-	if len(args) > 0 && args[0] == "log" {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch {
+	case slices.Contains(control.JobActions, sub):
+		pos, err := flags(flag.NewFlagSet("job "+sub, flag.ContinueOnError), args[1:])
+		if err != nil {
+			return nil, err
+		}
+		id, err := oneID("job "+sub, pos)
+		if err != nil {
+			return nil, err
+		}
+		return c.c.JobAction(c.ctx, id, sub)
+	case sub == "reply":
+		id, body, err := c.idAndBody("job reply", args[1:])
+		if err != nil {
+			return nil, err
+		}
+		return c.c.JobReply(c.ctx, id, body)
+	case sub == "labels":
+		pos, err := flags(flag.NewFlagSet("job labels", flag.ContinueOnError), args[1:])
+		if err != nil {
+			return nil, err
+		}
+		if len(pos) < 2 {
+			return nil, usagef("job labels: want a job id and label names")
+		}
+		id, err := parseID(pos[0])
+		if err != nil {
+			return nil, err
+		}
+		return c.c.JobLabels(c.ctx, id, pos[1:])
+	}
+	if sub == "log" {
 		fs := flag.NewFlagSet("job log", flag.ContinueOnError)
 		attempt := fs.Int("attempt", 0, "attempt (default: current)")
 		pos, err := flags(fs, args[1:])
