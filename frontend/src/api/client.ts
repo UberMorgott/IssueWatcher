@@ -24,6 +24,7 @@ import type {
   RepoLabel,
   JobStep,
   QueuedJob,
+  AutomationChunk,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -207,6 +208,8 @@ export const api = {
   },
   projectLabels: (id: number) => call<RepoLabel[]>('GET', `/api/projects/${id}/labels`),
   detectAgents: () => call<DetectedCLI[]>('GET', '/api/agents/detect'),
+  automationLog: (cursor = '', limit = 50) =>
+    call<AutomationChunk>('GET', `/api/automation/log?limit=${limit}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`),
 }
 
 /** Job rows always carry a result object (the column may hold null). */

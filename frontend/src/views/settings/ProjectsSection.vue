@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import SettingRow from '../../components/SettingRow.vue'
 import SettingsPanel from '../../components/SettingsPanel.vue'
+import AutomationProjectPanel from './AutomationProjectPanel.vue'
 import { useSettingsStore } from '../../stores/settings'
 import { useAppStore } from '../../stores/app'
 import { useSave } from '../../lib/save'
@@ -321,6 +322,8 @@ async function acceptAll() {
         />
       </div>
     </SettingsPanel>
+
+    <AutomationProjectPanel />
   </template>
 </template>
 

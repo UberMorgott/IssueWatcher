@@ -275,6 +275,29 @@ export interface ProjectAutomation {
   autoApplyLabels?: boolean
 }
 
+/** One rule decision (GET /api/automation/log, internal/store AutomationEntry). */
+export interface AutomationEntry {
+  id: number
+  at: string
+  itemId: number
+  event: RuleEvent
+  ruleId: string
+  flow: RuleFlow
+  decision: 'queued' | 'skipped'
+  /** Skipped: no_profile | unavailable | auto_fix_off | no_folder | exists | max_attempts | day_cap | rule_cap. */
+  reason: string
+  jobId: number | null
+  repo: string
+  number: number
+  title: string
+}
+
+export interface AutomationChunk {
+  items: AutomationEntry[]
+  nextCursor: string
+  more: boolean
+}
+
 /** settings.agents (internal/config Agents). */
 export interface Agents {
   maxParallel: number

@@ -13,6 +13,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '../../components/SettingRow.vue'
 import SettingsPanel from '../../components/SettingsPanel.vue'
+import AutomationPanel from './AutomationPanel.vue'
 import { api } from '../../api/client'
 import type { AgentCLI, AgentProfile, Agents, DetectedCLI, SettingsPatch } from '../../api/types'
 import { useSave } from '../../lib/save'
@@ -463,6 +464,8 @@ function patchProject(field: 'prompt' | 'verify') {
         </SettingRow>
       </template>
     </SettingsPanel>
+
+    <AutomationPanel />
 
     <Dialog
       :visible="!!editing"
