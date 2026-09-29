@@ -14,7 +14,7 @@ const DefaultAutoHide = 8 * time.Second
 type Prefs struct {
 	Enabled           bool
 	Kinds             map[store.EventKind]bool // nil = every kind
-	MutedRepos        map[string]bool          // "owner/repo" → no popups
+	MutedProjects     map[string]bool          // project key platform:external_id → no popups (names repeat across platforms)
 	QuietFrom         int                      // quiet hours, minutes since local midnight;
 	QuietTo           int                      // QuietFrom == QuietTo = off; may wrap past midnight
 	AutoHide          time.Duration
@@ -34,12 +34,20 @@ func (p Prefs) Filter(events []store.Event, now time.Time) []store.Event {
 		if p.Kinds != nil && !p.Kinds[e.Kind] {
 			continue
 		}
-		if p.MutedRepos[e.Repo] {
+		if p.MutedProjects[projectKey(e)] {
 			continue
 		}
 		out = append(out, e)
 	}
 	return out
+}
+
+// projectKey is the event's settings key; an event without one is GitHub's.
+func projectKey(e store.Event) string {
+	if e.Project != "" {
+		return e.Project
+	}
+	return "github:" + e.Repo
 }
 
 // Pick returns the cards to pop up for events at now. busy reports whether

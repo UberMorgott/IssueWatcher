@@ -174,3 +174,18 @@ func TestResetAndSubscribe(t *testing.T) {
 		t.Fatalf("subscribers: %v", seen)
 	}
 }
+
+// L8: mutes are keyed by project key; bare legacy names become github:<name>.
+func TestMutedProjectsQualified(t *testing.T) {
+	s := Defaults()
+	s.Notifications.MutedProjects = []string{"o/a", "github:o/a", "nexus:windrose/147", " ", "o/b"}
+	s.normalize()
+	got := s.Notifications.MutedProjects
+	if len(got) != 3 || got[0] != "github:o/a" || got[1] != "nexus:windrose/147" || got[2] != "github:o/b" {
+		t.Fatalf("muted %q", got)
+	}
+	s.Notifications.MutedProjects = nil
+	if s.normalize(); s.Notifications.MutedProjects == nil {
+		t.Fatal("nil muted list")
+	}
+}

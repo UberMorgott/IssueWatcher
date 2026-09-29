@@ -19,12 +19,12 @@ func notifyPrefs(n config.Notifications) notify.Prefs {
 			store.EventNewIssue: n.NewIssue, store.EventNewComment: n.NewComment, store.EventClosed: n.Closed,
 			store.EventNewItem: n.NewIssue, // new mod-page threads / bug reports follow the «new issue» switch
 		},
-		MutedRepos:        map[string]bool{},
+		MutedProjects:     map[string]bool{},
 		AutoHide:          time.Duration(n.AutoHideSeconds) * time.Second,
 		RespectWindowsDnd: n.RespectDnd,
 	}
 	for _, r := range n.MutedProjects {
-		p.MutedRepos[r] = true
+		p.MutedProjects[r] = true
 	}
 	if n.Quiet.Enabled {
 		p.QuietFrom, p.QuietTo = minutes(n.Quiet.From), minutes(n.Quiet.To)

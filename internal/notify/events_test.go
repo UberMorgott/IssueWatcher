@@ -96,7 +96,7 @@ func TestPrefsFilter(t *testing.T) {
 		t.Fatalf("defaults kept %d", len(got))
 	}
 	p.Kinds = map[store.EventKind]bool{store.EventNewComment: true, store.EventClosed: true}
-	p.MutedRepos = map[string]bool{"o/a": true}
+	p.MutedProjects = map[string]bool{"github:o/a": true}
 	if got := p.Filter(evs, noon); len(got) != 1 || got[0].Repo != "o/b" {
 		t.Fatalf("kinds+mute %+v", got)
 	}

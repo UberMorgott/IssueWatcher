@@ -13,6 +13,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useAppStore } from '../../stores/app'
 import { useSave } from '../../lib/save'
 import { api } from '../../api/client'
+import { platformName } from '../../lib/platforms'
 
 const { t } = useI18n()
 const settings = useSettingsStore()
@@ -28,11 +29,17 @@ const kinds = computed(() => [
   { key: 'closed', title: t('settings.notif.closed'), icon: 'pi pi-check-circle' },
 ] as const)
 
-// Muted names that are no longer synced stay selectable so they can be unmuted.
+// Mutes are keyed by project key (platform:id): the same mod name on Nexus,
+// CurseForge and Steam is three projects. Muted keys that are no longer synced
+// stay selectable so they can be unmuted.
 const projectOptions = computed(() => {
-  const names = new Set(app.repos.map((r) => r.name))
-  for (const m of n.value?.mutedProjects ?? []) names.add(m)
-  return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ label: name, value: name }))
+  const labels = new Map<string, string>()
+  for (const r of app.repos) {
+    const p = r.platform || 'github'
+    labels.set(r.key || `github:${r.name}`, p === 'github' ? r.name : `${r.name} · ${platformName(p)}`)
+  }
+  for (const m of n.value?.mutedProjects ?? []) if (!labels.has(m)) labels.set(m, m)
+  return [...labels].map(([value, label]) => ({ label, value })).sort((a, b) => a.label.localeCompare(b.label))
 })
 
 const testing = ref(false)

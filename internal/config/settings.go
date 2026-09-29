@@ -64,7 +64,7 @@ type Notifications struct {
 	NewIssue      bool       `json:"newIssue"`
 	NewComment    bool       `json:"newComment"`
 	Closed        bool       `json:"closed"`
-	MutedProjects []string   `json:"mutedProjects"` // project names (owner/repo): no popups, still unread
+	MutedProjects []string   `json:"mutedProjects"` // project keys platform:external_id (a bare name = github:<owner/repo>): no popups, still unread
 	Quiet         QuietHours `json:"quiet"`
 	// Group collapses several events of one item from one sync into one popup.
 	Group bool `json:"group"`
@@ -165,12 +165,29 @@ func (p ProviderSync) Reconcile() time.Duration {
 	return time.Duration(p.ReconcileMinutes) * time.Minute
 }
 
+// qualifyMuted keys muted projects by platform:external_id: a bare name was a
+// GitHub owner/repo (mod names repeat across platforms, so names cannot key
+// mutes). Duplicates are dropped; never nil.
+func qualifyMuted(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, k := range in {
+		k = strings.TrimSpace(k)
+		if k != "" && !strings.Contains(k, ":") {
+			k = "github:" + k
+		}
+		if k != "" && !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func (s *Settings) normalize() {
 	s.Agents.normalize()
 	s.Providers.normalize()
-	if s.Notifications.MutedProjects == nil {
-		s.Notifications.MutedProjects = []string{}
-	}
+	s.Notifications.MutedProjects = qualifyMuted(s.Notifications.MutedProjects)
 	if s.Projects.Roots == nil {
 		s.Projects.Roots = []string{}
 	}
