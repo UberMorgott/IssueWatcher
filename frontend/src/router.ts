@@ -38,3 +38,16 @@ export function updateDocumentTitle() {
 }
 
 router.afterEach(() => updateDocumentTitle())
+
+/** Loads every lazy page chunk once the app is idle, so a first visit does not wait for a download. */
+export function prefetchViews() {
+  const run = () => {
+    for (const r of router.getRoutes()) {
+      const c = r.components?.default
+      if (typeof c === 'function') void (c as () => Promise<unknown>)()
+    }
+  }
+  const idle = window.requestIdleCallback as typeof window.requestIdleCallback | undefined
+  if (idle) idle(run, { timeout: 3000 })
+  else window.setTimeout(run, 1500)
+}

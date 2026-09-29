@@ -20,7 +20,7 @@ import { jobOutcome, jobRef } from './lib/jobs'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
-import { updateDocumentTitle } from './router'
+import { prefetchViews, updateDocumentTitle } from './router'
 
 const app = useAppStore()
 const settings = useSettingsStore()
@@ -211,6 +211,7 @@ onMounted(() => {
   void updates.load()
   void jobs.seed()
   startLive()
+  prefetchViews()
   if ('BroadcastChannel' in window) {
     channel = new BroadcastChannel('issuewatcher')
     channel.onmessage = (e: MessageEvent<{ type?: string; id?: string }>) => {
@@ -271,7 +272,13 @@ const shortcuts = computed(() => [
         </RouterLink>
       </div>
       <main class="shell-content">
-        <RouterView />
+        <!-- Enter-only fade: the new page mounts and paints at once (no out-in
+             wait), the old one leaves in the same frame. -->
+        <RouterView v-slot="{ Component }">
+          <Transition name="page">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
 
@@ -425,6 +432,29 @@ const shortcuts = computed(() => [
 
 .shell-content {
   flex: 1;
+}
+
+/* A keyframe animation starts on the first frame (a transition would hold the
+   enter-from opacity for two frames first), and from 0.4 the page reads at once. */
+.page-enter-active {
+  animation: page-in 100ms ease-out;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0.4;
+  }
+}
+
+/* The old page is gone the moment the new one mounts: never two pages stacked. */
+.page-leave-active {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active {
+    animation: none;
+  }
 }
 
 .offline-banner {
