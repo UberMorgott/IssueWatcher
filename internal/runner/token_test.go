@@ -21,7 +21,7 @@ func TestTokenHeaderScopedToPushURL(t *testing.T) {
 	}
 	env, secret := tokenEnv(push, "tok123")
 	header := func(url string) string {
-		cmd := exec.Command("git", "config", "--get-urlmatch", "http.extraHeader", url) //nolint:noctx // test
+		cmd := exec.Command("git", "config", "--get-urlmatch", "http.extraHeader", url) //nolint:noctx,gosec // test: git with test-built args
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), env...)
 		out, _ := cmd.Output() // exit 1 = no match
