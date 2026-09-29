@@ -27,6 +27,7 @@ type FolderRow struct {
 	Name      string         `json:"name"`
 	URL       string         `json:"url"`
 	Platform  string         `json:"platform"`
+	Key       string         `json:"key"` // settings key platform:external_id
 	LocalPath string         `json:"localPath"`
 	Status    folders.Status `json:"status"`
 }
@@ -46,7 +47,7 @@ func (s *Server) handleFolders(w http.ResponseWriter, r *http.Request) {
 	out := make([]FolderRow, 0, len(repos))
 	for _, p := range repos {
 		out = append(out, FolderRow{
-			ProjectID: p.ID, Name: p.Name, URL: p.URL, Platform: p.Platform, LocalPath: p.LocalPath,
+			ProjectID: p.ID, Name: p.Name, URL: p.URL, Platform: p.Platform, Key: p.Key, LocalPath: p.LocalPath,
 			Status: folders.Check(p.LocalPath, p.URL),
 		})
 	}
@@ -100,7 +101,7 @@ func (s *Server) handleSetPath(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Publish(EventDataChanged, DataChange{Reason: "folder"})
 	writeJSON(w, http.StatusOK, FolderRow{
-		ProjectID: rp.ID, Name: rp.Name, URL: rp.URL, Platform: rp.Platform, LocalPath: p,
+		ProjectID: rp.ID, Name: rp.Name, URL: rp.URL, Platform: rp.Platform, Key: rp.Key, LocalPath: p,
 		Status: folders.Check(p, rp.URL),
 	})
 }

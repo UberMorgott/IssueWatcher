@@ -17,6 +17,7 @@ type Repo struct {
 	Name      string `json:"name"`
 	URL       string `json:"url"`
 	Platform  string `json:"platform"`
+	Key       string `json:"key"` // settings key platform:external_id (agents.projects, rules)
 	Open      int    `json:"open"`
 	Closed    int    `json:"closed"`
 	Unread    int    `json:"unread"`
@@ -27,7 +28,7 @@ type Repo struct {
 
 // Repos lists active projects with counts, by name.
 func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.url, s.platform, p.local_path, p.synced_at,
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
 		count(i.id) FILTER (WHERE i.unread = 1)
@@ -41,7 +42,7 @@ func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
 	out := []Repo{}
 	for rows.Next() {
 		var r Repo
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.LocalPath, &r.LastSync, &r.Open, &r.Closed, &r.Unread); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.Open, &r.Closed, &r.Unread); err != nil {
 			return nil, fmt.Errorf("store: scan repo: %w", err)
 		}
 		r.SyncedAt = r.LastSync
@@ -90,7 +91,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	if q.Desc {
 		cmp, dir = "<", "DESC"
 	}
-	inner := `SELECT p.id, p.name, p.url, s.platform, p.local_path, p.synced_at,
+	inner := `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id AS key, p.local_path, p.synced_at,
 		count(i.id) FILTER (WHERE i.status = 'open') AS open,
 		count(i.id) FILTER (WHERE i.status = 'closed') AS closed,
 		count(i.id) FILTER (WHERE i.unread = 1) AS unread
@@ -114,7 +115,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		where = " WHERE (" + key + " " + cmp + " ?2 OR (" + key + " = ?2 AND r.id " + cmp + " ?3))"
 		args = append(args, k.Value, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT r.id, r.name, r.url, r.platform, r.local_path, r.synced_at, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
+	rows, err := s.db.QueryContext(ctx, "SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
 		" FROM ("+inner+") r"+where+" ORDER BY "+key+" "+dir+", r.id "+dir+" LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: repos: %w", err)
@@ -123,7 +124,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	var sortVal any
 	for rows.Next() {
 		var r Repo
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.LocalPath, &r.LastSync, &r.Open, &r.Closed, &r.Unread, &sortVal); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.Open, &r.Closed, &r.Unread, &sortVal); err != nil {
 			return chunk, fmt.Errorf("store: scan repo: %w", err)
 		}
 		if len(chunk.Items) == limit {

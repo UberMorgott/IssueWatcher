@@ -171,7 +171,7 @@ func TestJobsAPI(t *testing.T) {
 func TestAutomationLogAPI(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Agents.Automation.Enabled = true
-	cfg.Agents.Automation.Rules = []config.Rule{{ID: "r1", Enabled: true, Project: "octo/app", Event: config.EventNewIssue, Flow: config.FlowReply, LabelsAny: []string{}}}
+	cfg.Agents.Automation.Rules = []config.Rule{{ID: "r1", Enabled: true, Project: "github:octo/app", Event: config.EventNewIssue, Flow: config.FlowReply, LabelsAny: []string{}}}
 	var r *runner.Runner
 	e := syncedEnv(t, func(o *Options) {
 		r = runner.New(runner.Options{Store: o.Store, DataDir: filepath.Join(t.TempDir(), "data"), Settings: func() config.Settings { return cfg }})
@@ -181,7 +181,7 @@ func TestAutomationLogAPI(t *testing.T) {
 	if code := e.call(t, http.MethodGet, "/api/items?state=open", "", &items); code != http.StatusOK || len(items.Items) != 1 {
 		t.Fatalf("items %d %+v", code, items)
 	}
-	r.Automate(t.Context(), []store.Event{{Kind: store.EventNewIssue, ItemID: items.Items[0].ID, Repo: "octo/app"}})
+	r.Automate(t.Context(), []store.Event{{Kind: store.EventNewIssue, ItemID: items.Items[0].ID, Project: "github:octo/app", Repo: "octo/app"}})
 	var log store.AutomationChunk
 	if code := e.call(t, http.MethodGet, "/api/automation/log?limit=10", "", &log); code != http.StatusOK || len(log.Items) != 1 ||
 		log.Items[0].Decision != store.DecisionQueued || log.Items[0].RuleID != "r1" || log.Items[0].JobID == nil || log.Items[0].Repo != "octo/app" {

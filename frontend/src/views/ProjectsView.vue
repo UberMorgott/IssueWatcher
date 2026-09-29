@@ -27,9 +27,9 @@ const app = useAppStore()
 const settings = useSettingsStore()
 const triage = useTriage()
 /** Fix jobs a triage of project queues (per-project override over the global value). */
-function triageTopN(name: string): number {
+function triageTopN(key: string): number {
   const ag = settings.doc?.settings.agents
-  return ag?.projects[name]?.triageTopN ?? ag?.triageTopN ?? 3
+  return ag?.projects[key]?.triageTopN ?? ag?.triageTopN ?? 3
 }
 const { t } = useI18n()
 const filter = ref('')
@@ -238,7 +238,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
           </Column>
           <Column class="actions-col">
             <template #body="{ data }: { data: Repo }">
-              <span v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.name) }) : t('folder.needed')">
+              <span v-tooltip.top="data.localPath ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')">
                 <Button
                   :label="t('jobs.triage.run')"
                   icon="pi pi-sort-amount-down"

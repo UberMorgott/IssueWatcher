@@ -170,7 +170,7 @@ type agentSpec struct {
 	readOnly bool
 	item     int64  // the job's item (scoped MCP server)
 	project  int64  // a project job's project (triage: project-scoped MCP server)
-	repo     string // the job's project, owner/repo (agents.jobMcp override)
+	repo     string // the job's project, key platform:external_id (agents.jobMcp override)
 	mcp      *jobMCP
 }
 

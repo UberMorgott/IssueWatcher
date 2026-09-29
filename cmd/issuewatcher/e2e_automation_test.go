@@ -83,8 +83,8 @@ func TestAutomationE2E(t *testing.T) {
 		"profiles": []any{profile("claude", "claude"), profile("codex", "codex")},
 		"automation": map[string]any{"enabled": true, "maxPerDay": 2, "maxAttempts": 2, "allowAutoFix": false, "autoApplyLabels": true,
 			"rules": []any{
-				map[string]any{"id": "crash-fix", "enabled": true, "project": e2eRepo, "event": "new_issue", "labelsAny": []string{"crash"}, "flow": "fix", "profileId": "", "maxPerDay": 0},
-				map[string]any{"id": "triage", "enabled": true, "project": e2eRepo, "event": "new_issue", "labelsAny": []string{}, "flow": "label", "profileId": "", "maxPerDay": 0},
+				map[string]any{"id": "crash-fix", "enabled": true, "project": "github:" + e2eRepo, "event": "new_issue", "labelsAny": []string{"crash"}, "flow": "fix", "profileId": "", "maxPerDay": 0},
+				map[string]any{"id": "triage", "enabled": true, "project": "github:" + e2eRepo, "event": "new_issue", "labelsAny": []string{}, "flow": "label", "profileId": "", "maxPerDay": 0},
 			}},
 	}})
 
@@ -124,7 +124,7 @@ func TestAutomationE2E(t *testing.T) {
 	// Global cap raised, project cap 2 (already used): day_cap.
 	patchSettings(t, a, map[string]any{"agents": map[string]any{
 		"automation": map[string]any{"maxPerDay": 50},
-		"projects":   map[string]any{e2eRepo: map[string]any{"automation": map[string]any{"maxPerDay": 2}}},
+		"projects":   map[string]any{"github:" + e2eRepo: map[string]any{"automation": map[string]any{"maxPerDay": 2}}},
 	}})
 	addIssues(gh, fakeIssue(6, "Dark mode", nil))
 	syncNow(t, a)

@@ -29,6 +29,8 @@ export interface Repo {
   name: string
   url: string
   platform: string
+  /** Settings key platform:external_id (agents.projects keys, rule projects). */
+  key: string
   open: number
   closed: number
   unread: number
@@ -256,7 +258,7 @@ export type RuleFlow = 'fix' | 'reply' | 'label'
 export interface AutomationRule {
   id: string
   enabled: boolean
-  /** owner/repo */
+  /** Project key platform:external_id (e.g. github:owner/repo). */
   project: string
   event: RuleEvent
   /** Empty = any item. */
@@ -319,7 +321,7 @@ export interface Agents {
   roles: { coder: string; responder: string; verifier: string }
   /** fixDirect: the direct fix flow; "" = built-in default (like fix). */
   prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string; label: string; triage: string }
-  /** Keyed by project name (owner/repo). */
+  /** Keyed by project key platform:external_id (e.g. github:owner/repo). */
   projects: Record<string, ProjectAgent>
   automation: Automation
   /** Each job's agent run gets IssueWatcher's MCP server for its issue (per run only). */
@@ -644,6 +646,8 @@ export interface FolderRow {
   name: string
   url: string
   platform: string
+  /** Settings key platform:external_id. */
+  key: string
   localPath: string
   status: 'none' | 'ok' | 'missing' | 'notGit' | 'mismatch'
 }

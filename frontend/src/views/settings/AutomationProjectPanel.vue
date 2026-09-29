@@ -6,11 +6,12 @@ import { useI18n } from 'vue-i18n'
 import SettingRow from '../../components/SettingRow.vue'
 import SettingsPanel from '../../components/SettingsPanel.vue'
 import type { ProjectAutomation, SettingsPatch } from '../../api/types'
+import { projectKeyOptions } from '../../lib/projectKey'
 import { useSave } from '../../lib/save'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
 
-// Per-project automation overrides (settings.agents.projects[name].automation):
+// Per-project automation overrides (settings.agents.projects[key].automation, key = platform:id):
 // an unset field inherits the global default of Settings › Агенты › Автоматизация.
 const { t } = useI18n()
 const settings = useSettingsStore()
@@ -20,11 +21,10 @@ const ag = computed(() => settings.doc?.settings.agents)
 
 const projectName = ref('')
 const projectOptions = computed(() => {
-  const names = new Set(app.repos.map((r) => r.name))
-  for (const [n, p] of Object.entries(ag.value?.projects ?? {})) if (p.automation && Object.keys(p.automation).length) names.add(n)
-  return [...names]
-    .sort((a, b) => a.localeCompare(b))
-    .map((n) => ({ label: n + (overridden(n) ? ' •' : ''), value: n }))
+  const keys = Object.entries(ag.value?.projects ?? {})
+    .filter(([, p]) => p.automation && Object.keys(p.automation).length)
+    .map(([k]) => k)
+  return projectKeyOptions(app.repos, keys).map((o) => ({ ...o, label: o.label + (overridden(o.value) ? ' •' : '') }))
 })
 function overridden(name: string): boolean {
   const o = ag.value?.projects[name]?.automation

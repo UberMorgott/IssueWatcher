@@ -206,9 +206,9 @@ func mode(t *testing.T, m string) { t.Setenv("FAKECLI_MODE", m) }
 
 // worktreeMode runs octo/demo's fix jobs in the Phase 2 worktree + PR mode.
 func worktreeMode(s *config.Settings) {
-	pa := s.Agents.Projects["octo/demo"]
+	pa := s.Agents.Projects["github:octo/demo"]
 	pa.Mode = config.ModeWorktreePR
-	s.Agents.Projects["octo/demo"] = pa
+	s.Agents.Projects["github:octo/demo"] = pa
 }
 
 func (e *env) enqueue(flow string, items ...int64) []store.Job {
@@ -263,7 +263,7 @@ func exists(p string) bool {
 func TestFixFlowToDraftPR(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, func(s *config.Settings) {
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeWorktreePR, Verify: "echo verified", Prompt: "Use {branch}."}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeWorktreePR, Verify: "echo verified", Prompt: "Use {branch}."}
 		s.Agents.Roles.Verifier = "codex"
 	})
 	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)

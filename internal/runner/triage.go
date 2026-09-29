@@ -113,7 +113,7 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 	if _, err := r.resolveExe(prof); err != nil {
 		return "", coded(CodeNoCLI, err)
 	}
-	topN := cfg.TriageTopNFor(t.ProjectName)
+	topN := cfg.TriageTopNFor(t.ProjectKey)
 	tr := &TriageResult{Open: len(t.Issues), More: t.More, TopN: topN, Picks: []TriagePick{}}
 	res.Triage = tr
 	log.addf(StepInfo, "%s: %d open issues%s, top %d get a fix job", t.ProjectName, len(t.Issues), map[bool]string{true: " (most recent)"}[t.More], topN)
@@ -121,14 +121,14 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 		log.add(StepInfo, "no open issues: nothing to rank")
 		return store.JobDone, nil
 	}
-	in := store.JobInput{ProjectName: t.ProjectName, ProjectURL: t.ProjectURL, LocalPath: t.LocalPath}
+	in := store.JobInput{ProjectName: t.ProjectName, ProjectKey: t.ProjectKey, ProjectURL: t.ProjectURL, LocalPath: t.LocalPath}
 	files, dir, err := r.readOnlyDir(*j, in, log)
 	if err != nil {
 		return "", err
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowTriage, promptInput{in: in, triage: &t, topN: topN})
-	agent, err := r.runAgent(ctx, agentSpec{project: j.ProjectID, repo: j.Repo, profile: prof, flow: flowTriage, dir: dir, workDir: files,
+	agent, err := r.runAgent(ctx, agentSpec{project: j.ProjectID, repo: j.ProjectKey, profile: prof, flow: flowTriage, dir: dir, workDir: files,
 		system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {

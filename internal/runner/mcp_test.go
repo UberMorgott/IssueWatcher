@@ -86,7 +86,7 @@ func TestJobMCPCodexAndSettings(t *testing.T) {
 
 	// Project override off: no server, no note.
 	e.mu.Lock()
-	e.cfg.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, JobMCP: new(false)}
+	e.cfg.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, JobMCP: new(false)}
 	e.mu.Unlock()
 	e.wait(e.enqueue("reply", e.items[1])[0].ID, store.JobNeedsReview)
 	rec = readRecord(t, e.record)
@@ -98,7 +98,7 @@ func TestJobMCPCodexAndSettings(t *testing.T) {
 func TestJobMCPFor(t *testing.T) {
 	cfg := config.Defaults()
 	r := New(Options{DataDir: "D", Exe: "iw.exe", Settings: func() config.Settings { return cfg }})
-	s := agentSpec{item: 3, repo: "o/r"}
+	s := agentSpec{item: 3, repo: "github:o/r"}
 	if m := r.jobMCPFor(s); m == nil || m.item != 3 || m.exe != "iw.exe" || m.dataDir != "D" {
 		t.Fatalf("default on: %+v", m)
 	}
@@ -106,7 +106,7 @@ func TestJobMCPFor(t *testing.T) {
 	if r.jobMCPFor(s) != nil {
 		t.Fatal("global off")
 	}
-	cfg.Agents.Projects["o/r"] = config.ProjectAgent{JobMCP: new(true)}
+	cfg.Agents.Projects["github:o/r"] = config.ProjectAgent{JobMCP: new(true)}
 	if r.jobMCPFor(s) == nil {
 		t.Fatal("project on beats global off")
 	}

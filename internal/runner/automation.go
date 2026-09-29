@@ -37,7 +37,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 	seen := map[itemFlow]bool{} // one decision per item + flow and batch
 	queued := false
 	for _, ev := range events {
-		pol := cfg.AutomationFor(ev.Repo)
+		pol := cfg.AutomationFor(ev.Project)
 		if !pol.Enabled || (ev.Kind != store.EventNewIssue && ev.Kind != store.EventNewComment && ev.Kind != store.EventNewItem) {
 			continue
 		}
@@ -100,7 +100,7 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 // ruleFor reports whether enabled rule ru covers the event's project, event
 // kind and item kind (rules without kinds cover issues only).
 func ruleFor(ru config.Rule, ev store.Event) bool {
-	return ru.Enabled && strings.EqualFold(ru.Project, ev.Repo) && ru.Event == string(ev.Kind) && ru.MatchesKind(ev.ItemKind)
+	return ru.Enabled && strings.EqualFold(ru.Project, ev.Project) && ru.Event == string(ev.Kind) && ru.MatchesKind(ev.ItemKind)
 }
 
 // matchRule returns the first enabled rule for the event's project and kind

@@ -25,7 +25,8 @@ const File = "config.json"
 //	4:   + agents.projects.*.mode (direct | worktree-pr); existing entries → direct
 //	5:   + agents.prompts.label, agents.automation (off, caps, rules), agents.projects.*.automation
 //	     overrides; only defaults are added
-const SchemaVersion = 5
+//	6:   project keys source-qualified: agents.projects keys and rule projects owner/repo → github:owner/repo
+const SchemaVersion = 6
 
 // ErrConflict means the caller edited an older revision.
 var ErrConflict = errors.New("config: settings changed elsewhere")

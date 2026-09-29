@@ -62,7 +62,7 @@ func (e *env) waitResult(id int64, ok func(store.Job, Result) bool) store.Job {
 func TestDirectFixCommitPushClose(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, func(s *config.Settings) {
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Prompt: "Project note {localPath}."}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Prompt: "Project note {localPath}."}
 	})
 	// The owner's work in progress: an edited and an untracked file.
 	writeFile(t, filepath.Join(e.local, "README.md"), "demo\nwip\n")

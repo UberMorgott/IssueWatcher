@@ -23,7 +23,7 @@ func autoSetup(t *testing.T, n int, edit func(*config.Settings)) *env {
 }
 
 func ev(kind store.EventKind, repo string, item int64) store.Event {
-	return store.Event{Kind: kind, Repo: repo, ItemID: item}
+	return store.Event{Kind: kind, Project: "github:" + repo, Repo: repo, ItemID: item}
 }
 
 func (e *env) set(f func(*config.Settings)) {
@@ -61,7 +61,7 @@ func rule(id, project, event, flow string, labels ...string) config.Rule {
 	if labels == nil {
 		labels = []string{}
 	}
-	return config.Rule{ID: id, Enabled: true, Project: project, Event: event, Flow: flow, LabelsAny: labels}
+	return config.Rule{ID: id, Enabled: true, Project: "github:" + project, Event: event, Flow: flow, LabelsAny: labels}
 }
 
 func TestAutomateMatching(t *testing.T) {
@@ -93,7 +93,7 @@ func TestAutomateMatching(t *testing.T) {
 	// A project override turns it on for octo/demo only.
 	on := true
 	e.set(func(s *config.Settings) {
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{Enabled: &on}}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{Enabled: &on}}
 	})
 	got := e.r.Automate(ctx, batch)
 	wantDecisions(t, got, decision{"bugs", "queued", ""}, decision{"all", "queued", ""})
@@ -169,7 +169,7 @@ func TestAutomateCaps(t *testing.T) {
 	e.set(func(s *config.Settings) {
 		s.Agents.Automation.MaxPerDay = 5
 		s.Agents.Automation.Rules[0].MaxPerDay = 0
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{MaxPerDay: &one}}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{MaxPerDay: &one}}
 	})
 	if a, b, c := auto(4), auto(5), other(1); a != queued || b != dayCap || c != (decision{"other", "queued", ""}) {
 		t.Fatalf("project cap: %+v %+v %+v", a, b, c)
@@ -239,7 +239,7 @@ func TestAutomateFixGateAndProfile(t *testing.T) {
 	// Project override on for octo/demo (mapped folder) → queued with the coder profile.
 	on := true
 	e.set(func(s *config.Settings) {
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{AllowAutoFix: &on}}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{AllowAutoFix: &on}}
 	})
 	got := e.r.Automate(ctx, demo)
 	wantDecisions(t, got, decision{"fix-demo", "queued", ""})

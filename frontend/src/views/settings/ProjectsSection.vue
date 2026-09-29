@@ -71,14 +71,14 @@ async function setPath(id: number, path: string) {
 }
 const mapped = computed(() => rows.value.filter((r) => r.localPath).length)
 
-// --- run mode of fix jobs per project (settings.agents.projects[name].mode; "" = direct)
+// --- run mode of fix jobs per project (settings.agents.projects[key].mode, key = platform:id; "" = direct)
 const modeOptions = computed(() => [
   { label: t('settings.folders.modeDirect'), value: 'direct' },
   { label: t('settings.folders.modeWorktree'), value: 'worktree-pr' },
 ])
-const modeOf = (name: string): RunMode => settings.doc?.settings.agents.projects[name]?.mode || 'direct'
-function setMode(name: string, mode: RunMode) {
-  if (mode !== modeOf(name)) void save({ agents: { projects: { [name]: { mode } } } })
+const modeOf = (key: string): RunMode => settings.doc?.settings.agents.projects[key]?.mode || 'direct'
+function setMode(key: string, mode: RunMode) {
+  if (mode !== modeOf(key)) void save({ agents: { projects: { [key]: { mode } } } })
 }
 
 const STATUS: Record<FolderRow['status'], 'success' | 'warn' | 'danger' | 'secondary'> = {
@@ -314,14 +314,14 @@ async function acceptAll() {
           />
         </form>
         <Select
-          :model-value="modeOf(r.name)"
+          :model-value="modeOf(r.key)"
           :options="modeOptions"
           option-label="label"
           option-value="value"
           size="small"
           :aria-label="t('settings.folders.modeFor', { name: r.name })"
           class="mode"
-          @update:model-value="(v: RunMode) => setMode(r.name, v)"
+          @update:model-value="(v: RunMode) => setMode(r.key, v)"
         />
       </div>
     </SettingsPanel>

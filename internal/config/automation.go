@@ -36,7 +36,7 @@ const (
 type Rule struct {
 	ID        string   `json:"id"` // [a-z0-9-], unique
 	Enabled   bool     `json:"enabled"`
-	Project   string   `json:"project"`   // owner/repo
+	Project   string   `json:"project"`   // platform:external_id (ProjectKey)
 	Event     string   `json:"event"`     // new_issue | new_comment | new_item
 	LabelsAny []string `json:"labelsAny"` // empty = any item
 	// Kinds are the item kinds the rule fires on (issue | comment | bug);
@@ -75,7 +75,7 @@ func defaultAutomation() Automation {
 	return Automation{MaxPerDay: 10, MaxAttempts: 2, Rules: []Rule{}}
 }
 
-// AutomationFor resolves project's (owner/repo) overrides over the global defaults.
+// AutomationFor resolves project's (platform:external_id) overrides over the global defaults.
 func (a Agents) AutomationFor(project string) AutomationPolicy {
 	g := a.Automation
 	p := AutomationPolicy{Enabled: g.Enabled, TotalPerDay: g.MaxPerDay, MaxAttempts: g.MaxAttempts,
@@ -123,7 +123,12 @@ func (r Rule) MatchesKind(kind string) bool {
 	return slices.Contains(r.Kinds, kind)
 }
 
-var projectName =regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+// projectKey is a source-qualified project key: platform:external_id.
+var projectKey = regexp.MustCompile(`^[a-z][a-z0-9]{0,31}:\S{1,200}$`)
+
+// ProjectKey is the settings key of a project: platform:external_id
+// (github:owner/repo, curseforge:<modId>, nexus:<game>/<modId>, steam:<id>).
+func ProjectKey(platform, externalID string) string { return platform + ":" + externalID }
 
 const (
 	maxRules      = 100
@@ -151,8 +156,8 @@ func (au Automation) validate(profiles map[string]bool) error {
 			return invalid(f("id"), "id", nil, "must be 1–32 of a-z, 0-9, -")
 		case seen[r.ID]:
 			return invalid(f("id"), "duplicate", nil, "duplicate id %q", r.ID)
-		case !projectName.MatchString(r.Project):
-			return invalid(f("project"), "project", nil, "must be owner/repo")
+		case !projectKey.MatchString(r.Project):
+			return invalid(f("project"), "project", nil, "must be platform:id (e.g. github:owner/repo)")
 		case !slices.Contains([]string{EventNewIssue, EventNewComment, EventNewItem}, r.Event):
 			return notOneOf(f("event"), EventNewIssue, EventNewComment, EventNewItem)
 		case slices.ContainsFunc(r.Kinds, func(k string) bool { return !slices.Contains(itemKinds, k) }):

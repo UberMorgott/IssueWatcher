@@ -171,7 +171,7 @@ func render(tmpl string, p promptInput) string {
 // prompts builds the system text (global + project layer) and the task text of flow.
 func prompts(cfg config.Agents, flow string, p promptInput) (system, task string) {
 	system = render(cfg.Prompts.System, p)
-	if pa, ok := cfg.Projects[p.in.ProjectName]; ok && strings.TrimSpace(pa.Prompt) != "" {
+	if pa, ok := cfg.Projects[p.in.ProjectKey]; ok && strings.TrimSpace(pa.Prompt) != "" {
 		system += "\n\nProject notes from the maintainer:\n" + render(pa.Prompt, p)
 	}
 	switch flow {
@@ -189,7 +189,7 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 		if !strings.Contains(cfg.Prompts.Triage, "{issues}") {
 			task += "\n\nOpen issues:\n" + render("{issues}", p)
 		}
-		if pa, ok := cfg.Projects[p.in.ProjectName]; ok && strings.TrimSpace(pa.TriagePrompt) != "" {
+		if pa, ok := cfg.Projects[p.in.ProjectKey]; ok && strings.TrimSpace(pa.TriagePrompt) != "" {
 			task += "\n\nTriage criteria of this project from the maintainer:\n" + render(pa.TriagePrompt, p)
 		}
 	case flowReview:

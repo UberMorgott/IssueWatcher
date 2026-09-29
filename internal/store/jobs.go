@@ -59,7 +59,9 @@ type Job struct {
 	UpdatedAt  string          `json:"updatedAt"`
 	// From the item and project.
 	Repo    string `json:"repo"`
-	Number  int    `json:"number"`
+	// ProjectKey is the settings key platform:external_id (agents.projects, rules).
+	ProjectKey string `json:"projectKey"`
+	Number     int    `json:"number"`
 	Title   string `json:"title"`
 	ItemURL string `json:"itemUrl"`
 	// LocalPath is the project's mapped folder (direct fix jobs run there).
@@ -68,10 +70,10 @@ type Job struct {
 
 const jobColumns = `j.id, coalesce(j.item_id, 0), j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
-	p.name, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''), p.local_path`
+	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''), p.local_path`
 
 // A project job (triage) has no item (item_id NULL): its item fields read as zero.
-const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id`
+const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id JOIN sources s ON s.id = p.source_id`
 
 func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	var (
@@ -80,7 +82,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	)
 	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.Origin, &j.RuleID, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
 		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
-		&j.Repo, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath)
+		&j.Repo, &j.ProjectKey, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath)
 	if err != nil {
 		return j, err
 	}
@@ -185,6 +187,7 @@ type TriageIssue struct {
 // TriageInput is a project and its open issues (most recently updated first).
 type TriageInput struct {
 	ProjectName string
+	ProjectKey  string // platform:external_id (settings key)
 	ProjectURL  string
 	LocalPath   string
 	Issues      []TriageIssue
@@ -219,8 +222,9 @@ func (s *Store) OpenIssues(ctx context.Context, projectID int64, numbers []int) 
 // clipped to bodyRunes characters.
 func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRunes int) (TriageInput, error) {
 	var in TriageInput
-	err := s.db.QueryRowContext(ctx, `SELECT name, url, local_path FROM projects WHERE id = ?`, projectID).
-		Scan(&in.ProjectName, &in.ProjectURL, &in.LocalPath)
+	err := s.db.QueryRowContext(ctx, `SELECT p.name, `+projectKeySQL+`, p.url, p.local_path
+		FROM projects p JOIN sources s ON s.id = p.source_id WHERE p.id = ?`, projectID).
+		Scan(&in.ProjectName, &in.ProjectKey, &in.ProjectURL, &in.LocalPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}
@@ -557,6 +561,7 @@ type JobInput struct {
 	URL            string
 	Author         string
 	ProjectName    string // owner/repo
+	ProjectKey     string // platform:external_id (settings key)
 	ProjectURL     string
 	LocalPath      string
 	Labels         []string
@@ -588,9 +593,9 @@ func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 	var in JobInput
 	var labels string
 	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
-		p.name, p.url, p.local_path FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id
+		p.name, `+projectKeySQL+`, p.url, p.local_path FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id
 		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author, &labels,
-		&in.ProjectName, &in.ProjectURL, &in.LocalPath)
+		&in.ProjectName, &in.ProjectKey, &in.ProjectURL, &in.LocalPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}

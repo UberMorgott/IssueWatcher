@@ -88,7 +88,7 @@ func TestLabelAutoApply(t *testing.T) {
 	off := false
 	e := setup(t, 1, func(s *config.Settings) {
 		s.Agents.Automation.AutoApplyLabels = true
-		s.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{AutoApplyLabels: &off}}
+		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect, Automation: config.ProjectAutomation{AutoApplyLabels: &off}}
 	})
 	e.labelRepo()
 	rule := func() store.Job {
@@ -110,7 +110,7 @@ func TestLabelAutoApply(t *testing.T) {
 		}
 	}
 	e.mu.Lock()
-	e.cfg.Agents.Projects["octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect}
+	e.cfg.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Mode: config.ModeDirect}
 	e.mu.Unlock()
 	j := rule()
 	if res := result(t, j); j.State != store.JobDone || !slices.Equal(res.AppliedLabels, []string{"documentation"}) {

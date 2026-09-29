@@ -14,7 +14,8 @@ type Agents struct {
 	Profiles    []AgentProfile `json:"profiles"`
 	Roles       AgentRoles     `json:"roles"`
 	Prompts     AgentPrompts   `json:"prompts"`
-	// Projects holds per-project agent settings, keyed by project name (owner/repo).
+	// Projects holds per-project agent settings, keyed by the source-qualified
+	// project key platform:external_id (ProjectKey, e.g. github:owner/repo).
 	Projects map[string]ProjectAgent `json:"projects"`
 	// Automation holds the rules and their global defaults (per-project overrides in Projects).
 	Automation Automation `json:"automation"`
@@ -205,7 +206,7 @@ func defaultAgents() Agents {
 	}
 }
 
-// TriageTopNFor is how many triage picks of project (owner/repo) get a fix job.
+// TriageTopNFor is how many triage picks of project (platform:external_id) get a fix job.
 func (a Agents) TriageTopNFor(project string) int {
 	if o := a.Projects[project].TriageTopN; o != nil {
 		return *o
@@ -213,7 +214,7 @@ func (a Agents) TriageTopNFor(project string) int {
 	return a.TriageTopN
 }
 
-// JobMCPFor reports whether project's (owner/repo) agent runs get the scoped MCP server.
+// JobMCPFor reports whether project's (platform:external_id) agent runs get the scoped MCP server.
 func (a Agents) JobMCPFor(project string) bool {
 	if o := a.Projects[project].JobMCP; o != nil {
 		return *o
@@ -246,7 +247,7 @@ func (a Agents) Profile(id string) (AgentProfile, bool) {
 	return a.Profiles[i], true
 }
 
-// ModeFor is the fix run mode of project (owner/repo): direct unless set.
+// ModeFor is the fix run mode of project (platform:external_id): direct unless set.
 func (a Agents) ModeFor(project string) string {
 	if p, ok := a.Projects[project]; ok && p.Mode == ModeWorktreePR {
 		return ModeWorktreePR
@@ -342,6 +343,9 @@ func (a Agents) validate() error {
 		}
 	}
 	for name, p := range a.Projects {
+		if !projectKey.MatchString(name) {
+			return invalid("agents.projects."+name, "projectKey", nil, "must be platform:id (e.g. github:owner/repo)")
+		}
 		if p.Mode != ModeDirect && p.Mode != ModeWorktreePR {
 			return notOneOf("agents.projects."+name+".mode", ModeDirect, ModeWorktreePR)
 		}

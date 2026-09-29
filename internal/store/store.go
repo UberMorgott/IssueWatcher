@@ -64,6 +64,7 @@ type Event struct {
 	Kind     EventKind
 	ItemKind string // issue | comment | bug
 	ItemID   int64
+	Project  string // settings key platform:external_id (agents.projects, rules)
 	Repo   string
 	Number int
 	Title  string
@@ -164,9 +165,11 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var repo, cursor, syncedAt string
-	err = tx.QueryRowContext(ctx, `SELECT name, sync_cursor, synced_at FROM projects WHERE id = ?`, projectID).
-		Scan(&repo, &cursor, &syncedAt)
+	var pr projectRef
+	var cursor, syncedAt string
+	err = tx.QueryRowContext(ctx, `SELECT p.name, `+projectKeySQL+`, p.sync_cursor, p.synced_at
+		FROM projects p JOIN sources s ON s.id = p.source_id WHERE p.id = ?`, projectID).
+		Scan(&pr.name, &pr.key, &cursor, &syncedAt)
 	if err != nil {
 		return nil, fmt.Errorf("store: project %d: %w", projectID, err)
 	}
@@ -177,7 +180,7 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 		changes int64
 	)
 	for i := range items {
-		ev, changed, err := applyItem(ctx, tx, sourceID, projectID, repo, &items[i], self, baseline)
+		ev, changed, err := applyItem(ctx, tx, sourceID, projectID, pr, &items[i], self, baseline)
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +203,14 @@ func (s *Store) ApplyItems(ctx context.Context, sourceID, projectID int64, items
 	return events, nil
 }
 
-func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo string,
+// projectKeySQL is a project's settings key platform:external_id (config.ProjectKey)
+// over projects p JOIN sources s.
+const projectKeySQL = `s.platform || ':' || p.external_id`
+
+// projectRef is a project's display name and settings key.
+type projectRef struct{ name, key string }
+
+func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr projectRef,
 	it *provider.Item, self string, baseline bool,
 ) (events []Event, changed bool, err error) {
 	status := "closed"
@@ -248,7 +258,7 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, repo 
 		return nil, false, fmt.Errorf("store: save item %s: %w", it.ExternalID, err)
 	}
 
-	base := Event{ItemID: id, ItemKind: kind, Repo: repo, Number: it.Number, Title: it.Title}
+	base := Event{ItemID: id, ItemKind: kind, Project: pr.key, Repo: pr.name, Number: it.Number, Title: it.Title}
 	if !baseline && !existed && it.Author != self {
 		e := base
 		e.Kind, e.Actor = EventNewIssue, it.Author

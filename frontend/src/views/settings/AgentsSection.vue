@@ -16,6 +16,7 @@ import SettingsPanel from '../../components/SettingsPanel.vue'
 import AutomationPanel from './AutomationPanel.vue'
 import { api } from '../../api/client'
 import type { AgentCLI, AgentProfile, Agents, DetectedCLI, SettingsPatch } from '../../api/types'
+import { projectKeyOptions } from '../../lib/projectKey'
 import { useSave } from '../../lib/save'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
@@ -242,11 +243,10 @@ function resetPrompt() {
 
 // --- per project -------------------------------------------------------------
 const projectName = ref('')
-const projectOptions = computed(() => {
-  const names = new Set(app.repos.map((r) => r.name))
-  for (const n of Object.keys(ag.value?.projects ?? {})) names.add(n)
-  return [...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ label: n + (ag.value?.projects[n] ? ' •' : ''), value: n }))
-})
+// Projects are keyed platform:id (internal/config ProjectKey); labels show the project name.
+const projectOptions = computed(() =>
+  projectKeyOptions(app.repos, Object.keys(ag.value?.projects ?? {})).map((o) => ({ ...o, label: o.label + (ag.value?.projects[o.value] ? ' •' : '') })),
+)
 const proj = computed(() => (projectName.value ? ag.value?.projects[projectName.value] : undefined))
 const projPrompt = useDraft(() => proj.value?.prompt ?? '')
 const projVerify = useDraft(() => proj.value?.verify ?? '')

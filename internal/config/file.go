@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func readRaw(path string) (map[string]any, error) {
@@ -106,8 +107,43 @@ func migrate(raw map[string]any) bool {
 	}
 	// v4 → v5: automation and the label prompt only add defaults (decode fills
 	// them, the rewrite stores them); nothing moves.
+	// v5 → v6: project keys become source-qualified (platform:external_id);
+	// every older key was a GitHub owner/repo.
+	qualifyProjectKeys(raw)
 	raw["schemaVersion"] = SchemaVersion
 	return true
+}
+
+// qualifyProjectKeys rewrites agents.projects keys and automation rule
+// projects without a platform prefix to github:<key>. Qualified keys, other
+// keys and fields are kept; an existing qualified key wins over its legacy twin.
+func qualifyProjectKeys(raw map[string]any) {
+	ag, ok := raw["agents"].(map[string]any)
+	if !ok {
+		return
+	}
+	legacy := func(k string) bool { return k != "" && !strings.Contains(k, ":") }
+	if projects, ok := ag["projects"].(map[string]any); ok {
+		for k, v := range projects {
+			if !legacy(k) {
+				continue
+			}
+			if _, taken := projects["github:"+k]; !taken {
+				projects["github:"+k] = v
+			}
+			delete(projects, k)
+		}
+	}
+	if au, ok := ag["automation"].(map[string]any); ok {
+		rules, _ := au["rules"].([]any)
+		for _, r := range rules {
+			if rm, ok := r.(map[string]any); ok {
+				if p, _ := rm["project"].(string); legacy(p) {
+					rm["project"] = "github:" + p
+				}
+			}
+		}
+	}
 }
 
 // write stores s.cur (known keys, normalised) merged into s.raw (unknown keys

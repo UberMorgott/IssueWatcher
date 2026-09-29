@@ -461,7 +461,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	if err != nil {
 		return "", coded(CodeGit, err)
 	}
-	if cfg.ModeFor(in.ProjectName) == config.ModeDirect {
+	if cfg.ModeFor(in.ProjectKey) == config.ModeDirect {
 		return r.runDirect(ctx, j, res, log, prof, cfg, in, files)
 	}
 	res.Mode = config.ModeWorktreePR
@@ -491,7 +491,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 	r.phase(ctx, j, "agent")
 	pin := promptInput{in: in, branch: branch}
 	system, task := prompts(cfg, flowFix, pin)
-	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowFix, dir: wt, workDir: files, system: system, task: task}, log)
+	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowFix, dir: wt, workDir: files, system: system, task: task}, log)
 	res.Agent = &agent
 	if err != nil {
 		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {
@@ -513,7 +513,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 		return store.JobNeedsReview, nil // nothing changed: the agent's summary says why
 	}
 
-	pa := cfg.Projects[in.ProjectName]
+	pa := cfg.Projects[in.ProjectKey]
 	if cmd, label := r.verifyCommand(in.LocalPath, wt, pa); len(cmd) > 0 {
 		r.phase(ctx, j, "verify")
 		v := r.verify(ctx, wt, files, cmd, label, log)
@@ -528,7 +528,7 @@ func (r *Runner) runFix(ctx context.Context, j *store.Job, res *Result, log *job
 			r.phase(ctx, j, "review")
 			pin.diff = diff
 			system, task := prompts(cfg, flowReview, pin)
-			rev, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: vp, flow: flowReview, dir: wt, workDir: files, system: system, task: task, readOnly: true}, log)
+			rev, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: vp, flow: flowReview, dir: wt, workDir: files, system: system, task: task, readOnly: true}, log)
 			if err != nil {
 				if errors.Is(err, ErrCancelled) {
 					return "", err
@@ -581,7 +581,7 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowReply, promptInput{in: in})
-	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.Repo, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
+	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {
 		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {

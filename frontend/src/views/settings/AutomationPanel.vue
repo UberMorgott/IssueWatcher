@@ -16,6 +16,7 @@ import SettingsPanel from '../../components/SettingsPanel.vue'
 import { api } from '../../api/client'
 import type { Automation, AutomationEntry, AutomationRule } from '../../api/types'
 import { relTime } from '../../lib/format'
+import { projectKeyLabel, projectKeyOptions } from '../../lib/projectKey'
 import { useSave } from '../../lib/save'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
@@ -45,11 +46,7 @@ const savingRule = ref(false)
 const eventOptions = computed(() => (['new_issue', 'new_comment'] as const).map((v) => ({ label: t('settings.automation.event.' + v), value: v })))
 const flowOptions = computed(() => (['label', 'reply', 'fix'] as const).map((v) => ({ label: t('jobs.flow.' + v), value: v })))
 const profileOptions = computed(() => [{ label: t('settings.automation.roleProfile'), value: '' }, ...profiles.value.map((p) => ({ label: p.name, value: p.id }))])
-const projectOptions = computed(() => {
-  const names = new Set(app.repos.map((r) => r.name))
-  for (const r of au.value?.rules ?? []) names.add(r.project)
-  return [...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ label: n, value: n }))
-})
+const projectOptions = computed(() => projectKeyOptions(app.repos, (au.value?.rules ?? []).map((r) => r.project)))
 
 function nextId(): string {
   const ids = new Set((au.value?.rules ?? []).map((r) => r.id))
@@ -258,7 +255,7 @@ function reasonText(e: AutomationEntry): string {
         <div class="r-main">
           <div class="r-line">
             <b class="mono">{{ r.id }}</b>
-            <span>{{ r.project }}</span>
+            <span>{{ projectKeyLabel(r.project, app.repos) }}</span>
             <span class="muted">·</span>
             <span>{{ t('settings.automation.event.' + r.event) }}</span>
             <i class="pi pi-arrow-right muted small" />
