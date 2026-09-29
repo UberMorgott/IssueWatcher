@@ -16,6 +16,8 @@ type Agents struct {
 	Prompts     AgentPrompts   `json:"prompts"`
 	// Projects holds per-project agent settings, keyed by project name (owner/repo).
 	Projects map[string]ProjectAgent `json:"projects"`
+	// Automation holds the rules and their global defaults (per-project overrides in Projects).
+	Automation Automation `json:"automation"`
 }
 
 // CLI kinds.
@@ -55,6 +57,7 @@ type AgentPrompts struct {
 	FixDir string `json:"fixDirect"` // fix flow, direct mode
 	Reply  string `json:"reply"`
 	Review string `json:"review"`
+	Label  string `json:"label"` // label flow: pick labels from the repo's list
 }
 
 // Fix job run modes (ProjectAgent.Mode).
@@ -76,6 +79,8 @@ type ProjectAgent struct {
 	Verify string `json:"verify"`
 	// NoAegis turns off `aegis verify` for a folder that has Aegis enabled.
 	NoAegis bool `json:"noAegis"`
+	// Automation overrides the global automation defaults for this project.
+	Automation ProjectAutomation `json:"automation,omitzero"`
 }
 
 // Default prompt texts. Variables: {repo} {issue.number} {issue.title}
@@ -134,6 +139,20 @@ Change (unified diff):
 {diff}
 
 Do not change any file. Answer: does the change fix the issue, which bugs or risks you see, which tests are missing.`
+	// DefaultLabelPrompt: {labels} is the repository's existing label list.
+	DefaultLabelPrompt = `Suggest labels for issue #{issue.number} "{issue.title}" in {repo}.
+
+Issue:
+{issue.body}
+
+Discussion:
+{comments}
+
+Labels that exist in the repository (pick only from this list, exact names):
+{labels}
+
+The project's source is in the current directory (read-only); check it when the issue's area is unclear.
+Pick the few labels that clearly apply (type, area, priority if obvious); none is a valid answer. Do not invent labels. Return the chosen names and one short sentence why.`
 )
 
 func defaultAgents() Agents {
@@ -146,8 +165,10 @@ func defaultAgents() Agents {
 		Roles: AgentRoles{Coder: "claude", Responder: "codex"},
 		Prompts: AgentPrompts{
 			System: DefaultSystemPrompt, Fix: DefaultFixPrompt, FixDir: DefaultFixDirectPrompt, Reply: DefaultReplyPrompt, Review: DefaultReviewPrompt,
+			Label: DefaultLabelPrompt,
 		},
-		Projects: map[string]ProjectAgent{},
+		Projects:   map[string]ProjectAgent{},
+		Automation: defaultAutomation(),
 	}
 }
 
@@ -160,7 +181,7 @@ func blankDefaultPrompts(known map[string]any) {
 		return
 	}
 	d := defaultAgents().Prompts
-	for k, def := range map[string]string{"system": d.System, "fix": d.Fix, "fixDirect": d.FixDir, "reply": d.Reply, "review": d.Review} {
+	for k, def := range map[string]string{"system": d.System, "fix": d.Fix, "fixDirect": d.FixDir, "reply": d.Reply, "review": d.Review, "label": d.Label} {
 		if pr[k] == def {
 			pr[k] = ""
 		}
@@ -212,11 +233,13 @@ func (a *Agents) normalize() {
 	d := defaultAgents().Prompts
 	for _, f := range []struct{ v, def *string }{
 		{&a.Prompts.System, &d.System}, {&a.Prompts.Fix, &d.Fix}, {&a.Prompts.FixDir, &d.FixDir}, {&a.Prompts.Reply, &d.Reply}, {&a.Prompts.Review, &d.Review},
+		{&a.Prompts.Label, &d.Label},
 	} {
 		if *f.v == "" { // an emptied template falls back to the default
 			*f.v = *f.def
 		}
 	}
+	a.Automation.normalize()
 }
 
 var profileID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
@@ -258,7 +281,7 @@ func (a Agents) validate() error {
 			return invalid("agents.roles."+name, "profile", map[string]any{"id": id}, "no profile %q", id)
 		}
 	}
-	for name, v := range map[string]string{"system": a.Prompts.System, "fix": a.Prompts.Fix, "fixDirect": a.Prompts.FixDir, "reply": a.Prompts.Reply, "review": a.Prompts.Review} {
+	for name, v := range map[string]string{"system": a.Prompts.System, "fix": a.Prompts.Fix, "fixDirect": a.Prompts.FixDir, "reply": a.Prompts.Reply, "review": a.Prompts.Review, "label": a.Prompts.Label} {
 		if len(v) > maxPromptBytes {
 			return invalid("agents.prompts."+name, "tooLong", map[string]any{"max": maxPromptBytes}, "at most %d bytes", maxPromptBytes)
 		}
@@ -270,6 +293,9 @@ func (a Agents) validate() error {
 		if len(p.Prompt) > maxPromptBytes || len(p.Verify) > 4096 {
 			return invalid("agents.projects."+name, "tooLong", map[string]any{"max": maxPromptBytes}, "too long")
 		}
+		if err := p.Automation.validate(name); err != nil {
+			return err
+		}
 	}
-	return nil
+	return a.Automation.validate(seen)
 }

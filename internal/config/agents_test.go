@@ -65,13 +65,116 @@ func TestAgentsModeMigration(t *testing.T) {
 	ag, _ := raw["agents"].(map[string]any)
 	projects, _ := ag["projects"].(map[string]any)
 	app, _ := projects["octo/app"].(map[string]any)
-	if raw["schemaVersion"] != float64(4) || app["mode"] != ModeDirect || app["future"] != float64(1) {
+	if raw["schemaVersion"] != float64(SchemaVersion) || app["mode"] != ModeDirect || app["future"] != float64(1) {
 		t.Fatalf("file: %v", raw)
 	}
 	if _, err := s.Patch(0, json.RawMessage(`{"agents": {"projects": {"octo/app": {"mode": "yolo"}}}}`), nil); err == nil {
 		t.Fatal("bad mode accepted")
 	} else if ve := (*ValidationError)(nil); !errors.As(err, &ve) || ve.Field != "agents.projects.octo/app.mode" || ve.Code != "enum" {
 		t.Fatalf("bad mode: %v", err)
+	}
+}
+
+// v4 → v5: automation defaults (off) and the label prompt are added, unknown
+// keys and existing agent settings survive.
+func TestAutomationMigration(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, `{"schemaVersion": 4, "future": "keep", "agents": {"maxParallel": 3, "prompts": {"reply": "mine"},
+		"projects": {"octo/app": {"mode": "worktree-pr", "future": 1}}, "automation": {"nested": true}}}`)
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := s.Get().Agents
+	au := a.Automation
+	if au.Enabled || au.MaxPerDay != 10 || au.MaxAttempts != 2 || au.AllowAutoFix || au.AutoApplyLabels || au.Rules == nil || len(au.Rules) != 0 {
+		t.Fatalf("automation defaults: %+v", au)
+	}
+	if a.MaxParallel != 3 || a.Prompts.Reply != "mine" || a.Prompts.Label != DefaultLabelPrompt || a.ModeFor("octo/app") != ModeWorktreePR {
+		t.Fatalf("agents: %+v", a)
+	}
+	if p := a.AutomationFor("octo/app"); p != (AutomationPolicy{MaxPerDay: 10, MaxAttempts: 2}) {
+		t.Fatalf("inherited policy: %+v", p)
+	}
+	raw := read(t, dir)
+	ag, _ := raw["agents"].(map[string]any)
+	auto, _ := ag["automation"].(map[string]any)
+	pr, _ := ag["prompts"].(map[string]any)
+	projects, _ := ag["projects"].(map[string]any)
+	app, _ := projects["octo/app"].(map[string]any)
+	if raw["schemaVersion"] != float64(SchemaVersion) || raw["future"] != "keep" || auto["nested"] != true ||
+		auto["enabled"] != false || auto["maxPerDay"] != float64(10) || pr["label"] != "" || app["future"] != float64(1) {
+		t.Fatalf("file: %v", raw)
+	}
+	if _, ok := app["automation"]; ok {
+		t.Fatalf("empty project override written: %v", app)
+	}
+}
+
+func TestAutomationOverrides(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Patch(0, json.RawMessage(`{"agents": {"automation": {"enabled": true, "maxPerDay": 20,
+		"rules": [{"id": "labels", "enabled": true, "project": "octo/app", "event": "new_issue", "flow": "label"}]},
+		"projects": {"octo/app": {"automation": {"enabled": false, "allowAutoFix": true, "maxAttempts": 5}},
+			"octo/lib": {"automation": {"autoApplyLabels": true, "maxPerDay": 3}}}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := got.Agents
+	for project, want := range map[string]AutomationPolicy{
+		"octo/app":   {Enabled: false, MaxPerDay: 20, MaxAttempts: 5, AllowAutoFix: true},
+		"octo/lib":   {Enabled: true, MaxPerDay: 3, MaxAttempts: 2, AutoApplyLabels: true},
+		"octo/other": {Enabled: true, MaxPerDay: 20, MaxAttempts: 2},
+	} {
+		if p := a.AutomationFor(project); p != want {
+			t.Errorf("%s: %+v, want %+v", project, p, want)
+		}
+	}
+	if r := a.Automation.Rules; len(r) != 1 || r[0].LabelsAny == nil || r[0].ProfileID != "" {
+		t.Fatalf("rules: %+v", r)
+	}
+	// null removes an override: the project inherits again.
+	got, err = s.Patch(got.Revision, json.RawMessage(`{"agents": {"projects": {"octo/app": {"automation": {"enabled": null}}}}}`), nil)
+	if err != nil || !got.Agents.AutomationFor("octo/app").Enabled || !got.Agents.AutomationFor("octo/app").AllowAutoFix {
+		t.Fatalf("override removed: %v %+v", err, got.Agents.AutomationFor("octo/app"))
+	}
+}
+
+func TestAutomationValidation(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := func(fields string) string {
+		return `{"agents": {"automation": {"rules": [{"id": "r", "project": "o/r", "event": "new_issue", "flow": "label"` + fields + `}]}}}`
+	}
+	cases := map[string][2]string{
+		`{"agents": {"automation": {"maxPerDay": 0}}}`:   {"agents.automation.maxPerDay", "range"},
+		`{"agents": {"automation": {"maxAttempts": 11}}}`: {"agents.automation.maxAttempts", "range"},
+		rule(`, "id": "Bad Id"`):                          {"agents.automation.rules.0.id", "id"},
+		rule(`, "project": "noslash"`):                    {"agents.automation.rules.0.project", "project"},
+		rule(`, "event": "closed"`):                       {"agents.automation.rules.0.event", "enum"},
+		rule(`, "flow": "verify"`):                        {"agents.automation.rules.0.flow", "enum"},
+		rule(`, "profileId": "ghost"`):                    {"agents.automation.rules.0.profileId", "profile"},
+		rule(`, "maxPerDay": -1`):                         {"agents.automation.rules.0.maxPerDay", "range"},
+		rule(`, "labelsAny": [""]`):                       {"agents.automation.rules.0.labelsAny", "required"},
+		`{"agents": {"automation": {"rules": [{"id": "r", "project": "o/r", "event": "new_issue", "flow": "fix"},
+			{"id": "r", "project": "o/r", "event": "new_comment", "flow": "reply"}]}}}`: {"agents.automation.rules.1.id", "duplicate"},
+		`{"agents": {"projects": {"o/r": {"automation": {"maxPerDay": 0}}}}}`:   {"agents.projects.o/r.automation.maxPerDay", "range"},
+		`{"agents": {"projects": {"o/r": {"automation": {"maxAttempts": 99}}}}}`: {"agents.projects.o/r.automation.maxAttempts", "range"},
+	}
+	for patch, want := range cases {
+		_, err := s.Patch(0, json.RawMessage(patch), nil)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || ve.Field != want[0] || ve.Code != want[1] {
+			t.Errorf("%s: %v, want %s/%s", patch, err, want[0], want[1])
+		}
+	}
+	if _, err := s.Patch(0, json.RawMessage(rule(`, "profileId": "codex", "labelsAny": ["bug"], "maxPerDay": 5`)), nil); err != nil {
+		t.Fatalf("valid rule: %v", err)
 	}
 }
 

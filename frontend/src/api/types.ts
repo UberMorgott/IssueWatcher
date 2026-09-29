@@ -233,6 +233,46 @@ export interface ProjectAgent {
   noAegis: boolean
   /** Missing or "" = 'direct'. */
   mode?: RunMode | ''
+  /** Overrides of the global automation defaults; a missing field = inherit. */
+  automation?: ProjectAutomation
+}
+
+export type RuleEvent = 'new_issue' | 'new_comment'
+export type RuleFlow = 'fix' | 'reply' | 'label'
+
+/** One automation rule (internal/config Rule); the first matching enabled rule wins. */
+export interface AutomationRule {
+  id: string
+  enabled: boolean
+  /** owner/repo */
+  project: string
+  event: RuleEvent
+  /** Empty = any item. */
+  labelsAny: string[]
+  flow: RuleFlow
+  /** "" = the flow's role. */
+  profileId: string
+  /** 0 = only the global/project cap. */
+  maxPerDay: number
+}
+
+/** settings.agents.automation: global defaults + rules (internal/config Automation). */
+export interface Automation {
+  enabled: boolean
+  maxPerDay: number
+  maxAttempts: number
+  allowAutoFix: boolean
+  autoApplyLabels: boolean
+  rules: AutomationRule[]
+}
+
+/** Per-project automation overrides (internal/config ProjectAutomation). */
+export interface ProjectAutomation {
+  enabled?: boolean
+  maxPerDay?: number
+  maxAttempts?: number
+  allowAutoFix?: boolean
+  autoApplyLabels?: boolean
 }
 
 /** settings.agents (internal/config Agents). */
@@ -241,9 +281,10 @@ export interface Agents {
   profiles: AgentProfile[]
   roles: { coder: string; responder: string; verifier: string }
   /** fixDirect: the direct fix flow; "" = built-in default (like fix). */
-  prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string }
+  prompts: { system: string; fix: string; fixDirect: string; reply: string; review: string; label: string }
   /** Keyed by project name (owner/repo). */
   projects: Record<string, ProjectAgent>
+  automation: Automation
 }
 
 // --- agent jobs (internal/store Job, internal/runner Result) -----------------

@@ -104,6 +104,8 @@ func migrate(raw map[string]any) bool {
 			}
 		}
 	}
+	// v4 → v5: automation and the label prompt only add defaults (decode fills
+	// them, the rewrite stores them); nothing moves.
 	raw["schemaVersion"] = SchemaVersion
 	return true
 }

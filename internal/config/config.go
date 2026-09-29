@@ -23,7 +23,9 @@ const File = "config.json"
 //	2:   sections (general, appearance, notifications, sync, projects, updates)
 //	3:   + agents (profiles, roles, prompts, per-project prompt/verify); nothing moves
 //	4:   + agents.projects.*.mode (direct | worktree-pr); existing entries → direct
-const SchemaVersion = 4
+//	5:   + agents.prompts.label, agents.automation (off, caps, rules), agents.projects.*.automation
+//	     overrides; only defaults are added
+const SchemaVersion = 5
 
 // ErrConflict means the caller edited an older revision.
 var ErrConflict = errors.New("config: settings changed elsewhere")
