@@ -59,12 +59,16 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 	return m
 }
 
-// Close stops the MCP server children.
+// Close stops the MCP server children for good.
 func (m *modPlatforms) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	bridges := make([]*mcpbridge.Client, 0, len(m.live))
 	for _, p := range m.live {
-		p.bridge.Close()
+		bridges = append(bridges, p.bridge)
+	}
+	m.mu.Unlock()
+	for _, b := range bridges {
+		b.Close()
 	}
 }
 
@@ -75,8 +79,19 @@ func modConfig(p config.Providers, id string) config.ModPlatform {
 	return p.CurseForge
 }
 
-// apply brings the running platforms in line with the settings.
+// apply brings the running platforms in line with the settings. Bridges are
+// stopped after m.mu is released: a stop may wait for an in-flight call, and
+// Platforms (GET /api/platforms) must not wait behind it.
 func (m *modPlatforms) apply(cfg config.Settings) {
+	var closing, stopping []*mcpbridge.Client
+	defer func() {
+		for _, b := range closing {
+			b.Close()
+		}
+		for _, b := range stopping {
+			b.Stop()
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, id := range []string{nexus.Platform, curseforge.Platform} {
@@ -90,12 +105,12 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 			m.log.Info("mod platform on", "platform", id)
 		case !want.Enabled && cur != nil:
 			m.group.Remove(id)
-			cur.bridge.Close()
+			closing = append(closing, cur.bridge) // final: a late call must not start an unowned server
 			delete(m.live, id)
 			delete(m.checks, id)
 			m.log.Info("mod platform off", "platform", id)
 		case cur != nil && (want.MCP.Command != cur.cfg.MCP.Command || !slices.Equal(want.MCP.Args, cur.cfg.MCP.Args)):
-			cur.bridge.Close() // the next call starts the new command
+			stopping = append(stopping, cur.bridge) // the next call starts the new command
 			cur.cfg = want
 			delete(m.checks, id)
 			cur.syncer.Trigger()

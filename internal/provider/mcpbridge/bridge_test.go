@@ -133,6 +133,98 @@ func TestIdleStop(t *testing.T) {
 	}
 }
 
+// A closed client (platform switched off) never starts a new server; Stop
+// (changed command) does restart on the next call.
+func TestCloseIsFinalStopIsNot(t *testing.T) {
+	fake := mcptest.New()
+	fake.Handle("read", func(map[string]any) (any, error) { return map[string]any{}, nil })
+	b := mcpbridge.New(mcpbridge.Options{Name: "t", Dial: fake.Dial})
+	if err := b.Call(t.Context(), "read", nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	b.Stop()
+	if err := b.Call(t.Context(), "read", nil, nil, true); err != nil || fake.Starts() != 2 {
+		t.Fatalf("after Stop: %v, starts %d", err, fake.Starts())
+	}
+	b.Close()
+	if err := b.Call(t.Context(), "read", nil, nil, true); !errors.Is(err, mcpbridge.ErrUnavailable) {
+		t.Fatalf("after Close: %v", err)
+	}
+	if fake.Starts() != 2 || b.Running() {
+		t.Fatalf("closed client started a server: starts %d", fake.Starts())
+	}
+}
+
+// Waiting behind a long call ends with the caller's context, and Close does
+// not wait for the in-flight call.
+func TestWaitHonoursContextAndCloseDoesNotBlock(t *testing.T) {
+	fake := mcptest.New()
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	fake.Handle("slow", func(map[string]any) (any, error) {
+		close(entered)
+		<-release
+		return map[string]any{}, nil
+	})
+	b := mcpbridge.New(mcpbridge.Options{Name: "t", Dial: fake.Dial, CallTimeout: 10 * time.Second})
+	done := make(chan error, 1)
+	go func() { done <- b.Call(context.Background(), "slow", nil, nil, true) }()
+	<-entered
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if err := b.Call(ctx, "slow", nil, nil, true); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
+		t.Fatalf("queued call: %v after %v", err, time.Since(start))
+	}
+	closed := make(chan struct{})
+	go func() { b.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close waited for the in-flight call")
+	}
+	close(release)
+	<-done // may finish or fail; it must not start a new server
+	if err := b.Call(t.Context(), "slow", nil, nil, true); !errors.Is(err, mcpbridge.ErrUnavailable) || fake.Starts() != 1 {
+		t.Fatalf("after Close: %v, starts %d", err, fake.Starts())
+	}
+}
+
+func TestWriteUnsure(t *testing.T) {
+	for code, want := range map[string]bool{
+		mcpbridge.CodeOutcomeUnknown: true, mcpbridge.CodeError: true,
+		mcpbridge.CodeNotLoggedIn: false, mcpbridge.CodeCloudflare: false, mcpbridge.CodeInvalid: false,
+		mcpbridge.CodeDisabled: false, mcpbridge.CodeRateLimited: false, mcpbridge.CodeNotFound: false,
+	} {
+		if got := mcpbridge.WriteUnsure(&mcpbridge.ToolError{Code: code}); got != want {
+			t.Errorf("%s: %v", code, got)
+		}
+	}
+	if !mcpbridge.WriteUnsure(mcpbridge.ErrOutcomeUnknown) || mcpbridge.WriteUnsure(errors.New("x")) || mcpbridge.WriteUnsure(nil) {
+		t.Fatal("plain errors")
+	}
+}
+
+func TestPageChanged(t *testing.T) {
+	var st provider.PollState
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	if !mcpbridge.PageChanged(&st, "k", "a", now, time.Hour) {
+		t.Fatal("no fingerprint yet must reconcile")
+	}
+	if mcpbridge.PageChanged(&st, "k", "a", now.Add(time.Minute), time.Hour) {
+		t.Fatal("same fingerprint")
+	}
+	if !mcpbridge.PageChanged(&st, "k", "b", now.Add(2*time.Minute), time.Hour) {
+		t.Fatal("changed fingerprint")
+	}
+	if mcpbridge.PageChanged(&st, "k", "b", now.Add(61*time.Minute), time.Hour) {
+		t.Fatal("reconciled 59 min ago")
+	}
+	if !mcpbridge.PageChanged(&st, "k", "b", now.Add(63*time.Minute), time.Hour) {
+		t.Fatal("last reconcile over an hour ago")
+	}
+}
+
 func TestTitle(t *testing.T) {
 	if got := mcpbridge.Title("\n  hello world \nsecond"); got != "hello world" {
 		t.Fatal(got)
