@@ -9,8 +9,8 @@ type Providers struct {
 	CurseForge ModPlatform `json:"curseforge"`
 }
 
-// ModPlatform is one MCP-backed platform. Enabled is read at startup; the
-// server command at every server start.
+// ModPlatform is one MCP-backed platform. Every field applies live: Enabled
+// adds or removes the platform's syncer, a new command restarts the server.
 type ModPlatform struct {
 	Enabled bool      `json:"enabled"`
 	MCP     MCPServer `json:"mcp"`

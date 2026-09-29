@@ -238,15 +238,15 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}), syncer.New(syncer.Options{
 		Store: st, Provider: stm, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
 	}))
-	mods := newModPlatforms(cfgs, st, log, syncPlan(cfg.Sync), onUpdate) // Nexus / CurseForge over MCP
+	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate) // Nexus / CurseForge over MCP, switched live
 	defer mods.Close()
-	sy.Add(mods.syncers...)
 	// Settings apply live: popups, toasts, poll interval.
 	cfgs.Subscribe(func(_, cur config.Settings) {
 		lp := liveFilter(cur.Notifications)
 		live.Store(&lp)
 		group.Store(cur.Notifications.Group)
 		sy.SetPlan(syncPlan(cur.Sync))
+		mods.apply(cur)
 		if tray != nil {
 			tray.SetPrefs(notifyPrefs(cur.Notifications))
 			tray.SetTheme(popupTheme(cur.Appearance))
@@ -320,6 +320,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Runner:        jobs,
 		Picker:        picker,
 		Steam:         stm,
+		Platforms:     mods,
 	})
 	if err != nil {
 		return err

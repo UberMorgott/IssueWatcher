@@ -75,6 +75,8 @@ type Options struct {
 	Picker FolderPicker
 	// Steam is the Steam provider's account settings (/api/providers/steam); nil disables them.
 	Steam SteamSettings
+	// Platforms reports and checks the platform accounts (/api/platforms); nil disables them.
+	Platforms Platforms
 }
 
 // Server serves the SPA and the loopback API.
@@ -151,6 +153,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Steam != nil {
 		s.registerSteam(mux)
+	}
+	if opts.Platforms != nil {
+		s.registerPlatforms(mux)
 	}
 	if opts.TestNotification != nil {
 		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)

@@ -116,3 +116,51 @@ func TestGroupSourcesIndependentAndRepliesRouted(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupAddRemoveWhileRunning(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	log := slog.New(slog.DiscardHandler)
+	g := NewGroup(New(Options{Store: st, Provider: &fakeProvider{platform: "alpha", account: "a1", item: "i"}, Log: log}))
+	var mu sync.Mutex
+	seen := map[string]bool{}
+	g.OnProgress(func(p Progress) { mu.Lock(); seen[p.Source] = true; mu.Unlock() })
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { g.Run(ctx); close(done) }()
+
+	late := New(Options{Store: st, Provider: &fakeProvider{platform: "beta", account: "b1", item: "j"}, Log: log})
+	g.Add(late) // started at once, with the group's progress listener
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		ok := seen["beta:b1"]
+		mu.Unlock()
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a syncer added while running never reported progress")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := g.Remove("beta"); len(got) != 1 || got[0] != late {
+		t.Fatalf("Remove(beta) = %v", got)
+	}
+	if n := len(g.Syncers()); n != 1 {
+		t.Fatalf("syncers after remove = %d, want 1", n)
+	}
+	if got := g.Remove("alpha"); len(got) != 0 {
+		t.Fatal("the primary syncer must never be removed")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}

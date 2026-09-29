@@ -33,46 +33,116 @@ func (s *Syncer) sourceID() int64 {
 // Group runs one Syncer per connected account (source). Each syncer keeps its
 // own cursor, budget, rate and error state, so one failing source never stops
 // the others; replies are routed by the item's source.
+//
+// Syncers may be added and removed while the group runs (a mod platform
+// switched on or off in Settings › Платформы applies without a restart).
 type Group struct {
-	syncers []*Syncer
+	mu       sync.Mutex
+	syncers  []*Syncer
+	ctx      context.Context // set by Run; nil before
+	wg       sync.WaitGroup
+	stops    map[*Syncer]context.CancelFunc
+	progress []func(Progress)
+	plan     *Plan
 }
 
 // NewGroup groups the syncers; the first is the primary one whose status is
 // reported at the top level of GroupStatus (the GitHub syncer).
-func NewGroup(syncers ...*Syncer) *Group { return &Group{syncers: syncers} }
+func NewGroup(syncers ...*Syncer) *Group {
+	return &Group{syncers: syncers, stops: map[*Syncer]context.CancelFunc{}}
+}
 
-// Add appends syncers (before Run).
-func (g *Group) Add(syncers ...*Syncer) { g.syncers = append(g.syncers, syncers...) }
+// Add appends syncers; while the group runs they start at once, with the
+// group's progress listeners and polling plan.
+func (g *Group) Add(syncers ...*Syncer) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, s := range syncers {
+		for _, f := range g.progress {
+			s.OnProgress(f)
+		}
+		if g.plan != nil {
+			s.SetPlan(*g.plan)
+		}
+		g.syncers = append(g.syncers, s)
+		if g.ctx != nil {
+			g.startLocked(g.ctx, s)
+		}
+	}
+}
+
+// Remove stops and drops every syncer of platform (never the primary one)
+// and returns them.
+func (g *Group) Remove(platform string) []*Syncer {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var removed []*Syncer
+	kept := g.syncers[:0:0]
+	for i, s := range g.syncers {
+		if i > 0 && s.opts.Provider.Platform() == platform {
+			removed = append(removed, s)
+			if stop := g.stops[s]; stop != nil {
+				stop()
+				delete(g.stops, s)
+			}
+			continue
+		}
+		kept = append(kept, s)
+	}
+	g.syncers = kept
+	return removed
+}
+
+// startLocked runs s under the group's context. g.mu must be held.
+func (g *Group) startLocked(parent context.Context, s *Syncer) {
+	ctx, stop := context.WithCancel(parent)
+	g.stops[s] = stop
+	g.wg.Go(func() { s.Run(ctx) })
+}
 
 // Syncers returns the grouped syncers.
-func (g *Group) Syncers() []*Syncer { return g.syncers }
+func (g *Group) Syncers() []*Syncer {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]*Syncer(nil), g.syncers...)
+}
 
-// Run runs every syncer's schedule until ctx ends.
+// Run runs every syncer's schedule (and those added later) until ctx ends.
 func (g *Group) Run(ctx context.Context) {
-	var wg sync.WaitGroup
+	g.mu.Lock()
+	g.ctx = ctx
 	for _, s := range g.syncers {
-		wg.Go(func() { s.Run(ctx) })
+		g.startLocked(ctx, s)
 	}
-	wg.Wait()
+	g.mu.Unlock()
+	<-ctx.Done()
+	g.wg.Wait()
 }
 
 // Trigger requests a full sync of every source.
 func (g *Group) Trigger() {
-	for _, s := range g.syncers {
+	for _, s := range g.Syncers() {
 		s.Trigger()
 	}
 }
 
-// SetPlan applies polling settings to every syncer.
+// SetPlan applies polling settings to every syncer (and to those added later).
 func (g *Group) SetPlan(p Plan) {
-	for _, s := range g.syncers {
+	g.mu.Lock()
+	g.plan = &p
+	g.mu.Unlock()
+	for _, s := range g.Syncers() {
 		s.SetPlan(p)
 	}
 }
 
-// OnProgress registers f with every syncer (Progress.Source tells them apart).
+// OnProgress registers f with every syncer, also those added later
+// (Progress.Source tells them apart).
 func (g *Group) OnProgress(f func(Progress)) {
-	for _, s := range g.syncers {
+	g.mu.Lock()
+	g.progress = append(g.progress, f)
+	g.mu.Unlock()
+	for _, s := range g.Syncers() {
 		s.OnProgress(f)
 	}
 }
@@ -93,8 +163,9 @@ type GroupStatus struct {
 
 // Status returns a snapshot of every source.
 func (g *Group) Status() GroupStatus {
-	out := GroupStatus{Sources: make([]SourceStatus, 0, len(g.syncers))}
-	for i, s := range g.syncers {
+	syncers := g.Syncers()
+	out := GroupStatus{Sources: make([]SourceStatus, 0, len(syncers))}
+	for i, s := range syncers {
 		st := s.Status()
 		if i == 0 {
 			out.Status = st
@@ -112,15 +183,16 @@ func (g *Group) Status() GroupStatus {
 // not known yet (signed out → provider.ErrNotSignedIn, account switched → the
 // current account, as before per-source syncers).
 func (g *Group) Reply(ctx context.Context, itemID int64, body string) (store.Comment, error) {
-	if len(g.syncers) == 0 {
+	syncers := g.Syncers()
+	if len(syncers) == 0 {
 		return store.Comment{}, ErrNoSource
 	}
-	ref, err := g.syncers[0].opts.Store.ItemRef(ctx, itemID)
+	ref, err := syncers[0].opts.Store.ItemRef(ctx, itemID)
 	if err != nil {
 		return store.Comment{}, err
 	}
 	var same []*Syncer
-	for _, s := range g.syncers {
+	for _, s := range syncers {
 		if s.opts.Provider.Platform() != ref.Platform {
 			continue
 		}
