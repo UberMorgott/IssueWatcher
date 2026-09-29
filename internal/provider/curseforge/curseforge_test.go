@@ -186,8 +186,11 @@ func TestDetectChangesReplyOnOldPage(t *testing.T) {
 	e := setup(t)
 	pr := provider.Project{ExternalID: "1443010"}
 	var st provider.PollState
+	if ch, err := e.prov.DetectChanges(t.Context(), pr, &st); err != nil || !ch.Overflow {
+		t.Fatalf("first check must reconcile: %+v %v", ch, err)
+	}
 	if ch, err := e.prov.DetectChanges(t.Context(), pr, &st); err != nil || ch.Overflow {
-		t.Fatalf("%+v %v", ch, err)
+		t.Fatalf("unchanged: %+v %v", ch, err)
 	}
 	e.site.mu.Lock()
 	p2 := e.site.pages[2]

@@ -399,7 +399,9 @@ func localTime(s *string) time.Time {
 const sigKey = "nexus:page1"
 
 // DetectChanges implements provider.Poller: page 1 of Posts and Bugs against
-// the last fingerprint; a difference asks for a reconcile of the project.
+// the last fingerprint; a difference, a missing fingerprint (restart, new
+// target: a comment may have landed since the last full read) or FullEvery
+// elapsed asks for a reconcile of the project.
 func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, st *provider.PollState) (provider.Changes, error) {
 	var ch provider.Changes
 	game, mod, err := parseProject(project.ExternalID)
@@ -433,16 +435,14 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 			parts = append(parts, fmt.Sprintf("%s:%d:%s:%s", r.ID, r.Replies, r.Status, mcpbridge.Time(r.LastPostAt).Format(time.RFC3339)))
 		}
 	}
-	sig := mcpbridge.Signature(parts...)
-	if st.ETags == nil {
-		st.ETags = map[string]string{}
-	}
-	prev := st.ETags[sigKey]
-	st.ETags[sigKey] = sig
-	// No fingerprint yet: the reconcile that created the target just read everything.
-	ch.Overflow = prev != "" && prev != sig
+	ch.Overflow = mcpbridge.PageChanged(st, sigKey, mcpbridge.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
+
+// FullEvery bounds how long page 1 alone is trusted: whether the site's
+// comment total counts replies is unverified, so a reply on a thread past
+// page 1 may leave page 1 unchanged; the project is re-read at least this often.
+const FullEvery = time.Hour
 
 // FetchChanged implements provider.Poller (the change check never lists
 // numbers: it asks for a reconcile).

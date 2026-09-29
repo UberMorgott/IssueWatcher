@@ -304,7 +304,8 @@ func threadItem(project provider.Project, mod int, t thread) provider.Item {
 const sigKey = "curseforge:page1"
 
 // DetectChanges implements provider.Poller: page 1 ids + the entry total (a
-// reply on an old thread raises the total) against the last fingerprint.
+// reply on an old thread should raise the total) against the last
+// fingerprint; no fingerprint yet or FullEvery elapsed also reconciles.
 func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, st *provider.PollState) (provider.Changes, error) {
 	ch := provider.Changes{Requests: 1}
 	mod, err := modID(project.ExternalID)
@@ -322,15 +323,13 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 	for _, t := range r.Comments {
 		parts = append(parts, t.ID+":"+strconv.Itoa(len(t.Replies)))
 	}
-	sig := mcpbridge.Signature(parts...)
-	if st.ETags == nil {
-		st.ETags = map[string]string{}
-	}
-	prev := st.ETags[sigKey]
-	st.ETags[sigKey] = sig
-	ch.Overflow = prev != "" && prev != sig
+	ch.Overflow = mcpbridge.PageChanged(st, sigKey, mcpbridge.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
+
+// FullEvery bounds how long page 1 alone is trusted (a reply on a thread past
+// page 1 changes page 1 only through the total, which is not verified live).
+const FullEvery = time.Hour
 
 // FetchChanged implements provider.Poller (unused: the check asks for a reconcile).
 func (p *Provider) FetchChanged(ctx context.Context, project provider.Project, _ []int) ([]provider.Item, error) {

@@ -274,8 +274,9 @@ func TestDetectChanges(t *testing.T) {
 	e := setup(t)
 	pr := provider.Project{ExternalID: "windrose/147"}
 	var st provider.PollState
+	// No fingerprint yet: a comment may have landed since the last full read.
 	ch, err := e.prov.DetectChanges(t.Context(), pr, &st)
-	if err != nil || ch.Overflow || ch.Requests != 2 {
+	if err != nil || !ch.Overflow || ch.Requests != 2 {
 		t.Fatalf("first check %+v %v", ch, err)
 	}
 	if ch, _ = e.prov.DetectChanges(t.Context(), pr, &st); ch.Overflow {
