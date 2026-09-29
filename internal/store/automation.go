@@ -89,7 +89,7 @@ func (s *Store) AutomationItemFacts(ctx context.Context, itemID int64) (Automati
 		it     AutomationItem
 		labels string
 	)
-	err := s.db.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+`, `+needsLinkCol+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
+	err := s.rd.QueryRowContext(ctx, `SELECT i.labels, `+folderCols+`, `+needsLinkCol+` FROM items i JOIN projects p ON p.id = i.project_id`+linkJoin+`
 		WHERE i.id = ?`, itemID).Scan(&labels, &it.LocalPath, &it.ProjectURL, &it.NeedsLink)
 	if errors.Is(err, sql.ErrNoRows) {
 		return it, ErrNotFound
@@ -217,7 +217,7 @@ func scanAutomation(sc interface{ Scan(...any) error }) (AutomationEntry, error)
 }
 
 func (s *Store) automationEntry(ctx context.Context, id int64) (AutomationEntry, error) {
-	e, err := scanAutomation(s.db.QueryRowContext(ctx, "SELECT "+automationColumns+" WHERE a.id = ?", id))
+	e, err := scanAutomation(s.rd.QueryRowContext(ctx, "SELECT "+automationColumns+" WHERE a.id = ?", id))
 	if err != nil {
 		return e, fmt.Errorf("store: automation entry: %w", err)
 	}
@@ -237,7 +237,7 @@ func (s *Store) AutomationLog(ctx context.Context, cursor string, limit int) (Au
 		}
 		before = k.ID
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+automationColumns+" WHERE a.id < ? ORDER BY a.id DESC LIMIT ?", before, limit+1)
+	rows, err := s.rd.QueryContext(ctx, "SELECT "+automationColumns+" WHERE a.id < ? ORDER BY a.id DESC LIMIT ?", before, limit+1)
 	if err != nil {
 		return chunk, fmt.Errorf("store: automation log: %w", err)
 	}

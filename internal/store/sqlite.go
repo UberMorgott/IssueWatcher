@@ -37,6 +37,21 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// OpenReader opens a read-only pool over the database at path (opened and
+// migrated by Open first): up to readers query_only connections, so page
+// reads run beside a sync's write transaction (WAL) instead of queueing
+// behind it on the single writer connection.
+func OpenReader(path string, readers int) (*sql.DB, error) {
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=query_only(1)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("store: open reader: %w", err)
+	}
+	db.SetMaxOpenConns(readers)
+	db.SetMaxIdleConns(readers)
+	return db, nil
+}
+
 // migrate applies migrations newer than PRAGMA user_version, one transaction each.
 func migrate(ctx context.Context, db *sql.DB) error {
 	return migrateTo(ctx, db, 0)

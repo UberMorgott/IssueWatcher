@@ -38,7 +38,7 @@ type Repo struct {
 
 // Repos lists active projects with counts, by name.
 func (s *Store) Repos(ctx context.Context) ([]Repo, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, `+linkColsAs+`,
+	rows, err := s.rd.QueryContext(ctx, `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, `+linkColsAs+`,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
 		count(i.id) FILTER (WHERE i.unread = 1)
@@ -130,7 +130,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	if t := strings.TrimSpace(q.Text); t != "" {
 		like = "%" + likeEscape(t) + "%"
 	}
-	if err := s.db.QueryRowContext(ctx, with+count, like).Scan(&chunk.Total); err != nil {
+	if err := s.rd.QueryRowContext(ctx, with+count, like).Scan(&chunk.Total); err != nil {
 		return chunk, fmt.Errorf("store: count repos: %w", err)
 	}
 	where, args := "", []any{like}
@@ -142,7 +142,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		where = " WHERE (" + key + " " + cmp + " ?2 OR (" + key + " = ?2 AND r.id " + cmp + " ?3))"
 		args = append(args, k.Value, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, with+"SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
+	rows, err := s.rd.QueryContext(ctx, with+"SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
 		" FROM ("+inner+") r"+where+" ORDER BY "+key+" "+dir+", r.id "+dir+" LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: repos: %w", err)
@@ -290,7 +290,7 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	chunk := IssueChunk{Items: []Issue{}}
 	if len(f.IDs) == 0 && f.Cursor == "" { // header counters (first chunk, head refresh): every filter but state and unread
 		var n IssueCounts
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1)"+
+		if err := s.rd.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1)"+
 			" FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).Scan(&n.Open, &n.Closed, &n.Unread); err != nil {
 			return chunk, fmt.Errorf("store: count issues: %w", err)
 		}
@@ -313,7 +313,7 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	from := " FROM items i JOIN projects p ON p.id = i.project_id WHERE " + strings.Join(where, " AND ")
 	if len(f.IDs) == 0 && f.Cursor == "" {
 		var n int
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*)"+from, args...).Scan(&n); err != nil {
+		if err := s.rd.QueryRowContext(ctx, "SELECT count(*)"+from, args...).Scan(&n); err != nil {
 			return chunk, fmt.Errorf("store: count issues: %w", err)
 		}
 		chunk.Total = &n
@@ -335,7 +335,7 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 		keyset = " AND (i.updated_at > ? OR (i.updated_at = ? AND i.id > ?))"
 		args = append(args, k.Value, k.Value, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+issueColumns+from+keyset+" ORDER BY i.updated_at DESC, i.id DESC LIMIT ?", //nolint:gosec // G202: WHERE built from constant fragments; all values are bound args
+	rows, err := s.rd.QueryContext(ctx, "SELECT "+issueColumns+from+keyset+" ORDER BY i.updated_at DESC, i.id DESC LIMIT ?", //nolint:gosec // G202: WHERE built from constant fragments; all values are bound args
 		append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: issues: %w", err)
@@ -387,7 +387,7 @@ type IssueDetail struct {
 // Issue returns one issue with its body.
 func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 	var d IssueDetail
-	row := s.db.QueryRowContext(ctx, "SELECT "+issueColumns+", i.body FROM items i JOIN projects p ON p.id = i.project_id WHERE i.id = ?", id)
+	row := s.rd.QueryRowContext(ctx, "SELECT "+issueColumns+", i.body FROM items i JOIN projects p ON p.id = i.project_id WHERE i.id = ?", id)
 	var body string
 	is, err := scanIssue(scanFunc(func(dst ...any) error { return row.Scan(append(dst, &body)...) }))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -447,7 +447,7 @@ func (s *Store) Comments(ctx context.Context, id int64, cursor string, limit int
 		q += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
 		args = append(args, k.Value, k.Value, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, q+` ORDER BY created_at, id LIMIT ?`, append(args, limit+1)...)
+	rows, err := s.rd.QueryContext(ctx, q+` ORDER BY created_at, id LIMIT ?`, append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: comments: %w", err)
 	}
@@ -497,7 +497,7 @@ type Stats struct {
 func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Time) (Stats, error) {
 	weeks = min(max(weeks, 1), 520)
 	st := Stats{}
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE i.status = 'open'),
+	err := s.rd.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE i.status = 'open'),
 		count(*) FILTER (WHERE i.status = 'closed')
 		FROM items i JOIN projects p ON p.id = i.project_id
 		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`)`, repoID).Scan(&st.Open, &st.Closed)
@@ -517,7 +517,7 @@ func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Tim
 	}
 
 	// date(x, '-6 days', 'weekday 1') = Monday on or before x.
-	rows, err := s.db.QueryContext(ctx, `SELECT wk, sum(opened), sum(closed) FROM (
+	rows, err := s.rd.QueryContext(ctx, `SELECT wk, sum(opened), sum(closed) FROM (
 		SELECT date(i.created_at, '-6 days', 'weekday 1') AS wk, 1 AS opened, 0 AS closed
 		FROM items i JOIN projects p ON p.id = i.project_id
 		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`) AND i.created_at >= ?2

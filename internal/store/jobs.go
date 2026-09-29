@@ -125,7 +125,7 @@ func (s *Store) createJob(ctx context.Context, itemID int64, flow, profileID, or
 		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, itemID, openOnly).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		var status string
-		err := s.db.QueryRowContext(ctx, `SELECT status FROM items WHERE id = ?`, itemID).Scan(&status)
+		err := s.rd.QueryRowContext(ctx, `SELECT status FROM items WHERE id = ?`, itemID).Scan(&status)
 		if errors.Is(err, sql.ErrNoRows) {
 			return Job{}, ErrNotFound
 		}
@@ -161,7 +161,7 @@ func (s *Store) CreateProjectJob(ctx context.Context, projectID int64, flow, pro
 		SELECT NULL, id, ?, ?, ?, ? FROM projects WHERE id = ?
 		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, projectID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		existing, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
+		existing, err := scanJob(s.rd.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
 			` WHERE j.project_id = ? AND j.flow = ? AND j.item_id IS NULL AND j.state IN ('queued', 'running', 'needs_review')`, projectID, flow))
 		if errors.Is(err, sql.ErrNoRows) {
 			return Job{}, ErrNotFound // no such project
@@ -216,7 +216,7 @@ func (s *Store) OpenIssues(ctx context.Context, projectID int64, numbers []int) 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, n, title FROM (SELECT i.id, `+triageNumber+` AS n, i.title, i.status
+	rows, err := s.rd.QueryContext(ctx, `SELECT id, n, title FROM (SELECT i.id, `+triageNumber+` AS n, i.title, i.status
 		FROM items i WHERE `+scopeItem2+`)
 		WHERE status = 'open' AND n IN (SELECT value FROM json_each(?1))`, string(nums), projectID, nil, ModItemRef)
 	if err != nil {
@@ -238,7 +238,7 @@ func (s *Store) OpenIssues(ctx context.Context, projectID int64, numbers []int) 
 // clipped to bodyRunes characters.
 func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRunes int) (TriageInput, error) {
 	var in TriageInput
-	err := s.db.QueryRowContext(ctx, `SELECT p.name, `+projectKeySQL+`, p.url, p.local_path
+	err := s.rd.QueryRowContext(ctx, `SELECT p.name, `+projectKeySQL+`, p.url, p.local_path
 		FROM projects p JOIN sources s ON s.id = p.source_id WHERE p.id = ?`, projectID).
 		Scan(&in.ProjectName, &in.ProjectKey, &in.ProjectURL, &in.LocalPath)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -247,7 +247,7 @@ func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRun
 	if err != nil {
 		return in, fmt.Errorf("store: triage input: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT i.id, `+triageNumber+`, CASE WHEN i.project_id = ?2 THEN '' ELSE s.platform END,
+	rows, err := s.rd.QueryContext(ctx, `SELECT i.id, `+triageNumber+`, CASE WHEN i.project_id = ?2 THEN '' ELSE s.platform END,
 		i.title, substr(i.body, 1, ?1), i.author, i.labels,
 		(SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.created_at, i.updated_at
 		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = p.source_id
@@ -278,7 +278,7 @@ func (s *Store) TriageInput(ctx context.Context, projectID int64, limit, bodyRun
 }
 
 func (s *Store) activeJob(ctx context.Context, itemID int64, flow string) (Job, error) {
-	j, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
+	j, err := scanJob(s.rd.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+
 		` WHERE j.item_id = ? AND j.flow = ? AND j.state IN ('queued', 'running', 'needs_review')`, itemID, flow))
 	if errors.Is(err, sql.ErrNoRows) {
 		return j, ErrNotFound
@@ -291,7 +291,7 @@ func (s *Store) activeJob(ctx context.Context, itemID int64, flow string) (Job, 
 
 // Job returns job id.
 func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
-	j, err := scanJob(s.db.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.id = ?", id))
+	j, err := scanJob(s.rd.QueryRowContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return j, ErrNotFound
 	}
@@ -352,7 +352,7 @@ func (s *Store) Jobs(ctx context.Context, f JobFilter) (JobChunk, error) {
 	chunk := JobChunk{Items: []Job{}}
 	if f.Cursor == "" {
 		var n int
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM jobs j"+cond, args...).Scan(&n); err != nil {
+		if err := s.rd.QueryRowContext(ctx, "SELECT count(*) FROM jobs j"+cond, args...).Scan(&n); err != nil {
 			return chunk, fmt.Errorf("store: count jobs: %w", err)
 		}
 		chunk.Total = &n
@@ -368,7 +368,7 @@ func (s *Store) Jobs(ctx context.Context, f JobFilter) (JobChunk, error) {
 		}
 		args = append(args, k.ID)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+cond+" ORDER BY j.id DESC LIMIT ?", append(args, limit+1)...)
+	rows, err := s.rd.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+cond+" ORDER BY j.id DESC LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: jobs: %w", err)
 	}
@@ -401,7 +401,7 @@ func (s *Store) JobsInState(ctx context.Context, states ...string) ([]Job, error
 	for i, st := range states {
 		args[i] = st
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.state IN (?"+strings.Repeat(",?", len(states)-1)+") ORDER BY j.id", args...) //nolint:gosec // G202: placeholders only
+	rows, err := s.rd.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+" WHERE j.state IN (?"+strings.Repeat(",?", len(states)-1)+") ORDER BY j.id", args...) //nolint:gosec // G202: placeholders only
 	if err != nil {
 		return nil, fmt.Errorf("store: jobs in state: %w", err)
 	}
@@ -511,7 +511,7 @@ func (s *Store) RecoverJobs(ctx context.Context) ([]Job, error) {
 // ClosedDirectFixes lists direct-mode fix jobs (needs_review, or done after a
 // push) whose issue is closed on the platform now but not marked so yet.
 func (s *Store) ClosedDirectFixes(ctx context.Context) ([]Job, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+` WHERE j.state IN ('needs_review', 'done') AND j.flow = 'fix'
+	rows, err := s.rd.QueryContext(ctx, "SELECT "+jobColumns+jobFrom+` WHERE j.state IN ('needs_review', 'done') AND j.flow = 'fix'
 		AND i.status = 'closed' AND json_valid(j.result) AND json_extract(j.result, '$.mode') = 'direct'
 		AND coalesce(json_extract(j.result, '$.local.closed'), 0) = 0 ORDER BY j.id`)
 	if err != nil {
@@ -543,7 +543,7 @@ func (s *Store) LatestJobs(ctx context.Context, itemIDs []int64) (map[int64]JobB
 	const cols = `j.item_id, j.id, j.flow, j.state, j.started_at,
 		CASE WHEN json_valid(j.result) THEN coalesce(json_extract(j.result, '$.local.outcome'), '') ELSE '' END`
 	q := "SELECT " + cols + " FROM jobs j WHERE j.id IN (SELECT max(id) FROM jobs WHERE item_id IN (?" + strings.Repeat(",?", len(ids)-1) + ") GROUP BY item_id)" //nolint:gosec // G202: placeholders only
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.rd.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: latest jobs: %w", err)
 	}
@@ -626,7 +626,7 @@ func (s *Store) SetItemLabels(ctx context.Context, itemID int64, labels []string
 func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 	var in JobInput
 	var labels string
-	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
+	err := s.rd.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
 		p.name, `+projectKeySQL+`, `+folderCols+`, s.platform <> '`+CodePlatform+`', coalesce(cp.name, '')
 		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id`+linkJoin+`
 		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author, &labels,

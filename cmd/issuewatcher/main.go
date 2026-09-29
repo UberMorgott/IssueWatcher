@@ -149,11 +149,17 @@ func run() (err error) {
 	defer lock.Release()
 	log.Info("starting", "version", Version, "data_dir", dataDir, "pid", os.Getpid())
 
-	db, err := store.Open(context.Background(), filepath.Join(dataDir, "issuewatcher.db"))
+	dbPath := filepath.Join(dataDir, "issuewatcher.db")
+	db, err := store.Open(context.Background(), dbPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	rdb, err := store.OpenReader(dbPath, 4)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rdb.Close() }()
 
 	cfgs, err := config.Open(dataDir)
 	if err != nil {
@@ -173,7 +179,7 @@ func run() (err error) {
 	}
 	settings := &appSettings{store: cfgs, dataDir: dataDir, exe: exe, version: Version, entry: entry}
 	minimized := startMinimized(os.Args[1:], cfg.General.StartMinimized) || l.quiet()
-	return serve(log, dataDir, cfgs, store.New(db), newAuth(log, dataDir), settings, minimized, headless, l, &serving)
+	return serve(log, dataDir, cfgs, store.NewWithReader(db, rdb), newAuth(log, dataDir), settings, minimized, headless, l, &serving)
 }
 
 func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, auth *github.Auth,

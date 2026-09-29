@@ -22,7 +22,7 @@ type PollTarget struct {
 // PollTargets lists the active projects of a source with their newest item
 // update and poll state.
 func (s *Store) PollTargets(ctx context.Context, sourceID int64) ([]PollTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.poll_state, p.checked_at,
+	rows, err := s.rd.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.poll_state, p.checked_at,
 		COALESCE((SELECT max(i.updated_at) FROM items i WHERE i.project_id = p.id), '')
 		FROM projects p WHERE p.source_id = ? AND p.active = 1 ORDER BY p.id`, sourceID)
 	if err != nil {
@@ -66,7 +66,7 @@ func (s *Store) LastSource(ctx context.Context, platform, account string) (st So
 		args = append(args, account)
 	}
 	var rec string
-	err = s.db.QueryRowContext(ctx, q+` ORDER BY reconciled_at DESC, id DESC LIMIT 1`, args...).Scan(&st.ID, &st.Account, &rec)
+	err = s.rd.QueryRowContext(ctx, q+` ORDER BY reconciled_at DESC, id DESC LIMIT 1`, args...).Scan(&st.ID, &st.Account, &rec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, false, nil
 	}

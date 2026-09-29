@@ -27,7 +27,8 @@ func ts(t time.Time) string {
 
 // Store wraps the database with the queries sync and the API need.
 type Store struct {
-	db      *sql.DB
+	db      *sql.DB // the writer (one connection): writes and transactions
+	rd      *sql.DB // readers: a query_only pool, or db itself (New)
 	changes atomic.Int64 // rows sync really changed (items, comments, projects)
 }
 
@@ -36,8 +37,12 @@ type Store struct {
 // changed what the dashboard shows.
 func (s *Store) Changes() int64 { return s.changes.Load() }
 
-// New wraps an opened database (see Open).
-func New(db *sql.DB) *Store { return &Store{db: db} }
+// New wraps an opened database (see Open); reads share its connection.
+func New(db *sql.DB) *Store { return &Store{db: db, rd: db} }
+
+// NewWithReader wraps the writer db and a reader pool (see OpenReader): reads
+// never queue behind a write transaction.
+func NewWithReader(db, rd *sql.DB) *Store { return &Store{db: db, rd: rd} }
 
 // EventKind is a change detected by sync.
 type EventKind string
@@ -243,7 +248,7 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 // to; "" when none (or on a schema before project links).
 func (s *Store) linkedCodeKey(ctx context.Context, id int64) string {
 	var key string
-	_ = s.db.QueryRowContext(ctx, `SELECT s.platform || ':' || p.external_id FROM project_links pl
+	_ = s.rd.QueryRowContext(ctx, `SELECT s.platform || ':' || p.external_id FROM project_links pl
 		JOIN projects p ON p.id = pl.code_project_id JOIN sources s ON s.id = p.source_id WHERE pl.mod_project_id = ?`, id).Scan(&key)
 	return key
 }
@@ -380,7 +385,7 @@ type ItemRef struct {
 // ItemRef looks up the platform identity of item id.
 func (s *Store) ItemRef(ctx context.Context, id int64) (ItemRef, error) {
 	ref := ItemRef{ID: id}
-	err := s.db.QueryRowContext(ctx, `SELECT i.external_id, s.platform, s.id, s.account FROM items i
+	err := s.rd.QueryRowContext(ctx, `SELECT i.external_id, s.platform, s.id, s.account FROM items i
 		JOIN sources s ON s.id = i.source_id WHERE i.id = ?`, id).Scan(&ref.ExternalID, &ref.Platform, &ref.SourceID, &ref.Account)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ref, ErrNotFound
@@ -429,7 +434,7 @@ func (s *Store) MarkRead(ctx context.Context, id int64) error {
 // UnreadCount is the tray badge: items with unseen activity.
 func (s *Store) UnreadCount(ctx context.Context) (int, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE unread = 1`).Scan(&n); err != nil {
+	if err := s.rd.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE unread = 1`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("store: unread count: %w", err)
 	}
 	return n, nil

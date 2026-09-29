@@ -306,7 +306,7 @@ func linkPlan(repos []Repo, decided map[int64]bool, hints map[int64]linkHint) (a
 
 // linkHints are the mod pages' provider hints by project id.
 func (s *Store) linkHints(ctx context.Context) (map[int64]linkHint, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, game, code_url FROM projects WHERE active = 1 AND (game <> '' OR code_url <> '')`)
+	rows, err := s.rd.QueryContext(ctx, `SELECT id, game, code_url FROM projects WHERE active = 1 AND (game <> '' OR code_url <> '')`)
 	if err != nil {
 		return nil, fmt.Errorf("store: link hints: %w", err)
 	}
@@ -339,7 +339,7 @@ func (s *Store) plan(ctx context.Context, repos []Repo) (auto map[int64]int64, s
 	return auto, suggest, nil
 }
 func (s *Store) linkDecisions(ctx context.Context) (map[int64]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT mod_project_id FROM project_link_decisions`)
+	rows, err := s.rd.QueryContext(ctx, `SELECT mod_project_id FROM project_link_decisions`)
 	if err != nil {
 		return nil, fmt.Errorf("store: link decisions: %w", err)
 	}

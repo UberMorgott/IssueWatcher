@@ -60,7 +60,7 @@ func (s *Store) fixTargets(ctx context.Context, ids []int64) (map[int64]Fix, err
 	for _, id := range ids {
 		nums = append(nums, strconv.FormatInt(id, 10))
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, coalesce(cp.id, p.id), `+folderCols+`, `+needsLinkCol+`
+	rows, err := s.rd.QueryContext(ctx, `SELECT p.id, coalesce(cp.id, p.id), `+folderCols+`, `+needsLinkCol+`
 		FROM projects p`+linkJoin+` WHERE p.id IN (SELECT value FROM json_each(?))`, "["+strings.Join(nums, ",")+"]")
 	if err != nil {
 		return nil, fmt.Errorf("store: fix targets: %w", err)
@@ -220,7 +220,7 @@ func (s *Store) Links(ctx context.Context, id int64) (ProjectLinks, error) {
 	if _, err := s.projectPlatform(ctx, s.db, id); err != nil {
 		return out, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT pl.mod_project_id = ?1, p.id, p.name, p.url, s.platform FROM project_links pl
+	rows, err := s.rd.QueryContext(ctx, `SELECT pl.mod_project_id = ?1, p.id, p.name, p.url, s.platform FROM project_links pl
 		JOIN projects p ON p.id = CASE WHEN pl.mod_project_id = ?1 THEN pl.code_project_id ELSE pl.mod_project_id END
 		JOIN sources s ON s.id = p.source_id
 		WHERE pl.mod_project_id = ?1 OR pl.code_project_id = ?1 ORDER BY p.name COLLATE NOCASE`, id)

@@ -88,7 +88,7 @@ func (s *Store) fillIntegrations(ctx context.Context, rows []Repo) error {
 	if err != nil {
 		return err
 	}
-	q, err := s.db.QueryContext(ctx, groupMembersWith+`SELECT m.gid, x.id, x.name, x.url, s.platform, x.synced_at,
+	q, err := s.rd.QueryContext(ctx, groupMembersWith+`SELECT m.gid, x.id, x.name, x.url, s.platform, x.synced_at,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
 		count(i.id) FILTER (WHERE i.unread = 1)
@@ -128,7 +128,7 @@ func (s *Store) GroupTargets(ctx context.Context, id int64) ([]SyncTarget, error
 	if _, err := s.projectPlatform(ctx, s.db, id); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.source_id, s.platform
+	rows, err := s.rd.QueryContext(ctx, `SELECT p.id, p.external_id, p.name, p.url, p.sync_cursor, p.source_id, s.platform
 		FROM projects p JOIN sources s ON s.id = p.source_id
 		WHERE p.active = 1 AND `+scopeProj1+` ORDER BY p.id <> ?1, p.id`, id)
 	if err != nil {
