@@ -56,7 +56,7 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 			continue
 		}
 		seen[id] = true
-		j, err := r.opts.Store.CreateJob(ctx, id, flow, profileID)
+		j, err := r.opts.Store.CreateJob(ctx, id, flow, profileID, store.OriginManual, "")
 		q := Queued{ItemID: id}
 		switch {
 		case err == nil:

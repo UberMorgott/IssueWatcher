@@ -13,7 +13,7 @@ import (
 
 // Agent jobs (docs/ARCHITECTURE.md → HTTP API, Runner):
 //
-//	GET  /api/jobs?state=&flow=&project=&item=&cursor=&limit=  keyset chunk, newest first
+//	GET  /api/jobs?state=&flow=&origin=&project=&item=&cursor=&limit=  keyset chunk, newest first
 //	POST /api/jobs {itemIds[], flow: fix|reply, profileId?}    one job per item → 201 {jobs:[{itemId, job?, error?}]}
 //	GET  /api/jobs/{id}                  job
 //	GET  /api/jobs/{id}/log?attempt=     {attempt, steps:[{t, kind, text}]}
@@ -62,7 +62,7 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	f := store.JobFilter{State: q.Get("state"), Flow: q.Get("flow"), ProjectID: project, ItemID: item, Cursor: q.Get("cursor"), Limit: int(min(limit, 1000))}
+	f := store.JobFilter{State: q.Get("state"), Flow: q.Get("flow"), Origin: q.Get("origin"), ProjectID: project, ItemID: item, Cursor: q.Get("cursor"), Limit: int(min(limit, 1000))}
 	chunk, err := s.opts.Store.Jobs(r.Context(), f)
 	if errors.Is(err, store.ErrBadCursor) {
 		errJSON(w, http.StatusBadRequest, "bad cursor")

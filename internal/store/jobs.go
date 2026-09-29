@@ -21,6 +21,12 @@ const (
 	JobCancelled   = "cancelled"
 )
 
+// Job origins: queued by a click or by an automation rule.
+const (
+	OriginManual = "manual"
+	OriginRule   = "rule"
+)
+
 // ActiveJobStates are the unfinished states; an item has at most one such job per flow.
 var ActiveJobStates = []string{JobQueued, JobRunning, JobNeedsReview}
 
@@ -37,6 +43,8 @@ type Job struct {
 	ProjectID  int64           `json:"projectId"`
 	Flow       string          `json:"flow"`
 	State      string          `json:"state"`
+	Origin     string          `json:"origin"` // manual | rule
+	RuleID     string          `json:"ruleId"` // origin rule: agents.automation.rules[].id
 	ProfileID  string          `json:"profileId"`
 	Attempt    int             `json:"attempt"`
 	Phase      string          `json:"phase"`
@@ -58,7 +66,7 @@ type Job struct {
 	LocalPath string `json:"localPath"`
 }
 
-const jobColumns = `j.id, j.item_id, j.project_id, j.flow, j.state, j.profile_id, j.attempt, j.phase, j.branch,
+const jobColumns = `j.id, j.item_id, j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
 	p.name, i.number, i.title, i.url, p.local_path`
 
@@ -69,7 +77,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 		j      Job
 		result string
 	)
-	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
+	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.Origin, &j.RuleID, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
 		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
 		&j.Repo, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath)
 	if err != nil {
@@ -82,13 +90,17 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	return j, nil
 }
 
-// CreateJob queues a job for item itemID. An unfinished job of the same flow
-// for that item → ErrJobExists (with that job).
-func (s *Store) CreateJob(ctx context.Context, itemID int64, flow, profileID string) (Job, error) {
+// CreateJob queues a job for item itemID. origin is OriginManual ("" = manual)
+// or OriginRule with ruleID. An unfinished job of the same flow for that item
+// → ErrJobExists (with that job).
+func (s *Store) CreateJob(ctx context.Context, itemID int64, flow, profileID, origin, ruleID string) (Job, error) {
+	if origin == "" {
+		origin = OriginManual
+	}
 	var id int64
-	err := s.db.QueryRowContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, profile_id)
-		SELECT id, project_id, ?, ? FROM items WHERE id = ?
-		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, itemID).Scan(&id)
+	err := s.db.QueryRowContext(ctx, `INSERT INTO jobs (item_id, project_id, flow, profile_id, origin, rule_id)
+		SELECT id, project_id, ?, ?, ?, ? FROM items WHERE id = ?
+		ON CONFLICT DO NOTHING RETURNING id`, flow, profileID, origin, ruleID, itemID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		var n int
 		if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items WHERE id = ?`, itemID).Scan(&n); err != nil {
@@ -136,7 +148,8 @@ func (s *Store) Job(ctx context.Context, id int64) (Job, error) {
 // JobFilter selects jobs for the Jobs page (newest first).
 type JobFilter struct {
 	State     string // a job state, "active" (queued/running/needs_review) or "" (all)
-	Flow      string // fix | reply | ""
+	Flow      string // fix | reply | verify | label | ""
+	Origin    string // manual | rule | ""
 	ProjectID int64
 	ItemID    int64
 	Cursor    string // older than this row
@@ -166,6 +179,9 @@ func (s *Store) Jobs(ctx context.Context, f JobFilter) (JobChunk, error) {
 	}
 	if f.Flow != "" {
 		where, args = append(where, "j.flow = ?"), append(args, f.Flow)
+	}
+	if f.Origin != "" {
+		where, args = append(where, "j.origin = ?"), append(args, f.Origin)
 	}
 	if f.ProjectID != 0 {
 		where, args = append(where, "j.project_id = ?"), append(args, f.ProjectID)

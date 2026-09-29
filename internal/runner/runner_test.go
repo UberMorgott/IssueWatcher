@@ -569,14 +569,14 @@ func TestRestartRecovery(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 2, nil)
 	// Simulate a crash: one job left running, one queued, before a runner starts.
-	a, err := e.st.CreateJob(t.Context(), e.items[0], "fix", "claude")
+	a, err := e.st.CreateJob(t.Context(), e.items[0], "fix", "claude", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.st.UpdateJob(t.Context(), a.ID, nil, store.JobChange{State: new(store.JobRunning), Started: true}); err != nil {
 		t.Fatal(err)
 	}
-	b, err := e.st.CreateJob(t.Context(), e.items[1], "fix", "claude")
+	b, err := e.st.CreateJob(t.Context(), e.items[1], "fix", "claude", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

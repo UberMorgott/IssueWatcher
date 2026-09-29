@@ -69,6 +69,13 @@ func TestJobsAPI(t *testing.T) {
 	if code := e.call(t, http.MethodGet, "/api/jobs?state=active", "", &chunk); code != http.StatusOK || len(chunk.Items) != 0 {
 		t.Fatalf("active %d %+v", code, chunk)
 	}
+	if code := e.call(t, http.MethodGet, "/api/jobs?origin=manual", "", &chunk); code != http.StatusOK || len(chunk.Items) != 1 ||
+		chunk.Items[0].Origin != store.OriginManual || chunk.Items[0].RuleID != "" {
+		t.Fatalf("origin manual %d %+v", code, chunk)
+	}
+	if code := e.call(t, http.MethodGet, "/api/jobs?origin=rule", "", &chunk); code != http.StatusOK || len(chunk.Items) != 0 || *chunk.Total != 0 {
+		t.Fatalf("origin rule %d %+v", code, chunk)
+	}
 	var log struct {
 		Attempt int           `json:"attempt"`
 		Steps   []runner.Step `json:"steps"`

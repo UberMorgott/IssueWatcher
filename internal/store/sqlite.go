@@ -39,6 +39,12 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 
 // migrate applies migrations newer than PRAGMA user_version, one transaction each.
 func migrate(ctx context.Context, db *sql.DB) error {
+	return migrateTo(ctx, db, 0)
+}
+
+// migrateTo is migrate stopping after version upTo (0 = all); tests use it to
+// build a database at an older schema.
+func migrateTo(ctx context.Context, db *sql.DB, upTo int) error {
 	entries, err := migrationFiles.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("store: read migrations: %w", err)
@@ -58,6 +64,9 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		version := i + 1
 		if version <= current {
 			continue
+		}
+		if upTo > 0 && version > upTo {
+			break
 		}
 		if err := applyMigration(ctx, db, name, version); err != nil {
 			return err

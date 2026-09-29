@@ -250,6 +250,7 @@ export interface Agents {
 
 export type JobState = 'queued' | 'running' | 'needs_review' | 'done' | 'failed' | 'cancelled'
 export type JobFlow = 'fix' | 'reply'
+export type JobOrigin = 'manual' | 'rule'
 export type JobPhase = '' | 'prepare' | 'agent' | 'check' | 'verify' | 'review' | 'publish'
 
 /** Issue row badge: the item's newest job. */
@@ -361,6 +362,9 @@ export interface Job {
   projectId: number
   flow: JobFlow
   state: JobState
+  /** Queued by a click or by an automation rule (ruleId). */
+  origin: JobOrigin
+  ruleId: string
   profileId: string
   attempt: number
   phase: JobPhase
@@ -395,6 +399,7 @@ export interface JobQuery {
   /** A job state or "active" (queued/running/needs_review). */
   state?: string
   flow?: string
+  origin?: JobOrigin
   project?: number
   item?: number
   cursor?: string
