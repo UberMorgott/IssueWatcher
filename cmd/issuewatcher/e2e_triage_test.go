@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -36,6 +37,38 @@ func TestTriageE2E(t *testing.T) {
 		t.Fatalf("item: %v", err)
 	}
 	pid := strconv.FormatInt(first.RepoID, 10)
+	// Fix jobs need the project's local folder (a clone of it); the coder
+	// profile's CLI is missing, so they stop at once and fakecli's record
+	// stays the triage's.
+	var rows []struct {
+		ProjectID int64  `json:"projectId"`
+		URL       string `json:"url"`
+	}
+	c.send(t, http.MethodGet, "/api/folders", nil, &rows)
+	i := slices.IndexFunc(rows, func(r struct {
+		ProjectID int64  `json:"projectId"`
+		URL       string `json:"url"`
+	}) bool {
+		return r.ProjectID == first.RepoID
+	})
+	if i < 0 {
+		t.Fatalf("folders %+v", rows)
+	}
+	clone := filepath.Join(c.dir, "clone")
+	for _, args := range [][]string{{"init", "-q", clone}, {"-C", clone, "remote", "add", "origin", rows[i].URL + ".git"}} {
+		if b, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, b)
+		}
+	}
+	var fr struct{ Status string }
+	if code := c.send(t, http.MethodPut, "/api/projects/"+pid+"/path", map[string]any{"path": clone}, &fr); code != http.StatusOK || fr.Status != "ok" {
+		t.Fatalf("map folder: %d %+v", code, fr)
+	}
+	patchSettings(t, c.app, map[string]any{"agents": map[string]any{"roles": map[string]any{"coder": "codex"},
+		"profiles": []any{
+			map[string]any{"id": "claude", "name": "claude", "cli": "claude", "path": c.fakecli, "model": "", "args": []string{}, "timeoutMinutes": 5, "maxParallel": 1, "maxBudgetUsd": 0},
+			map[string]any{"id": "codex", "name": "codex", "cli": "codex", "path": filepath.Join(c.dir, "no-codex.exe"), "model": "", "args": []string{}, "timeoutMinutes": 5, "maxParallel": 1, "maxBudgetUsd": 0},
+		}}})
 
 	var tj store.Job
 	if code := c.send(t, http.MethodPost, "/api/projects/"+pid+"/triage", nil, &tj); code != http.StatusCreated || tj.Flow != "triage" || tj.ItemID != 0 {
