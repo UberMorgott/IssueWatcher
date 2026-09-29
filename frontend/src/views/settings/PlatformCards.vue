@@ -76,6 +76,8 @@ function statusHint(id: string) {
 const login = reactive<Record<string, LoginStatus | null>>({})
 const starting = reactive<Record<string, boolean>>({})
 const timers: Record<string, number> = {}
+/** Set on unmount: late responses of connect / poll must not start timers again. */
+let disposed = false
 const active = (id: string) => ['qr', 'scanned', 'window'].includes(login[id]?.state ?? '')
 const connectLabel = (id: string) => t(status(id)?.state === 'relogin' ? 'platforms.reconnect' : 'platforms.connect')
 const showConnect = (id: CardId) => {
@@ -94,6 +96,10 @@ async function connect(id: CardId) {
   starting[id] = true
   const r = await api.login(id)
   starting[id] = false
+  if (disposed) {
+    if (r.ok && id === 'steam') void api.cancelLogin('steam') // the QR would wait with nobody to scan it
+    return
+  }
   if (!r.ok) {
     errors[id] = `${t('platforms.loginFailed')}: ${r.error}`
     return
@@ -103,6 +109,7 @@ async function connect(id: CardId) {
 }
 
 function onLogin(id: CardId, s: LoginStatus) {
+  if (disposed) return // left the page: a request that returned late starts no new poll
   clearTimeout(timers[id])
   login[id] = s
   switch (s.state) {
@@ -127,7 +134,7 @@ function onLogin(id: CardId, s: LoginStatus) {
 async function poll(id: CardId) {
   if (!login[id]) return
   const r = await api.loginStatus(id)
-  if (!login[id]) return // cancelled meanwhile
+  if (disposed || !login[id]) return // cancelled or left the page meanwhile
   if (r.ok) onLogin(id, r.data)
   else timers[id] = window.setTimeout(() => void poll(id), 5000) // server busy: keep waiting
 }
@@ -145,8 +152,10 @@ function cancelLogin(id: CardId) {
   void api.cancelLogin(id)
 }
 onBeforeUnmount(() => {
+  disposed = true
   for (const id of Object.keys(timers)) clearTimeout(timers[id])
   if (active('steam')) void api.cancelLogin('steam')
+  for (const id of Object.keys(login)) login[id] = null
 })
 
 // The QR code of Steam's challenge URL, drawn as one SVG path (no v-html).
