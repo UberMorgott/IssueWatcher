@@ -210,6 +210,27 @@ func TestDirectPushCarriesEarlierJob(t *testing.T) {
 	}
 }
 
+// A push to another branch does not carry an earlier job whose commit is an
+// ancestor: that job's own branch never got it.
+func TestDirectPushOtherBranchDoesNotCarry(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 2, nil)
+	a := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	run(t, e.local, "checkout", "-q", "-b", "feature")
+	b := e.wait(e.enqueue("fix", e.items[1])[0].ID, store.JobNeedsReview)
+	if ra, rb := result(t, a).Local, result(t, b).Local; ra.Branch != "main" || rb.Branch != "feature" ||
+		run(t, e.local, "rev-parse", rb.HeadSHA+"^") != ra.HeadSHA {
+		t.Fatalf("A %+v, B %+v", ra, rb)
+	}
+	if _, err := e.r.Push(t.Context(), b.ID); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = e.st.Job(t.Context(), a.ID)
+	if r := result(t, a); a.State != store.JobNeedsReview || r.Local.Pushed {
+		t.Fatalf("job A on main was marked carried by a push to feature: %s %+v", a.State, r.Local)
+	}
+}
+
 // An issue closed after the owner pushed the commit by hand ends the job.
 func TestDirectPushedByHandThenClosed(t *testing.T) {
 	mode(t, "ok")

@@ -314,16 +314,18 @@ func (r *Runner) Push(ctx context.Context, id int64) (store.Job, error) {
 	}
 	nj, err := r.unlockPublish(ctx, j, res, perr)
 	if perr == nil {
-		r.markCarried(context.WithoutCancel(ctx), j.ID, res.Local, log)
+		r.markCarried(context.WithoutCancel(ctx), j, res.Local, log)
 	}
 	return nj, err
 }
 
-// markCarried ends the other direct fixes in the same folder whose commits went
-// along with a push (their head is an ancestor of the pushed one). The push
-// targets the project URL, not origin, so the remote-tracking refs that
-// onRemote / closeResolved read never learn about it.
-func (r *Runner) markCarried(ctx context.Context, pushedID int64, pushed *LocalResult, log *jobLog) {
+// markCarried ends the other direct fixes of the same project, folder and
+// branch whose commits went along with a push (their head is an ancestor of
+// the pushed one); a fix of another project sharing the clone, or on another
+// branch, did not reach its own target. The push targets the project URL, not
+// origin, so the remote-tracking refs that onRemote / closeResolved read never
+// learn about it.
+func (r *Runner) markCarried(ctx context.Context, pushedJob store.Job, pushed *LocalResult, log *jobLog) {
 	jobs, err := r.opts.Store.JobsInState(ctx, store.JobNeedsReview)
 	if err != nil {
 		r.opts.Log.Error("runner: carried pushes", "err", err)
@@ -332,8 +334,8 @@ func (r *Runner) markCarried(ctx context.Context, pushedID int64, pushed *LocalR
 	for _, j := range jobs {
 		res := parseResult(j)
 		loc := res.Local
-		if j.ID == pushedID || j.Flow != flowFix || res.Mode != config.ModeDirect || loc == nil || len(loc.Commits) == 0 ||
-			loc.Pushed || folderKey(loc.Dir) != folderKey(pushed.Dir) ||
+		if j.ID == pushedJob.ID || j.ProjectID != pushedJob.ProjectID || j.Flow != flowFix || res.Mode != config.ModeDirect ||
+			loc == nil || len(loc.Commits) == 0 || loc.Pushed || loc.Branch != pushed.Branch || folderKey(loc.Dir) != folderKey(pushed.Dir) ||
 			!r.gitOK(ctx, pushed.Dir, "merge-base", "--is-ancestor", loc.HeadSHA, pushed.HeadSHA) {
 			continue
 		}
