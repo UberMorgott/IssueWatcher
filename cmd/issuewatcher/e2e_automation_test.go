@@ -138,6 +138,38 @@ func TestAutomationE2E(t *testing.T) {
 	if n := len(automationLog(t, a)); n != 5 {
 		t.Fatalf("decision log has %d rows after a quiet sync, want 5", n)
 	}
+	// Manual label job (dispatch + «Добавить метки»): suggestions wait for the click.
+	var itemID int64
+	for _, raw := range items(t, a) {
+		var it struct {
+			ID     int64
+			Number int
+		}
+		_ = json.Unmarshal(raw, &it)
+		if it.Number == 1 {
+			itemID = it.ID
+		}
+	}
+	var queued struct {
+		Jobs []struct{ Job store.Job }
+	}
+	a.send(t, http.MethodPost, "/api/jobs", map[string]any{"itemIds": []int64{itemID}, "flow": "label"}, &queued)
+	if len(queued.Jobs) != 1 {
+		t.Fatalf("dispatch label: %+v", queued)
+	}
+	id := queued.Jobs[0].Job.ID
+	var j store.Job
+	waitFor(t, "manual label job needs_review", func() bool {
+		a.send(t, http.MethodGet, fmt.Sprintf("/api/jobs/%d", id), nil, &j)
+		return j.State == store.JobNeedsReview
+	})
+	if got := fakeLabels(gh, 1); len(got) != 0 {
+		t.Fatalf("manual label job applied %v without a click", got)
+	}
+	a.send(t, http.MethodPost, fmt.Sprintf("/api/jobs/%d/labels", id), map[string]any{"labels": []string{"question"}}, &j)
+	if got := fakeLabels(gh, 1); j.State != store.JobDone || !slices.Equal(got, []string{"question"}) {
+		t.Fatalf("apply labels: job %s, fake labels %v", j.State, got)
+	}
 	t.Logf("fake GitHub: %d calls, %d label adds", len(gh.Calls()), gh.LabelAdds)
 }
 
