@@ -1,7 +1,7 @@
 import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
 import { onBeforeUnmount } from 'vue'
-import type { SettingsPatch } from '../api/types'
+import type { Settings, SettingsPatch } from '../api/types'
 import { useSettingsStore } from '../stores/settings'
 
 /**
@@ -15,7 +15,7 @@ export function useSave() {
   const timers = new Map<string, number>()
   onBeforeUnmount(() => timers.forEach((id) => window.clearTimeout(id)))
 
-  async function save(p: SettingsPatch): Promise<boolean> {
+  async function save(p: SettingsPatch | ((s: Settings) => SettingsPatch)): Promise<boolean> {
     const err = await settings.patch(p)
     if (err) toast.add({ severity: 'error', summary: t('settings.saveFailed'), detail: err, life: 6000 })
     return !err

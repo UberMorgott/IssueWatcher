@@ -30,8 +30,10 @@ const save = useSave()
 const au = computed<Automation | undefined>(() => settings.doc?.settings.agents.automation)
 const profiles = computed(() => settings.doc?.settings.agents.profiles ?? [])
 
-function saveRules(rules: AutomationRule[]) {
-  return save({ agents: { automation: { rules } } })
+// Every rules change is a function of the latest saved list (by rule id): the
+// store rebuilds it on a 409 retry, so quick clicks never undo each other.
+function saveRules(edit: (rules: AutomationRule[]) => AutomationRule[]) {
+  return save((s) => ({ agents: { automation: { rules: edit(s.agents.automation.rules.slice()) } } }))
 }
 
 // --- rules -------------------------------------------------------------------
@@ -76,26 +78,32 @@ async function saveRule() {
     labelsAny: [...new Set(labelsText.split(',').map((l) => l.trim()).filter(Boolean))],
     maxPerDay: rest.maxPerDay || 0,
   }
-  const next = cur.rules.slice()
-  if (editIndex.value >= 0) next[editIndex.value] = rule
-  else next.push(rule)
+  const oldId = editIndex.value >= 0 ? cur.rules[editIndex.value]?.id : undefined
   savingRule.value = true
-  const ok = await saveRules(next)
+  const ok = await saveRules((rules) => {
+    const k = oldId === undefined ? -1 : rules.findIndex((r) => r.id === oldId)
+    if (k >= 0) rules[k] = rule
+    else rules.push(rule)
+    return rules
+  })
   savingRule.value = false
   if (ok) editing.value = null
 }
 
 function toggleRule(i: number, enabled: boolean) {
-  const cur = au.value
-  if (cur) void saveRules(cur.rules.map((r, j) => (j === i ? { ...r, enabled } : r)))
+  const id = au.value?.rules[i]?.id
+  if (id !== undefined) void saveRules((rules) => rules.map((r) => (r.id === id ? { ...r, enabled } : r)))
 }
 
 function moveRule(i: number, d: -1 | 1) {
-  const cur = au.value
-  if (!cur || i + d < 0 || i + d >= cur.rules.length) return
-  const next = cur.rules.slice()
-  ;[next[i], next[i + d]] = [next[i + d]!, next[i]!]
-  void saveRules(next)
+  const id = au.value?.rules[i]?.id
+  if (id === undefined) return
+  void saveRules((rules) => {
+    const k = rules.findIndex((r) => r.id === id)
+    if (k < 0 || k + d < 0 || k + d >= rules.length) return rules
+    ;[rules[k], rules[k + d]] = [rules[k + d]!, rules[k]!]
+    return rules
+  })
 }
 
 function removeRule(i: number) {
@@ -108,7 +116,7 @@ function removeRule(i: number) {
     icon: 'pi pi-exclamation-triangle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
     acceptProps: { label: t('settings.agents.delete'), severity: 'danger' },
-    accept: () => void saveRules(cur.rules.filter((_, j) => j !== i)),
+    accept: () => void saveRules((rules) => rules.filter((x) => x.id !== r.id)),
   })
 }
 
