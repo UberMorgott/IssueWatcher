@@ -89,14 +89,16 @@ async function onExpand(e: { data: Repo }) {
   repoStats[id] = r.ok ? r.data : 'error'
 }
 
-// Live data: re-read the loaded range in place (same sort, no scroll jump); open charts refetch quietly.
+// Live data: re-read the loaded range in place (same sort, no scroll jump) and take its cursor too,
+// so the next chunk continues after the re-read rows; open charts refetch quietly.
 watch(
   () => app.dataVersion,
   async () => {
     const n = rows.value.length
     if (n) {
+      const key = [sortField.value, sortOrder.value, filter.value.trim()].join('|')
       const r = await api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), '', Math.min(Math.max(n, 50), 1000), true)
-      if (r.ok) rows.value = r.data.items
+      if (r.ok && key === [sortField.value, sortOrder.value, filter.value.trim()].join('|')) list.replace(r.data)
     }
     for (const k of Object.keys(expanded.value)) {
       const id = Number(k)
