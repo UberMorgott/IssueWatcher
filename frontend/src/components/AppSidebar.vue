@@ -43,10 +43,10 @@ const active = (match: string[]) => match.includes(String(route.name))
         v-if="app.version"
         to="/settings/updates"
         class="version mono"
-        :title="t('nav.versionTip')"
+        :title="`${app.version} · ${t('nav.versionTip')}`"
         @click="emit('navigate')"
       >
-        {{ app.version }}
+        <span class="version-text">{{ app.version }}</span>
         <span
           v-if="app.updateAvailable"
           class="update-dot"
@@ -127,6 +127,7 @@ const active = (match: string[]) => match.includes(String(route.name))
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: none;
   min-width: 0;
   color: var(--iw-text);
   font-weight: 650;
@@ -152,10 +153,22 @@ const active = (match: string[]) => match.includes(String(route.name))
   align-items: center;
   gap: 5px;
   align-self: center;
+  flex: 0 1 auto;
+  min-width: 0; /* a long dev version shrinks (ellipsis) instead of overlapping the name */
   margin-top: 3px;
   font-size: calc(11px * var(--iw-fs, 1));
   color: var(--iw-dimmed);
   white-space: nowrap;
+}
+
+.version-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-dot {
+  flex: none;
 }
 
 .version:hover {
