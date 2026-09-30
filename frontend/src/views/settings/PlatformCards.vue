@@ -19,9 +19,9 @@ import { absTime, relTime } from '../../lib/format'
 // Settings › Платформы: one card per mod platform. «Подключить» is the whole
 // setup: Steam shows a QR code from Steam's own sign-in service (scan it in
 // the Steam app); Nexus / CurseForge / Factorio switch on and sign in in a
-// window of the installed browser. Accounts are detected; the manual fields
-// (author, Steam id/key/cookies) sit under
-// «Дополнительно». A tray card «войдите снова» opens /connections?login=<id>.
+// window of the installed browser. Accounts are detected (Steam: the SteamID
+// comes from the QR session); the manual overrides (author, Steam id/key/cookies)
+// sit under the collapsed «Дополнительно». A tray card «войдите снова» opens /connections?login=<id>.
 type ModId = 'nexus' | 'curseforge' | 'factorio'
 type CardId = ModId | 'steam'
 const app = useAppStore()
@@ -235,14 +235,22 @@ async function check(id: string) {
 
 // --- Steam
 const steam = ref<SteamStatus | null>(null)
+// The detected account is shown read-only; steamId is only a manual override
+// (empty = keep the account from the QR sign-in).
 const steamDraft = reactive({ steamId: '', apiKey: '', loginSecure: '', sessionid: '' })
 async function loadSteam() {
   const r = await api.steam()
-  if (r.ok) {
-    steam.value = r.data
-    steamDraft.steamId = r.data.steamId
-  }
+  if (r.ok) steam.value = r.data
 }
+const steamIdChanged = () => {
+  const v = steamDraft.steamId.trim()
+  return !!v && v !== (steam.value?.steamId ?? '')
+}
+const steamAccount = computed(() => {
+  const s = steam.value
+  if (!s?.steamId) return ''
+  return s.persona ? `${s.persona} (${s.steamId})` : s.steamId
+})
 onMounted(async () => {
   void app.loadPlatforms()
   await loadSteam()
@@ -254,13 +262,13 @@ onMounted(async () => {
   }
 })
 const steamDirty = computed(
-  () => steamDraft.steamId.trim() !== (steam.value?.steamId ?? '') || !!steamDraft.apiKey || !!steamDraft.loginSecure || !!steamDraft.sessionid,
+  () => steamIdChanged() || !!steamDraft.apiKey || !!steamDraft.loginSecure || !!steamDraft.sessionid,
 )
 async function saveSteam(extra: Record<string, string> = {}) {
   busy.steam = true
   errors.steam = ''
   const u: Record<string, string> = { ...extra }
-  if (steamDraft.steamId.trim() !== (steam.value?.steamId ?? '')) u.steamId = steamDraft.steamId.trim()
+  if (steamIdChanged()) u.steamId = steamDraft.steamId.trim()
   if (steamDraft.apiKey) u.apiKey = steamDraft.apiKey.trim()
   if (steamDraft.loginSecure) u.steamLoginSecure = steamDraft.loginSecure.trim()
   if (steamDraft.sessionid) u.sessionid = steamDraft.sessionid.trim()
@@ -271,8 +279,7 @@ async function saveSteam(extra: Record<string, string> = {}) {
     return false
   }
   steam.value = r.data
-  steamDraft.steamId = r.data.steamId
-  steamDraft.apiKey = steamDraft.loginSecure = steamDraft.sessionid = ''
+  steamDraft.steamId = steamDraft.apiKey = steamDraft.loginSecure = steamDraft.sessionid = ''
   toast.add({ severity: 'success', summary: t('platforms.steamSaved'), life: 2000 })
   await app.loadPlatforms()
   if (r.data.configured) void check('steam')
@@ -457,8 +464,12 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       </div>
     </template>
 
-    <!-- Steam: manual SteamID, API key, cookies (write-only), all optional -->
+    <!-- Steam: detected account (read-only); manual SteamID, API key, cookies (write-only) under «Дополнительно» -->
     <template v-if="c.id === 'steam'">
+      <small
+        v-if="steamAccount"
+        class="muted"
+      ><i class="pi pi-user" /> {{ t('platforms.steamAccount', { name: steamAccount }) }}</small>
       <Message
         v-if="steam?.session === 'expired'"
         severity="warn"
@@ -476,7 +487,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
         :aria-expanded="!!advanced.steam"
         @click="advanced.steam = !advanced.steam"
       >
-        <i :class="advanced.steam ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" /> {{ t('platforms.manual') }}
+        <i :class="advanced.steam ? 'pi pi-chevron-down' : 'pi pi-chevron-right'" /> {{ t('platforms.advanced') }}
       </button>
       <div
         v-if="advanced.steam"
@@ -486,10 +497,11 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           <span class="label">{{ t('platforms.steamId') }}</span>
           <InputText
             v-model="steamDraft.steamId"
-            placeholder="7656119…"
+            :placeholder="steam?.steamId || '7656119…'"
             class="mono"
             fluid
           />
+          <small class="muted">{{ t('platforms.steamIdHint') }}</small>
         </label>
         <label class="field">
           <span class="label">{{ t('platforms.apiKey') }}</span>
