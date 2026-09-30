@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,6 +131,26 @@ func newFakeNative(t *testing.T) (*Provider, *fakeSite) {
 	p := New(Options{Native: &NativeOptions{Browser: fs, HTTP: hc, GraphQL: srv.URL + "/v2/graphql", APIRouter: srv.URL + "/graphql"},
 		Author: func() string { return "UberMorgott" }})
 	return p, fs
+}
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The sign-in probe's native has a clock: HTTP 429 with valid JSON and no
+// GraphQL errors is a rate-limit error, not a nil func panic.
+func TestSignInProbeRateLimited(t *testing.T) {
+	hc := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Request: r,
+			Body: io.NopCloser(strings.NewReader(`{"data":null}`))}, nil
+	})}
+	spec := SignInSpec(hc, nil)
+	jar := websession.Memory([]websession.Cookie{{Name: "sid", Value: "x", Domain: "nexusmods.com", Path: "/", Secure: true}}, "")
+	_, err := spec.Probe(t.Context(), jar)
+	var rl *provider.RateLimitError
+	if !errors.As(err, &rl) || rl.Reset.IsZero() {
+		t.Fatalf("probe err = %v, want a RateLimitError with a reset", err)
+	}
 }
 
 func TestParseCommentsFixture(t *testing.T) {

@@ -104,6 +104,9 @@ func (n *native) fill() {
 	if n.games == nil {
 		n.games, n.threads = map[string]int{}, map[string]int{}
 	}
+	if n.now == nil {
+		n.now = time.Now
+	}
 }
 
 func (n *native) sigKey() string { return nativeSigV2 }
