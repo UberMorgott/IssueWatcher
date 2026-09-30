@@ -46,6 +46,7 @@ const marks: Record<string, Mark> = {
   nexus,
   nexusmods: nexus,
   codex: { hex: '#10A37F', mono: '>_', title: 'Codex' },
+  factorio: { hex: '#E39827', mono: 'F', title: 'Factorio Mod Portal' },
 }
 
 const mark = computed<Mark>(() => marks[props.platform] ?? { hex: '#627386', mono: props.platform.slice(0, 1).toUpperCase(), title: props.platform })

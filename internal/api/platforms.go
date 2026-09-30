@@ -27,6 +27,7 @@ const (
 	SessionManual  = "manual"  // cookies pasted by hand
 	SessionQR      = "qr"      // Steam QR sign-in (renews itself)
 	SessionStored  = "stored"  // a session of unknown origin
+	SessionProfile = "profile" // native: IssueWatcher's own browser profile was already signed in
 )
 
 // ErrUnknownPlatform: Check of a platform that has no account check.

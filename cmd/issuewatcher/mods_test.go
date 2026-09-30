@@ -52,7 +52,7 @@ func newTestPlatforms(t *testing.T, fakes map[string]*mcptest.Server) (*modPlatf
 	gh := github.NewProvider(newAuth(log, dir))
 	stm := steam.New(steam.Options{Dir: filepath.Join(dir, "secrets"), Log: log})
 	group := syncer.NewGroup(syncer.New(syncer.Options{Store: st, Provider: gh, Log: log}))
-	m := newModPlatforms(cfgs, st, log, group, gh, stm, nil)
+	m := newModPlatforms(cfgs, st, log, group, gh, stm, nil, dir)
 	if fakes != nil {
 		m.dial = func(id string) func(ctx context.Context) (mcp.Transport, error) { return fakes[id].Dial }
 	}

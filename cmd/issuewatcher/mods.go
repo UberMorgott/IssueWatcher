@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,25 +16,42 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/UberMorgott/issuewatcher/internal/api"
+	"github.com/UberMorgott/issuewatcher/internal/browser"
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/factorio"
 	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
+	"github.com/UberMorgott/issuewatcher/internal/secret"
+	"github.com/UberMorgott/issuewatcher/internal/signin"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
+	"github.com/UberMorgott/issuewatcher/internal/websession"
 )
 
 // checkTimeout bounds one «Проверить» (an MCP server may start a browser first).
 const checkTimeout = 90 * time.Second
 
-// modPlatform is one running MCP-backed platform.
+// modPlatform is one running mod platform: over its MCP server (bridge set)
+// or native (session set: the built-in engine's stored sign-in).
 type modPlatform struct {
-	bridge *mcpbridge.Client
-	prov   provider.Provider
-	syncer *syncer.Syncer
-	cfg    config.ModPlatform
+	bridge  *mcpbridge.Client
+	session *signin.Manager
+	prov    provider.Provider
+	syncer  *syncer.Syncer
+	cfg     config.ModPlatform
+}
+
+func (mp *modPlatform) native() bool { return mp != nil && mp.bridge == nil }
+
+// modIDs are the switchable mod platforms (Steam has its own settings).
+var modIDs = []string{nexus.Platform, curseforge.Platform, factorio.Platform}
+
+// nativeEngine reports whether id runs the built-in engine under cfg.
+func nativeEngine(id string, cfg config.ModPlatform) bool {
+	return id == factorio.Platform || cfg.Engine == config.EngineNative
 }
 
 // modPlatforms runs the MCP-backed mod platforms switched on in settings
@@ -48,6 +67,13 @@ type modPlatforms struct {
 	gh       provider.Provider
 	steam    *steam.Provider
 	onUpdate func([]store.Event, int)
+	dataDir  string
+
+	// native replaces building a native provider (tests: fake sites).
+	native func(id string, author func() string) (provider.Provider, *signin.Manager)
+
+	brMu sync.Mutex
+	br   *browser.Browser // shared by the native engines, started lazily
 
 	// onRelogin shows the tray card «<platform>: войдите снова» (set by main).
 	onRelogin func(id, name string)
@@ -63,9 +89,9 @@ type modPlatforms struct {
 }
 
 func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, group *syncer.Group,
-	gh provider.Provider, stm *steam.Provider, onUpdate func([]store.Event, int),
+	gh provider.Provider, stm *steam.Provider, onUpdate func([]store.Event, int), dataDir string,
 ) *modPlatforms {
-	m := &modPlatforms{cfgs: cfgs, st: st, log: log, group: group, gh: gh, steam: stm, onUpdate: onUpdate,
+	m := &modPlatforms{cfgs: cfgs, st: st, log: log, group: group, gh: gh, steam: stm, onUpdate: onUpdate, dataDir: dataDir,
 		live: map[string]*modPlatform{}, checks: map[string]api.PlatformStatus{}, notified: map[string]bool{}}
 	m.apply(cfgs.Get())
 	group.OnProgress(func(p syncer.Progress) {
@@ -78,24 +104,80 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 	return m
 }
 
-// Close stops the MCP server children for good.
+// Close stops the MCP server children and the browser for good.
 func (m *modPlatforms) Close() {
 	m.mu.Lock()
 	bridges := make([]*mcpbridge.Client, 0, len(m.live))
+	var sessions []*signin.Manager
 	for _, p := range m.live {
-		bridges = append(bridges, p.bridge)
+		if p.bridge != nil {
+			bridges = append(bridges, p.bridge)
+		}
+		if p.session != nil {
+			sessions = append(sessions, p.session)
+		}
 	}
 	m.mu.Unlock()
 	for _, b := range bridges {
 		b.Close()
 	}
+	for _, s := range sessions {
+		s.Cancel()
+	}
+	m.brMu.Lock()
+	br := m.br
+	m.brMu.Unlock()
+	if br != nil {
+		br.Close()
+	}
 }
 
 func modConfig(p config.Providers, id string) config.ModPlatform {
-	if id == nexus.Platform {
+	switch id {
+	case nexus.Platform:
 		return p.Nexus
+	case factorio.Platform:
+		return config.ModPlatform{Enabled: p.Factorio.Enabled, Author: p.Factorio.Author, Engine: config.EngineNative}
 	}
 	return p.CurseForge
+}
+
+// browser is the shared installed-browser driver of the native engines
+// (profile data\browser, owner-only).
+func (m *modPlatforms) browser() *browser.Browser {
+	m.brMu.Lock()
+	defer m.brMu.Unlock()
+	if m.br == nil {
+		dir := filepath.Join(m.dataDir, "browser")
+		if err := secret.RestrictDir(dir); err != nil {
+			m.log.Warn("browser profile dir", "err", err)
+		}
+		origins := slices.Concat(nexus.Origins, nexus.SignInOrigins, curseforge.Origins, factorio.Origins)
+		m.br = browser.New(browser.Options{Dir: dir, Origins: origins, Log: m.log})
+	}
+	return m.br
+}
+
+// buildNative builds a platform's native provider and its sign-in.
+func (m *modPlatforms) buildNative(id string, author func() string) (provider.Provider, *signin.Manager) {
+	if m.native != nil {
+		return m.native(id, author)
+	}
+	jar, err := websession.Open(filepath.Join(m.dataDir, "secrets", id+".json"))
+	if err != nil {
+		m.log.Warn("stored session unreadable: sign in again", "platform", id, "err", err)
+	}
+	br := m.browser()
+	switch id {
+	case nexus.Platform:
+		mgr := signin.New(nexus.SignInSpec(nil, m.log), jar, br)
+		return nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log}), mgr
+	case factorio.Platform:
+		mgr := signin.New(factorio.SignInSpec(nil, m.log), jar, br)
+		return factorio.New(factorio.Options{Session: mgr, Author: author, Log: m.log}), mgr
+	}
+	mgr := signin.New(curseforge.SignInSpec(nil, m.log), jar, br)
+	return curseforge.New(curseforge.Options{Native: &curseforge.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log}), mgr
 }
 
 // apply brings the running platforms in line with the settings. Bridges are
@@ -103,6 +185,7 @@ func modConfig(p config.Providers, id string) config.ModPlatform {
 // Platforms (GET /api/platforms) must not wait behind it.
 func (m *modPlatforms) apply(cfg config.Settings) {
 	var closing, stopping []*mcpbridge.Client
+	var cancelling []*signin.Manager
 	defer func() {
 		for _, b := range closing {
 			b.Close()
@@ -110,10 +193,21 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 		for _, b := range stopping {
 			b.Stop()
 		}
+		for _, s := range cancelling {
+			s.Cancel()
+		}
 	}()
+	drop := func(p *modPlatform) {
+		if p.bridge != nil {
+			closing = append(closing, p.bridge) // final: a late call must not start an unowned server
+		}
+		if p.session != nil {
+			cancelling = append(cancelling, p.session)
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, id := range []string{nexus.Platform, curseforge.Platform} {
+	for _, id := range modIDs {
 		want := modConfig(cfg.Providers, id)
 		cur := m.live[id]
 		switch {
@@ -121,15 +215,25 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 			p := m.start(id, cfg)
 			m.live[id] = p
 			m.group.Add(p.syncer)
-			m.log.Info("mod platform on", "platform", id)
+			m.log.Info("mod platform on", "platform", id, "native", p.native())
 		case !want.Enabled && cur != nil:
 			m.group.Remove(id)
-			closing = append(closing, cur.bridge) // final: a late call must not start an unowned server
+			drop(cur)
 			delete(m.live, id)
 			delete(m.checks, id)
 			delete(m.sessions, id)
 			m.log.Info("mod platform off", "platform", id)
-		case cur != nil && (want.MCP.Command != cur.cfg.MCP.Command || !slices.Equal(want.MCP.Args, cur.cfg.MCP.Args)):
+		case cur != nil && nativeEngine(id, want) != cur.native():
+			// The engine changed: a new provider (same platform id, same source).
+			m.group.Remove(id)
+			drop(cur)
+			p := m.start(id, cfg)
+			m.live[id] = p
+			m.group.Add(p.syncer)
+			delete(m.checks, id)
+			delete(m.sessions, id)
+			m.log.Info("mod platform engine switched", "platform", id, "native", p.native())
+		case cur != nil && cur.bridge != nil && (want.MCP.Command != cur.cfg.MCP.Command || !slices.Equal(want.MCP.Args, cur.cfg.MCP.Args)):
 			stopping = append(stopping, cur.bridge) // the next call starts the new command
 			cur.cfg = want
 			delete(m.checks, id)
@@ -142,9 +246,15 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 	}
 }
 
-// start builds a platform's bridge, provider and syncer. m.mu must be held.
+// start builds a platform's provider (native, or over its MCP bridge) and
+// syncer. m.mu must be held.
 func (m *modPlatforms) start(id string, cfg config.Settings) *modPlatform {
 	pick := func() config.ModPlatform { return modConfig(m.cfgs.Get().Providers, id) }
+	if nativeEngine(id, modConfig(cfg.Providers, id)) {
+		p, mgr := m.buildNative(id, func() string { return pick().Author })
+		s := syncer.New(syncer.Options{Store: m.st, Provider: p, Plan: syncPlan(cfg.Sync), Log: m.log, OnUpdate: m.onUpdate})
+		return &modPlatform{session: mgr, prov: p, syncer: s, cfg: modConfig(cfg.Providers, id)}
+	}
 	opts := mcpbridge.Options{Name: id, Log: m.log, Command: func() (string, []string) {
 		s := pick().MCP
 		return os.ExpandEnv(s.Command), s.Args
@@ -165,7 +275,8 @@ func (m *modPlatforms) start(id string, cfg config.Settings) *modPlatform {
 }
 
 var platformNames = map[string]string{
-	"github": "GitHub", nexus.Platform: "Nexus Mods", curseforge.Platform: "CurseForge", steam.Platform: "Steam Workshop",
+	"github": "GitHub", nexus.Platform: "Nexus Mods", curseforge.Platform: "CurseForge", factorio.Platform: "Factorio Mod Portal",
+	steam.Platform: "Steam Workshop",
 }
 
 // Platforms implements api.Platforms: every platform, GitHub first.
@@ -181,8 +292,8 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 	cfg := m.cfgs.Get().Providers
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]api.PlatformStatus, 0, 4)
-	for _, id := range []string{"github", nexus.Platform, curseforge.Platform, steam.Platform} {
+	out := make([]api.PlatformStatus, 0, 5)
+	for _, id := range []string{"github", nexus.Platform, curseforge.Platform, factorio.Platform, steam.Platform} {
 		ps := api.PlatformStatus{ID: id, Name: platformNames[id], Enabled: true, Projects: projects[id]}
 		steamExpired := false
 		switch id {
@@ -196,12 +307,17 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 			ps.Session, ps.AccountName = steamSession(st), st.Persona
 		default:
 			ps.Enabled = modConfig(cfg, id).Enabled
-			if p := m.live[id]; p != nil {
+			switch p := m.live[id]; {
+			case p != nil:
 				ps.Capabilities = p.prov.Capabilities()
-				ps.Running = p.bridge.Running()
-			} else if id == nexus.Platform {
+				if p.bridge != nil {
+					ps.Running = p.bridge.Running()
+				}
+			case id == nexus.Platform:
 				ps.Capabilities = nexus.New(nexus.Options{}).Capabilities()
-			} else {
+			case id == factorio.Platform:
+				ps.Capabilities = factorio.New(factorio.Options{}).Capabilities()
+			default:
 				ps.Capabilities = curseforge.New(curseforge.Options{}).Capabilities()
 			}
 		}
@@ -247,13 +363,13 @@ func (m *modPlatforms) Check(ctx context.Context, id string) (api.PlatformStatus
 	switch id {
 	case steam.Platform:
 		p = m.steam
-	case nexus.Platform, curseforge.Platform:
+	case nexus.Platform, curseforge.Platform, factorio.Platform:
 		if mp := m.live[id]; mp != nil {
 			p = mp.prov
 		}
 	}
 	m.mu.Unlock()
-	if id != steam.Platform && id != nexus.Platform && id != curseforge.Platform {
+	if id != steam.Platform && !slices.Contains(modIDs, id) {
 		return api.PlatformStatus{}, api.ErrUnknownPlatform
 	}
 	res := api.PlatformStatus{ID: id, CheckedAt: time.Now().UTC().Format(time.RFC3339)}
@@ -355,7 +471,7 @@ func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, e
 		out := qrStatus(st)
 		m.logLogin(out, sourceName(api.SessionQR), "")
 		return out, nil
-	case nexus.Platform, curseforge.Platform:
+	case nexus.Platform, curseforge.Platform, factorio.Platform:
 	default:
 		return api.LoginStatus{}, api.ErrUnknownPlatform
 	}
@@ -369,7 +485,8 @@ func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, e
 	ctx, cancel := context.WithTimeout(ctx, loginTimeout)
 	defer cancel()
 	// Already signed in (or a window already open): no new import or window.
-	if res, err := l.LoginStatus(ctx); err == nil && (res.LoggedIn || res.InProgress) {
+	// The native sign-in checks its stored session itself (with a probe).
+	if res, err := l.LoginStatus(ctx); err == nil && (res.InProgress || (res.LoggedIn && !m.isNative(id))) {
 		return m.loginResult(ctx, id, res), nil
 	}
 	res, err := l.Login(ctx)
@@ -386,7 +503,7 @@ func (m *modPlatforms) LoginStatus(ctx context.Context, id string) (api.LoginSta
 		out := qrStatus(m.steam.QRLoginStatus())
 		m.logLogin(out, sourceName(api.SessionQR), "")
 		return out, nil
-	case nexus.Platform, curseforge.Platform:
+	case nexus.Platform, curseforge.Platform, factorio.Platform:
 	default:
 		return api.LoginStatus{}, api.ErrUnknownPlatform
 	}
@@ -409,7 +526,7 @@ func (m *modPlatforms) CancelLogin(id string) error {
 	case steam.Platform:
 		m.steam.CancelQR()
 		return nil
-	case nexus.Platform, curseforge.Platform:
+	case nexus.Platform, curseforge.Platform, factorio.Platform:
 		// Stop a waiting sign-in (default-browser polling / the server's window).
 		l, err := m.loginer(id)
 		if err != nil {
@@ -538,7 +655,7 @@ func sessionOf(ctx context.Context, p provider.Provider) (string, string) {
 		return "", ""
 	case !st.LoggedIn:
 		return api.SessionNone, ""
-	case st.Source == api.SessionBrowser || st.Source == api.SessionWindow || st.Source == api.SessionManual:
+	case st.Source == api.SessionBrowser || st.Source == api.SessionWindow || st.Source == api.SessionManual || st.Source == api.SessionProfile:
 		return st.Source, st.Browser
 	default:
 		return api.SessionStored, ""
@@ -603,7 +720,7 @@ func (m *modPlatforms) Logout(ctx context.Context, id string, forget bool) (api.
 				return api.PlatformStatus{}, err
 			}
 		}
-	case nexus.Platform, curseforge.Platform:
+	case nexus.Platform, curseforge.Platform, factorio.Platform:
 		ctx, cancel := context.WithTimeout(ctx, loginTimeout)
 		defer cancel()
 		if err := m.serverLogout(ctx, id); err != nil {
@@ -637,9 +754,12 @@ func (m *modPlatforms) serverLogout(ctx context.Context, id string) error {
 	mp := m.live[id]
 	m.mu.Unlock()
 	var p provider.Provider
-	if mp != nil {
+	switch {
+	case mp != nil:
 		p = mp.prov
-	} else {
+	case nativeEngine(id, modConfig(m.cfgs.Get().Providers, id)):
+		p, _ = m.buildNative(id, func() string { return "" }) // clears the stored jar + profile of a switched-off platform
+	default:
 		opts := mcpbridge.Options{Name: id, Log: m.log, Command: func() (string, []string) {
 			s := modConfig(m.cfgs.Get().Providers, id).MCP
 			return os.ExpandEnv(s.Command), s.Args
@@ -660,6 +780,13 @@ func (m *modPlatforms) serverLogout(ctx context.Context, id string) error {
 		return api.ErrUnknownPlatform
 	}
 	return lo.Logout(ctx)
+}
+
+// isNative reports whether a running platform uses the built-in engine.
+func (m *modPlatforms) isNative(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.live[id].native()
 }
 
 // forget clears the uploader account and switches the platform off.
@@ -719,8 +846,12 @@ func (m *modPlatforms) connected(ctx context.Context, id string) {
 		m.mu.Lock()
 		mp := m.live[id]
 		m.mu.Unlock()
-		if np, ok := mp.provOK(); ok && np.Member() > 0 && strings.TrimSpace(mp.cfg.Author) == "" {
-			m.setAuthor(id, strconv.Itoa(np.Member()))
+		if np, ok := mp.provOK(); ok && strings.TrimSpace(mp.cfg.Author) == "" {
+			if np.Member() > 0 {
+				m.setAuthor(id, strconv.Itoa(np.Member()))
+			} else if mp.native() && mp.session != nil && mp.session.Status().Account != "" {
+				m.setAuthor(id, mp.session.Status().Account) // the native sign-in knows the account name
+			}
 		}
 	}
 	m.mu.Lock()
@@ -749,7 +880,8 @@ func (m *modPlatforms) setAuthor(id, author string) {
 		if strings.TrimSpace(modConfig(cur.Providers, id).Author) != "" {
 			return
 		}
-		_, err := m.cfgs.Patch(cur.Revision, []byte(`{"providers":{"`+id+`":{"author":"`+author+`"}}}`), nil)
+		patch, _ := json.Marshal(map[string]any{"providers": map[string]any{id: map[string]any{"author": author}}})
+		_, err := m.cfgs.Patch(cur.Revision, patch, nil)
 		if err == nil {
 			m.log.Info("platform account detected", "platform", id, "author", author)
 			return
@@ -768,7 +900,7 @@ func checkState(err error) (string, string) {
 		return api.PlatformConnected, ""
 	case errors.Is(err, mcpbridge.ErrUnavailable):
 		return api.PlatformUnavailable, err.Error()
-	case errors.Is(err, curseforge.ErrRelogin), errors.Is(err, steam.ErrSessionExpired):
+	case errors.Is(err, curseforge.ErrRelogin), errors.Is(err, steam.ErrSessionExpired), errors.Is(err, provider.ErrRelogin):
 		return api.PlatformRelogin, err.Error()
 	case errors.Is(err, provider.ErrNotSignedIn):
 		return api.PlatformSignedOut, err.Error()

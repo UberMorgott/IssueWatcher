@@ -277,15 +277,25 @@ export interface Settings {
   providers: Providers
 }
 
-/** settings.providers: the MCP-backed mod platforms (internal/config Providers); apply live. */
+/** settings.providers: the mod platforms (internal/config Providers); apply live. */
 export interface Providers {
   nexus: ModPlatform
   curseforge: ModPlatform
+  factorio: NativePlatform
+}
+
+/** A platform with only the built-in engine (Factorio). */
+export interface NativePlatform {
+  enabled: boolean
+  /** Portal username whose mods are listed; empty = the signed-in one. */
+  author?: string
 }
 
 export interface ModPlatform {
   enabled: boolean
   mcp: { command: string; args: string[] }
+  /** 'mcp' = the owner's MCP server, 'native' = built-in (installed browser + plain HTTP). */
+  engine?: 'mcp' | 'native'
   /** Nexus: the exact uploader account name or member id (required); CurseForge: CFWidget author override. */
   author?: string
 }
@@ -784,7 +794,7 @@ export interface Capabilities {
 export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'unavailable' | 'error'
 
 /** none = public reads only; qr = Steam QR sign-in; stored = origin unknown. */
-export type PlatformSession = 'none' | 'browser' | 'window' | 'manual' | 'qr' | 'stored'
+export type PlatformSession = 'none' | 'browser' | 'window' | 'manual' | 'qr' | 'stored' | 'profile'
 
 /** GET /api/platforms row (internal/api PlatformStatus). */
 export interface PlatformStatus {

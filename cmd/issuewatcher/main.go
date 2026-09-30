@@ -258,7 +258,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}), syncer.New(syncer.Options{
 		Store: st, Provider: stm, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
 	}))
-	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate) // Nexus / CurseForge over MCP, switched live
+	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate, dataDir) // Nexus / CurseForge / Factorio (MCP or native), switched live
 	defer mods.Close()
 	mods.onRelogin = func(id, name string) { // a click opens «Подключить» for that platform
 		c := notify.ReloginCard(id, name, time.Now())

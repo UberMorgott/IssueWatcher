@@ -1,13 +1,14 @@
 import type { Capabilities, ItemKind } from '../api/types'
 
 /** Platforms in display order (GitHub first). */
-export const PLATFORMS = ['github', 'nexus', 'curseforge', 'steam'] as const
+export const PLATFORMS = ['github', 'nexus', 'curseforge', 'factorio', 'steam'] as const
 export type PlatformId = (typeof PLATFORMS)[number]
 
 export const PLATFORM_NAMES: Record<string, string> = {
   github: 'GitHub',
   nexus: 'Nexus Mods',
   curseforge: 'CurseForge',
+  factorio: 'Factorio Mod Portal',
   steam: 'Steam Workshop',
 }
 
@@ -25,12 +26,12 @@ export function fallbackCaps(platform: string): Capabilities {
     listProjects: true,
     syncItems: true,
     listComments: true,
-    reply: platform !== 'steam',
+    reply: platform !== 'steam' && platform !== 'factorio',
     setLabels: gh,
     setStatus: false,
     createPR: gh,
     auth: '',
-    kinds: gh ? ['issue'] : platform === 'nexus' ? ['comment', 'bug'] : ['comment'],
+    kinds: gh ? ['issue'] : platform === 'nexus' || platform === 'factorio' ? ['comment', 'bug'] : ['comment'],
     replyThreaded: platform !== 'steam',
   }
 }

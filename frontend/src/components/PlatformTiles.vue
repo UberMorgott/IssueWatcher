@@ -11,7 +11,7 @@ const app = useAppStore()
 const { t } = useI18n()
 
 const tiles = computed(() =>
-  (['nexus', 'curseforge', 'steam'] as const).map((id) => {
+  (['nexus', 'curseforge', 'factorio', 'steam'] as const).map((id) => {
     const repos = app.repos.filter((r) => r.platform === id)
     const st = app.platforms.find((p) => p.id === id)
     return {

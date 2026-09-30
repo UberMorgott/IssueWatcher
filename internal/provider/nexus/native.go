@@ -44,6 +44,9 @@ type NativeOptions struct {
 // Origins are the https origins the native engine uses in the browser.
 var Origins = []string{"https://www.nexusmods.com"}
 
+// SignInOrigins are the origins of the sign-in window (besides Origins).
+var SignInOrigins = []string{"https://users.nexusmods.com", "https://next.nexusmods.com"}
+
 // Endpoints of the native engine.
 const (
 	siteOrigin  = "https://www.nexusmods.com"
@@ -60,7 +63,7 @@ func SignInSpec(hc *http.Client, log *slog.Logger) signin.Spec {
 	n.fill()
 	return signin.Spec{
 		Platform: Platform, LoginURL: signInURL,
-		Domains: []string{"nexusmods.com"}, Origins: []string{siteOrigin, "https://users.nexusmods.com", "https://next.nexusmods.com"},
+		Domains: []string{"nexusmods.com"}, Origins: append([]string{siteOrigin}, SignInOrigins...),
 		Log: log,
 		Probe: func(ctx context.Context, jar *websession.Jar) (string, error) {
 			m, err := n.whoAmI(ctx, jar)

@@ -63,3 +63,12 @@ func Remove(path string) error {
 	}
 	return nil
 }
+
+// RestrictDir creates dir (and parents) and restricts it to the current user,
+// inherited by everything created inside (a browser profile).
+func RestrictDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("secret: create dir: %w", err)
+	}
+	return restrict(dir, true)
+}
