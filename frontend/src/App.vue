@@ -229,15 +229,29 @@ onBeforeUnmount(() => {
   channel?.close()
 })
 
+/** Shortcut help, grouped by where the keys work. */
 const shortcuts = computed(() => [
-  ['/', t('app.keys.search')],
-  ['J / K', t('app.keys.nextPrev')],
-  ['Enter', t('app.keys.open')],
-  ['X', t('app.keys.toggle')],
-  ['R', t('app.keys.sync')],
-  ['[', t('app.keys.sidebar')],
-  [t('app.keys.goKeys'), t('app.keys.go')],
-  ['?', t('app.keys.help')],
+  {
+    title: t('app.keys.global'),
+    keys: [
+      ['/', t('app.keys.search')],
+      ['R', t('app.keys.sync')],
+      ['[', t('app.keys.sidebar')],
+      [t('app.keys.goKeys'), t('app.keys.go')],
+      ['?', t('app.keys.help')],
+    ],
+  },
+  {
+    title: t('app.keys.list'),
+    keys: [
+      ['J / K', t('app.keys.nextPrev')],
+      ['Enter', t('app.keys.open')],
+      ['X', t('app.keys.toggle')],
+      ['Shift + X', t('app.keys.range')],
+      ['Esc', t('app.keys.clear')],
+    ],
+  },
+  { title: t('app.keys.item'), keys: [['Ctrl + Enter', t('app.keys.send')]] },
 ])
 </script>
 
@@ -372,9 +386,17 @@ const shortcuts = computed(() => [
       dismissable-mask
     >
       <table class="keys">
-        <tbody>
+        <tbody
+          v-for="g in shortcuts"
+          :key="g.title"
+        >
+          <tr>
+            <th colspan="2">
+              {{ g.title }}
+            </th>
+          </tr>
           <tr
-            v-for="[k, what] in shortcuts"
+            v-for="[k, what] in g.keys"
             :key="k"
           >
             <td><kbd class="mono">{{ k }}</kbd></td>
@@ -600,6 +622,14 @@ const shortcuts = computed(() => [
 .keys td {
   padding: 8px 4px;
   border-bottom: 1px solid var(--iw-border);
+}
+
+.keys th {
+  padding: 14px 4px 4px;
+  text-align: left;
+  font-size: calc(12px * var(--iw-fs, 1));
+  font-weight: 600;
+  color: var(--iw-muted);
 }
 
 kbd {

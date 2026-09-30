@@ -23,20 +23,21 @@ const SectionSkeleton = defineComponent({
 const lazySection = (loader: AsyncComponentLoader) => defineAsyncComponent({ loader, loadingComponent: SectionSkeleton, delay: 0 })
 
 // Secondary menu (docs/ARCHITECTURE.md → Settings). Deep link: /settings/<id>.
-const SECTIONS: { id: string; icon: string; view: Component }[] = [
+// «Подключения» is its own page (/connections): the entry links there.
+const SECTIONS: { id: string; icon: string; view?: Component; link?: string }[] = [
   { id: 'general', icon: 'pi pi-sliders-h', view: lazySection(() => import('./settings/GeneralSection.vue')) },
   { id: 'appearance', icon: 'pi pi-palette', view: lazySection(() => import('./settings/AppearanceSection.vue')) },
   { id: 'notifications', icon: 'pi pi-bell', view: lazySection(() => import('./settings/NotificationsSection.vue')) },
   { id: 'sync', icon: 'pi pi-sync', view: lazySection(() => import('./settings/SyncSection.vue')) },
-  { id: 'connections', icon: 'pi pi-link', view: lazySection(() => import('./ConnectionsView.vue')) },
+  { id: 'connections', icon: 'pi pi-link', link: '/connections' },
   { id: 'projects', icon: 'pi pi-folder', view: lazySection(() => import('./settings/ProjectsSection.vue')) },
   { id: 'agents', icon: 'pi pi-microchip-ai', view: lazySection(() => import('./settings/AgentsSection.vue')) },
   { id: 'updates', icon: 'pi pi-cloud-download', view: lazySection(() => import('./settings/UpdatesSection.vue')) },
   { id: 'advanced', icon: 'pi pi-wrench', view: lazySection(() => import('./settings/AdvancedSection.vue')) },
 ]
 
-const current = computed(() => SECTIONS.find((s) => s.id === props.section) ?? SECTIONS[0])
-if (props.section && !SECTIONS.some((s) => s.id === props.section)) void router.replace('/settings/general')
+const current = computed(() => SECTIONS.find((s) => s.id === props.section && s.view) ?? SECTIONS[0])
+if (props.section && !SECTIONS.some((s) => s.id === props.section && s.view)) void router.replace('/settings/general')
 
 useCrumbs(() => [
   { label: t('nav.settings'), to: '/settings' },
@@ -53,7 +54,7 @@ useCrumbs(() => [
       <RouterLink
         v-for="s in SECTIONS"
         :key="s.id"
-        :to="'/settings/' + s.id"
+        :to="s.link ?? '/settings/' + s.id"
         class="side-link"
         :class="{ active: current.id === s.id }"
         :aria-current="current.id === s.id ? 'page' : undefined"
@@ -75,7 +76,6 @@ useCrumbs(() => [
         :is="current.view"
         v-else
         :key="current.id"
-        v-bind="current.id === 'connections' ? { embedded: true } : {}"
       />
     </div>
   </div>

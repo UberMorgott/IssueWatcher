@@ -37,8 +37,8 @@ let activitySeq = 0
 /** App-wide state: theme, shell, connections, sync status, repo list, live feed. */
 export const useAppStore = defineStore('app', () => {
   // --- shell: the effective light/dark theme (lib/appearance); setTheme saves
-  // the mode server-side, so every tab and browser follows.
-  function setTheme(t: Theme) {
+  // the mode (light | dark | system) server-side, so every tab and browser follows.
+  function setTheme(t: Theme | 'system') {
     void useSettingsStore().patch({ appearance: { mode: t } })
   }
   const sidebarCollapsed = ref(load('iw.sidebar') === 'collapsed')
@@ -95,10 +95,14 @@ export const useAppStore = defineStore('app', () => {
 
   // --- platforms (Settings › Платформы): state + capabilities per platform
   const platforms = ref<PlatformStatus[]>([])
+  const platformsLoaded = ref(false)
   async function loadPlatforms() {
     const r = await api.platforms()
     if (r.ok) platforms.value = r.data ?? []
+    platformsLoaded.value = true
   }
+  /** A mod platform is switched on (connected or still checking): not a first run any more. */
+  const anyPlatformOn = computed(() => platforms.value.some((p) => p.id !== 'github' && p.enabled))
   function setPlatform(p: PlatformStatus) {
     platforms.value = platforms.value.some((x) => x.id === p.id) ? platforms.value.map((x) => (x.id === p.id ? p : x)) : [...platforms.value, p]
   }
@@ -188,8 +192,10 @@ export const useAppStore = defineStore('app', () => {
   /** Unread comments (mod page threads); the rest of unreadTotal are issues and bug reports (sidebar badges, Overview). */
   const unreadComments = computed(() => repos.value.reduce((n, r) => n + (r.unreadComments ?? 0), 0))
   const unreadIssues = computed(() => unreadTotal.value - unreadComments.value)
-  /** First run: nothing connected and nothing synced yet → pages show the Connect CTA. */
-  const onboarding = computed(() => authLoaded.value && reposLoaded.value && !githubConnected.value && repos.value.length === 0)
+  /** First run: no source connected (GitHub or a mod platform) and nothing synced yet → pages show the Connect CTA. */
+  const onboarding = computed(
+    () => authLoaded.value && reposLoaded.value && platformsLoaded.value && !githubConnected.value && !anyPlatformOn.value && repos.value.length === 0,
+  )
   /** Signed out but earlier data is still in the local database. */
   const offlineData = computed(() => authLoaded.value && !githubConnected.value && repos.value.some((r) => r.platform === 'github'))
 
@@ -252,6 +258,8 @@ export const useAppStore = defineStore('app', () => {
     connect,
     disconnect,
     platforms,
+    platformsLoaded,
+    anyPlatformOn,
     loadPlatforms,
     setPlatform,
     caps,

@@ -17,7 +17,9 @@ export const router = createRouter({
     { path: '/jobs', name: 'jobs', component: () => import('./views/JobsView.vue'), meta: { title: 'jobs' } },
     { path: '/jobs/:id', name: 'job', component: () => import('./views/JobView.vue'), props: true, meta: { title: 'job' } },
     { path: '/agents', redirect: '/settings/agents' },
+    // One page for every account (GitHub + mod platforms); Settings › Подключения links here, the old path redirects.
     { path: '/connections', name: 'connections', component: () => import('./views/ConnectionsView.vue'), meta: { title: 'connections' } },
+    { path: '/settings/connections', redirect: (to) => ({ path: '/connections', query: to.query }) },
     // Deep links: /settings/<section> (general, appearance, notifications, sync, …).
     { path: '/settings/:section?', name: 'settings', component: () => import('./views/SettingsView.vue'), props: true, meta: { title: 'settings' } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue'), meta: { title: 'notFound' } },

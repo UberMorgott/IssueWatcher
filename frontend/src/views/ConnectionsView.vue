@@ -12,8 +12,6 @@ import { useAppStore } from '../stores/app'
 import { absTime, relTime } from '../lib/format'
 import { useSettingsStore } from '../stores/settings'
 
-/** embedded: shown inside Settings → Connections (no page frame). */
-defineProps<{ embedded?: boolean }>()
 const app = useAppStore()
 const confirm = useConfirm()
 const toast = useToast()
@@ -81,7 +79,7 @@ function disconnect() {
 </script>
 
 <template>
-  <div :class="embedded ? 'embedded' : 'page'">
+  <div class="page">
     <i18n-t
       keypath="connections.sub"
       tag="p"
@@ -269,12 +267,6 @@ function disconnect() {
 </template>
 
 <style scoped>
-.embedded {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
 .cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -4,8 +4,14 @@ import Button from 'primevue/button'
 import { useI18n } from 'vue-i18n'
 import PlatformIcon from './PlatformIcon.vue'
 import { useAppStore } from '../stores/app'
+import { useSettingsStore } from '../stores/settings'
+import { PLATFORMS } from '../lib/platforms'
 
+// First run: nothing connected yet. GitHub is one click here; the mod platforms
+// (Nexus, CurseForge, Factorio, Steam) connect on the Connections page.
 const app = useAppStore()
+const settings = useSettingsStore()
+const secretsDir = computed(() => (settings.doc?.info.dataDir ? settings.doc.info.dataDir + '\\secrets' : 'data\\secrets'))
 const { t } = useI18n()
 const busy = ref(false)
 const waiting = ref(false)
@@ -17,7 +23,7 @@ async function connect() {
 }
 
 const steps = computed(() => [
-  { icon: 'pi pi-github', title: t('hero.steps.connectTitle'), text: t('hero.steps.connectText') },
+  { icon: 'pi pi-link', title: t('hero.steps.connectTitle'), text: t('hero.steps.connectText') },
   { icon: 'pi pi-sync', title: t('hero.steps.syncTitle'), text: t('hero.steps.syncText') },
   { icon: 'pi pi-inbox', title: t('hero.steps.reviewTitle'), text: t('hero.steps.reviewText') },
 ])
@@ -27,11 +33,15 @@ const steps = computed(() => [
   <section class="hero panel">
     <div class="hero-glow" />
     <div class="hero-main">
-      <PlatformIcon
-        platform="github"
-        :size="56"
-        tile
-      />
+      <div class="hero-icons">
+        <PlatformIcon
+          v-for="p in PLATFORMS"
+          :key="p"
+          :platform="p"
+          :size="44"
+          tile
+        />
+      </div>
       <h2 class="hero-title">
         {{ t('hero.title') }}
       </h2>
@@ -42,7 +52,7 @@ const steps = computed(() => [
         scope="global"
       >
         <template #path>
-          <span class="mono">data\secrets</span>
+          <span class="mono">{{ secretsDir }}</span>
         </template>
       </i18n-t>
       <div class="hero-actions">
@@ -51,15 +61,18 @@ const steps = computed(() => [
           icon="pi pi-github"
           size="large"
           :loading="busy"
-          :disabled="!app.authLoaded || !!app.authError"
+          :disabled="!app.authLoaded || !app.github"
           @click="connect"
         />
-        <RouterLink
+        <Button
+          as="router-link"
           to="/connections"
-          class="hero-link"
-        >
-          {{ t('hero.otherPlatforms') }} <i class="pi pi-arrow-right" />
-        </RouterLink>
+          :label="t('hero.otherPlatforms')"
+          icon="pi pi-link"
+          size="large"
+          severity="secondary"
+          outlined
+        />
       </div>
       <p
         v-if="waiting && !app.githubConnected"
@@ -139,15 +152,15 @@ const steps = computed(() => [
 .hero-actions {
   display: flex;
   align-items: center;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 8px;
 }
 
-.hero-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
+.hero-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .hero-error {

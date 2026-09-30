@@ -8,7 +8,17 @@ export interface ShortcutActions {
   go: (path: string) => void
 }
 
-const GO: Record<string, string> = { o: '/', i: '/issues', m: '/comments', p: '/projects', j: '/jobs', a: '/settings/agents', c: '/connections', s: '/settings' }
+// Physical keys (e.code): the shortcuts work on any keyboard layout (ЙЦУКЕН too).
+const GO: Record<string, string> = {
+  KeyO: '/',
+  KeyI: '/issues',
+  KeyM: '/comments',
+  KeyP: '/projects',
+  KeyJ: '/jobs',
+  KeyA: '/settings/agents',
+  KeyC: '/connections',
+  KeyS: '/settings',
+}
 
 /** True when a key press belongs to a text field or an open overlay. */
 export function typing(e: KeyboardEvent): boolean {
@@ -17,41 +27,41 @@ export function typing(e: KeyboardEvent): boolean {
   return t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || !!t.closest('[role="dialog"], [role="listbox"], [role="menu"]')
 }
 
-/** Global single-key shortcuts (ignored while typing or with modifiers). */
+/**
+ * Global single-key shortcuts (ignored while typing or with Ctrl/Alt/Meta).
+ * Listens in the capture phase: the second key of a "G, then …" jump is
+ * consumed here, so a page's own keys (J/K in a list) do not also fire.
+ */
 export function useShortcuts(a: ShortcutActions) {
   let gAt = 0
   const onKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey || typing(e)) return
-    const k = e.key.toLowerCase()
-    if (gAt && Date.now() - gAt < 1200 && GO[k]) {
+    if (gAt && Date.now() - gAt < 1200 && GO[e.code]) {
       gAt = 0
       e.preventDefault()
-      a.go(GO[k])
+      e.stopPropagation()
+      a.go(GO[e.code])
       return
     }
     gAt = 0
-    switch (e.key) {
-      case '/':
+    switch (e.code) {
+      case 'Slash':
+      case 'NumpadDivide':
         e.preventDefault()
-        a.search()
+        if (e.shiftKey) a.help() // "?"
+        else a.search()
         break
-      case '?':
-        e.preventDefault()
-        a.help()
-        break
-      case '[':
+      case 'BracketLeft':
         a.sidebar()
         break
-      case 'r':
-      case 'R':
+      case 'KeyR':
         a.sync()
         break
-      case 'g':
-      case 'G':
+      case 'KeyG':
         gAt = Date.now()
         break
     }
   }
-  onMounted(() => window.addEventListener('keydown', onKey))
-  onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+  onMounted(() => window.addEventListener('keydown', onKey, true))
+  onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
 }

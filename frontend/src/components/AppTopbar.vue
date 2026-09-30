@@ -5,8 +5,12 @@ import Button from 'primevue/button'
 import Menu from 'primevue/menu'
 import Popover from 'primevue/popover'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
+import PlatformIcon from './PlatformIcon.vue'
 import { useAppStore } from '../stores/app'
+import { useSettingsStore } from '../stores/settings'
+import { platformName } from '../lib/platforms'
 import { liveConnected } from '../api/live'
 import { routeTitle } from '../router'
 import { crumbs } from '../lib/crumbs'
@@ -17,6 +21,8 @@ const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const confirm = useConfirm()
+const settings = useSettingsStore()
 const { t } = useI18n()
 
 const title = computed(() => routeTitle(route))
@@ -25,19 +31,52 @@ type Tone = 'ok' | 'busy' | 'warn' | 'error' | 'off'
 /** Every source's status (the top-level fields alone are the GitHub one). */
 const sources = computed(() => app.sync?.sources ?? (app.sync ? [{ ...app.sync, platform: 'github', account: '' }] : []))
 const rateLimitedUntil = computed(() => sources.value.map((s) => s.rateLimitedUntil).find(Boolean) ?? '')
-const lastError = computed(() => sources.value.filter((s) => s.signedIn).map((s) => s.lastError).find(Boolean) ?? '')
 const lastSync = computed(() => sources.value.map((s) => s.lastSync).filter(Boolean).sort().at(-1) ?? '')
+
+/** One row per enabled source (popover) with its own state; GitHub signed out is listed but never alarms. */
+const rows = computed(() =>
+  sources.value.map((s) => {
+    const card = app.platforms.find((p) => p.id === s.platform)
+    const off = s.platform === 'github' ? !app.githubConnected : card?.enabled === false
+    const account = s.platform === 'github' ? (app.github?.login ? '@' + app.github.login : '') : card?.accountName || s.account
+    let tone: Tone = 'off'
+    let relogin = false
+    let text = t('topbar.notSynced')
+    if (off) text = t('topbar.notConnectedLower')
+    else if (s.relogin || card?.state === 'relogin') [tone, text, relogin] = ['warn', t('topbar.relogin'), true]
+    else if (s.rateLimitedUntil) [tone, text] = ['warn', t('topbar.rateLimited')]
+    else if (s.lastError) [tone, text] = ['error', t('topbar.syncError')]
+    else if (s.lastSync) [tone, text] = ['ok', relTime(s.lastSync)]
+    return { key: s.platform + ':' + s.account, platform: s.platform, name: platformName(s.platform), account, tone, text, error: off ? '' : s.lastError, off, relogin }
+  }),
+)
+const worst = (tone: Tone) => rows.value.filter((r) => !r.off && r.tone === tone)
 const status = computed<{ tone: Tone; text: string }>(() => {
   if (!app.anyConnected) return { tone: 'off', text: t('topbar.notConnected') }
   const p = app.progress
   if (p && p.total > 0) return { tone: 'busy', text: t('topbar.syncProgress', { done: p.done, total: p.total }) }
   if (app.syncing) return { tone: 'busy', text: t('topbar.syncing') }
   if (!app.sync) return { tone: 'off', text: t('topbar.syncUnavailable') }
+  // A dead source is never hidden behind another one's fresh sync.
+  const errors = worst('error')
+  if (errors.length) return { tone: 'error', text: errors.length === 1 ? t('topbar.syncErrorIn', { name: errors[0].name }) : t('topbar.syncError') }
+  const relogin = rows.value.filter((r) => !r.off && r.relogin)
+  if (relogin.length) return { tone: 'warn', text: relogin.length === 1 ? t('topbar.reloginIn', { name: relogin[0].name }) : t('topbar.relogin') }
   if (rateLimitedUntil.value) return { tone: 'warn', text: t('topbar.rateLimited') }
-  if (lastError.value) return { tone: 'error', text: t('topbar.syncError') }
   if (lastSync.value) return { tone: 'ok', text: t('topbar.synced', { time: relTime(lastSync.value) }) }
   return { tone: 'off', text: t('topbar.waitingFirstSync') }
 })
+const intervalText = computed(() => {
+  const s = app.sync
+  if (!s?.activeEvery) return duration(s?.interval) || '—'
+  return t('topbar.intervalValue', { active: duration(s.activeEvery), idle: duration(s.idleEvery) || '—' })
+})
+
+// Theme: light → dark → system (follows Windows) → light.
+const mode = computed(() => settings.doc?.settings.appearance.mode ?? app.theme)
+const NEXT_MODE = { light: 'dark', dark: 'system', system: 'light' } as const
+const themeIcon = computed(() => ({ light: 'pi pi-sun', dark: 'pi pi-moon', system: 'pi pi-desktop' })[mode.value])
+const themeTip = computed(() => t('topbar.themeTip', { mode: t('topbar.mode.' + mode.value), next: t('topbar.mode.' + NEXT_MODE[mode.value]) }))
 /** Background work (scheduled reconcile, change checks): a quiet spinner with a tooltip, never a blocked button. */
 const backgroundText = computed(() => {
   const b = app.background
@@ -53,12 +92,33 @@ async function syncNow() {
   if (err) toast.add({ severity: 'error', summary: t('topbar.syncStartFailed'), detail: err, life: 5000 })
 }
 
+/** Connected accounts of every platform (GitHub first), for the account menu. */
+const accounts = computed(() => {
+  const out: string[] = []
+  if (app.githubConnected && app.github?.login) out.push('GitHub · @' + app.github.login)
+  for (const p of app.platforms) {
+    if (p.id === 'github' || !p.enabled || p.state !== 'connected') continue
+    const who = p.accountName || (p.id !== 'steam' ? p.account : '') // never a raw SteamID64
+    out.push(who ? `${p.name} · ${who}` : p.name)
+  }
+  return out
+})
+function signOutGithub() {
+  confirm.require({
+    header: t('connections.disconnectTitle'),
+    message: t('connections.disconnectText'),
+    icon: 'pi pi-sign-out',
+    rejectProps: { label: t('common.cancel'), severity: 'secondary', outlined: true },
+    acceptProps: { label: t('topbar.signOut'), severity: 'danger' },
+    accept: () => void app.disconnect('github'),
+  })
+}
 const accountItems = computed(() => [
-  { label: app.github?.login ? '@' + app.github.login : t('topbar.notSignedIn'), disabled: true },
+  ...(accounts.value.length ? accounts.value.map((label) => ({ label, disabled: true })) : [{ label: t('topbar.nothingConnected'), disabled: true }]),
   { separator: true },
   { label: t('nav.connections'), icon: 'pi pi-link', command: () => router.push('/connections') },
   { label: t('nav.settings'), icon: 'pi pi-cog', command: () => router.push('/settings') },
-  ...(app.githubConnected ? [{ label: t('topbar.signOut'), icon: 'pi pi-sign-out', command: () => app.disconnect('github') }] : []),
+  ...(app.githubConnected ? [{ label: t('topbar.signOut'), icon: 'pi pi-sign-out', command: signOutGithub }] : []),
 ])
 </script>
 
@@ -132,8 +192,31 @@ const accountItems = computed(() => [
       </button>
       <Popover ref="pop">
         <div class="sync-pop">
-          <div class="row">
-            <span class="muted">GitHub</span><span>{{ app.githubConnected ? '@' + app.github?.login : t('topbar.notConnectedLower') }}</span>
+          <div
+            v-for="r in rows"
+            :key="r.key"
+            class="source"
+          >
+            <div class="row">
+              <span class="src-name"><PlatformIcon
+                :platform="r.platform"
+                :size="14"
+              /> {{ r.name }}<span
+                v-if="r.account"
+                class="muted"
+              > · {{ r.account }}</span></span>
+              <span
+                class="src-state"
+                :class="r.tone"
+              ><span class="dot" />{{ r.text }}</span>
+            </div>
+            <p
+              v-if="r.error && r.tone === 'error'"
+              v-tooltip.bottom="r.error"
+              class="err"
+            >
+              {{ t('topbar.sourceErrorHint') }}
+            </p>
           </div>
           <div
             v-if="app.progress?.repo"
@@ -151,7 +234,7 @@ const accountItems = computed(() => [
             <span class="muted">{{ t('topbar.lastSync') }}</span><span>{{ absTime(lastSync) || t('common.never') }}</span>
           </div>
           <div class="row">
-            <span class="muted">{{ t('topbar.interval') }}</span><span class="mono">{{ duration(app.sync?.interval) || '—' }}</span>
+            <span class="muted">{{ t('topbar.interval') }}</span><span>{{ intervalText }}</span>
           </div>
           <div class="row">
             <span class="muted">{{ t('topbar.liveUpdates') }}</span><span>{{ liveConnected ? t('topbar.liveConnected') : t('topbar.liveReconnecting') }}</span>
@@ -162,12 +245,14 @@ const accountItems = computed(() => [
           >
             <span>{{ t('topbar.rateLimitedUntil') }}</span><span>{{ absTime(rateLimitedUntil) }}</span>
           </div>
-          <p
-            v-if="lastError"
-            class="err"
+          <RouterLink
+            v-if="rows.some((r) => !r.off && (r.tone === 'error' || r.relogin))"
+            to="/connections"
+            class="pop-link"
+            @click="pop?.hide()"
           >
-            {{ lastError }}
-          </p>
+            {{ t('topbar.openConnections') }} <i class="pi pi-arrow-right" />
+          </RouterLink>
         </div>
       </Popover>
 
@@ -183,13 +268,13 @@ const accountItems = computed(() => [
         @click="syncNow"
       />
       <Button
-        v-tooltip.bottom="app.theme === 'dark' ? t('topbar.lightTheme') : t('topbar.darkTheme')"
-        :icon="app.theme === 'dark' ? 'pi pi-sun' : 'pi pi-moon'"
+        v-tooltip.bottom="themeTip"
+        :icon="themeIcon"
         severity="secondary"
         text
         rounded
-        :aria-label="t('topbar.toggleTheme')"
-        @click="app.setTheme(app.theme === 'dark' ? 'light' : 'dark')"
+        :aria-label="themeTip"
+        @click="app.setTheme(NEXT_MODE[mode])"
       />
       <button
         type="button"
@@ -347,6 +432,44 @@ const accountItems = computed(() => [
 
 .sync-pop .row.warn {
   color: var(--iw-warn);
+}
+
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--iw-border);
+}
+
+.src-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.src-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--iw-muted);
+}
+
+.src-state.ok {
+  color: var(--iw-success);
+}
+
+.src-state.warn {
+  color: var(--iw-warn);
+}
+
+.pop-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
 }
 
 .sync-pop .err {
