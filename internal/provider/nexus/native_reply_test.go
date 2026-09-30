@@ -197,7 +197,10 @@ func TestNativeReplyBug(t *testing.T) {
 func TestNativeReplyNeedsSession(t *testing.T) {
 	fs := &fakeSite{t: t, comments: map[int]string{1: commentsHTML(nil)}}
 	posted := 0
-	fs.onPost = func(browser.Request) (browser.Response, error) { posted++; return browser.Response{Status: 200, Body: "1"}, nil }
+	fs.onPost = func(browser.Request) (browser.Response, error) {
+		posted++
+		return browser.Response{Status: 200, Body: "1"}, nil
+	}
 	srv, hc := gqlServer(t, nil)
 	p := New(Options{Native: &NativeOptions{Browser: fs, HTTP: hc, GraphQL: srv.URL + "/v2/graphql", APIRouter: srv.URL + "/graphql"},
 		Author: func() string { return "UberMorgott" }})
