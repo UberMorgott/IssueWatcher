@@ -16,6 +16,7 @@ export interface ChartTheme {
   surface: string
   opened: string
   closed: string
+  warn: string
 }
 
 const props = defineProps<{ option: (t: ChartTheme) => EChartsCoreOption; height?: string; label: string }>()
@@ -33,6 +34,7 @@ function themeColors(): ChartTheme {
     surface: v('--iw-surface'),
     opened: v('--iw-chart-opened'),
     closed: v('--iw-chart-closed'),
+    warn: v('--iw-warn'),
   }
 }
 

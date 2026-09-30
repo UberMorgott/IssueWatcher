@@ -14,7 +14,7 @@ import { api } from '../api/client'
 import type { Issue, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, relTime, repoColor, shortDay, shortRepo } from '../lib/format'
+import { absTime, relTime, shortDay, shortRepo } from '../lib/format'
 import { cachedRef } from '../lib/cache'
 import { isModPlatform, repoPlatform } from '../lib/platforms'
 
@@ -103,22 +103,61 @@ const weeklyOption = computed(() => {
   })
 })
 
+const escHtml = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch] ?? ch)
+
+/** Open items per project, split by kind: issues (incl. bug reports) and mod page comment threads. */
 const reposOption = computed(() => {
-  const rows = [...topRepos.value].reverse()
-  const openName = t('overview.openSeries')
+  const rows = [...topRepos.value].reverse().map((r) => {
+    const comments = r.openComments ?? 0
+    return { name: shortRepo(r.name), issues: r.open - comments, comments, total: r.open }
+  })
+  const names = { issues: t('overview.issuesSeries'), comments: t('overview.commentsSeries'), total: t('overview.totalSeries') }
+  const withComments = hasComments.value
+  const end = [0, 4, 4, 0]
   return (c: ChartTheme): EChartsCoreOption => ({
-    grid: { left: 8, right: 36, top: 8, bottom: 8, containLabel: true },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'none' }, backgroundColor: c.surface, borderColor: c.border, textStyle: { color: c.text } },
+    grid: { left: 8, right: 36, top: withComments ? 28 : 8, bottom: 8, containLabel: true },
+    legend: withComments ? { top: 0, right: 0, icon: 'roundRect', itemWidth: 10, itemHeight: 10, textStyle: { color: c.muted } } : undefined,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'none' },
+      backgroundColor: c.surface,
+      borderColor: c.border,
+      textStyle: { color: c.text },
+      formatter: (ps: { dataIndex: number }[]) => {
+        const r = rows[ps[0]?.dataIndex ?? 0]
+        if (!r) return ''
+        const dot = (col: string) => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${col}"></span>`
+        const lines = [`<b>${escHtml(r.name)}</b>`, `${dot(c.opened)}${escHtml(names.issues)}: ${r.issues}`]
+        if (withComments) lines.push(`${dot(c.warn)}${escHtml(names.comments)}: ${r.comments}`, `${escHtml(names.total)}: ${r.total}`)
+        return lines.join('<br>')
+      },
+    },
     xAxis: { type: 'value', show: false },
-    yAxis: { type: 'category', data: rows.map((r) => shortRepo(r.name)), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: c.muted } },
+    yAxis: { type: 'category', data: rows.map((r) => r.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: c.muted } },
     series: [
       {
-        name: openName,
+        name: names.issues,
         type: 'bar',
-        data: rows.map((r) => ({ value: r.open, itemStyle: { color: repoColor(r.id), borderRadius: [0, 4, 4, 0] } })),
+        stack: 'open',
+        data: rows.map((r) => ({ value: r.issues, itemStyle: { borderRadius: withComments && r.comments ? 0 : end } })),
+        itemStyle: { color: c.opened },
         barMaxWidth: 16,
-        label: { show: true, position: 'right', color: c.muted },
+        label: withComments ? undefined : { show: true, position: 'right', color: c.muted },
       },
+      ...(withComments
+        ? [
+            {
+              name: names.comments,
+              type: 'bar',
+              stack: 'open',
+              data: rows.map((r) => r.comments),
+              itemStyle: { color: c.warn, borderRadius: end },
+              barMaxWidth: 16,
+              // Label on the stack's last segment: shows the project's total at the bar end.
+              label: { show: true, position: 'right', color: c.muted, formatter: (p: { dataIndex: number }) => String(rows[p.dataIndex]?.total ?? '') },
+            },
+          ]
+        : []),
     ],
   })
 })
