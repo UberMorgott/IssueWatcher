@@ -74,12 +74,12 @@ type Conn struct {
 	subID   int
 	err     error
 	done    chan struct{}
-	wmu     sync.Mutex // one write at a time
+	wsem    chan struct{} // one write at a time (a slot, so waiting honours ctx)
 }
 
 // NewConn starts reading t.
 func NewConn(t Transport) *Conn {
-	c := &Conn{t: t, pending: map[int64]chan reply{}, subs: map[int]func(Event){}, done: make(chan struct{})}
+	c := &Conn{t: t, pending: map[int64]chan reply{}, subs: map[int]func(Event){}, done: make(chan struct{}), wsem: make(chan struct{}, 1)}
 	go c.read()
 	return c
 }
@@ -203,12 +203,9 @@ func (c *Conn) Call(ctx context.Context, session, method string, params, out any
 		c.drop(id)
 		return err
 	}
-	c.wmu.Lock()
-	err = c.t.Write(b)
-	c.wmu.Unlock()
-	if err != nil {
+	if err := c.write(ctx, b); err != nil {
 		c.drop(id)
-		return fmt.Errorf("%w: %w", ErrClosed, err)
+		return err
 	}
 	select {
 	case r := <-ch:
@@ -226,6 +223,34 @@ func (c *Conn) Call(ctx context.Context, session, method string, params, out any
 		return nil
 	case <-ctx.Done():
 		c.drop(id)
+		return ctx.Err()
+	}
+}
+
+// write sends one message; ctx bounds both the wait for the writer slot and
+// the write itself (a browser that stopped reading must not hang the caller).
+// A write cut short by ctx finishes in the background (framing stays whole)
+// and unblocks when the transport closes.
+func (c *Conn) write(ctx context.Context, b []byte) error {
+	select {
+	case c.wsem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return c.Err()
+	}
+	werr := make(chan error, 1)
+	go func() {
+		defer func() { <-c.wsem }()
+		werr <- c.t.Write(b)
+	}()
+	select {
+	case err := <-werr:
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrClosed, err)
+		}
+		return nil
+	case <-ctx.Done():
 		return ctx.Err()
 	}
 }

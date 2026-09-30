@@ -182,6 +182,53 @@ func TestConnOversizeFrameDropsConnection(t *testing.T) {
 	}
 }
 
+// stuckTransport is a browser that stopped reading: writes block until Close.
+type stuckTransport struct {
+	once   sync.Once
+	closed chan struct{}
+}
+
+func newStuck() *stuckTransport { return &stuckTransport{closed: make(chan struct{})} }
+
+func (s *stuckTransport) Read() ([]byte, error) {
+	<-s.closed
+	return nil, io.EOF
+}
+
+func (s *stuckTransport) Write([]byte) error {
+	<-s.closed
+	return io.ErrClosedPipe
+}
+
+func (s *stuckTransport) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestConnCallWriteBoundedByContext(t *testing.T) {
+	st := newStuck()
+	c := NewConn(st)
+	defer func() { _ = c.Close() }()
+	done := make(chan error, 2)
+	for range 2 { // the second waits behind the stuck write: also bounded
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			done <- c.Call(ctx, "", "Browser.close", nil, nil)
+		}()
+	}
+	for range 2 {
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("err = %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("Call ignored ctx while the write was stuck")
+		}
+	}
+}
+
 func TestPipeTransportFramesLargeMessages(t *testing.T) {
 	p := newPeer(t, 0)
 	c := NewConn(p.client)

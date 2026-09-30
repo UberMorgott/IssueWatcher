@@ -62,6 +62,8 @@ type Options struct {
 // Browser is one lazily started browser process for every platform.
 type Browser struct {
 	opts Options
+	// stopWait bounds each shutdown step (Browser.close, the exit wait).
+	stopWait time.Duration
 
 	op sync.Mutex // one operation at a time (tabs, mode switches)
 
@@ -101,7 +103,7 @@ func New(opts Options) *Browser {
 	if opts.Start == nil {
 		opts.Start = startBrowser
 	}
-	return &Browser{opts: opts, tabs: map[string]*tab{}}
+	return &Browser{opts: opts, stopWait: 3 * time.Second, tabs: map[string]*tab{}}
 }
 
 // Running reports whether a browser process is up.
@@ -147,17 +149,31 @@ func (b *Browser) stop(ctx context.Context) {
 		b.idle = nil
 	}
 	b.mu.Unlock()
+	b.shutdown(ctx, p, c)
+}
+
+// shutdown ends a browser run: Browser.close (bounded) lets it flush the
+// profile (cookies); the transport close and the process-tree kill follow
+// whether or not it answered, each bounded, so a stuck browser cannot hang it.
+func (b *Browser) shutdown(ctx context.Context, p *process, c *Conn) {
 	if c != nil {
-		// Browser.close lets it flush the profile (cookies) before the kill.
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), b.stopWait)
 		_ = c.Call(cctx, "", "Browser.close", nil, nil)
 		cancel()
-		_ = c.Close()
+		closed := make(chan struct{})
+		go func() {
+			_ = c.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(b.stopWait):
+		}
 	}
 	if p != nil {
 		select {
 		case <-p.exited:
-		case <-time.After(3 * time.Second):
+		case <-time.After(b.stopWait):
 		}
 		p.kill()
 	}

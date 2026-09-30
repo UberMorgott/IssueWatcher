@@ -224,6 +224,25 @@ func TestIdleStop(t *testing.T) {
 	}
 }
 
+func TestStopDoesNotHangOnStuckPipe(t *testing.T) {
+	b := New(Options{Dir: t.TempDir()})
+	b.stopWait = 100 * time.Millisecond
+	st := newStuck()
+	var killed atomic.Bool
+	p := &process{t: st, kill: func() { killed.Store(true); _ = st.Close() }, exited: make(chan struct{})}
+	b.proc, b.conn = p, NewConn(st)
+	done := make(chan struct{})
+	go func() { b.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop hung on Browser.close over a stuck pipe")
+	}
+	if !killed.Load() {
+		t.Fatal("process not killed")
+	}
+}
+
 func (f *fakeChrome) setFetch(fn func(string) Response) {
 	f.mu.Lock()
 	f.fetch = fn
