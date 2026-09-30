@@ -12,3 +12,8 @@
 - Commit identity: `git -c user.name=UberMorgott -c user.email=UberMorgott@users.noreply.github.com commit`.
 - Parallel agents share one index: commit with `git commit --only -- <explicit paths>`, don't stage ahead of time.
 - Design and phases: `docs/ARCHITECTURE.md`; checklist: `TASKS.md`.
+
+## Releases: standing OK (owner, 2026-09-30)
+- After verified user-facing fixes/features land on `main`, cut a release without asking: push `main`, then
+  `pwsh -File release.ps1 -Version vX.Y.Z` (patch for fixes), Russian release notes in the v0.9.0 style.
+  Why: the owner's installed app self-updates only from releases, so unreleased fixes never reach them.
