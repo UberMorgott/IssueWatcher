@@ -1,11 +1,16 @@
 <script setup lang="ts">
-defineProps<{ label: string; value: number | string | null; icon: string; tone?: 'primary' | 'success' | 'warn' | 'muted'; hint?: string; loading?: boolean }>()
+import type { RouteLocationRaw } from 'vue-router'
+
+// A stat tile; with `to` the whole tile links to the list behind the number.
+defineProps<{ label: string; value: number | string | null; icon: string; tone?: 'primary' | 'success' | 'warn' | 'muted'; hint?: string; loading?: boolean; to?: RouteLocationRaw }>()
 </script>
 
 <template>
-  <div
+  <component
+    :is="to ? 'RouterLink' : 'div'"
+    :to="to"
     class="stat panel"
-    :class="tone ?? 'primary'"
+    :class="[tone ?? 'primary', { link: !!to }]"
   >
     <div class="stat-top">
       <span class="stat-label">{{ label }}</span>
@@ -27,7 +32,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
     >
       {{ hint }}
     </div>
-  </div>
+  </component>
 </template>
 
 <style scoped>
@@ -37,6 +42,16 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  color: var(--iw-text);
+}
+
+.stat.link {
+  transition: border-color 120ms ease;
+}
+
+.stat.link:hover {
+  border-color: var(--iw-border-strong);
+  color: var(--iw-text);
 }
 
 .stat-top {

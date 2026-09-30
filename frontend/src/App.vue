@@ -18,7 +18,7 @@ import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
 import { jobOutcome, jobRef } from './lib/jobs'
-import { jobPlatform, repoPlatform } from './lib/platforms'
+import { itemRef, jobPlatform, repoPlatform } from './lib/platforms'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
 import { useShortcuts } from './lib/shortcuts'
@@ -65,6 +65,13 @@ const KIND: Record<string, { key: string; icon: string; severity: 'info' | 'succ
   'comment.new': { key: 'app.newComment', icon: 'pi pi-comment', severity: 'info' },
   'item.closed': { key: 'app.issueClosed', icon: 'pi pi-check-circle', severity: 'secondary' },
 }
+/** Summary key of a live item event by item kind: a mod page's thread or bug report is no «issue». */
+function liveKey(name: string, kind: string | undefined): string {
+  if (name === 'item.new' && kind === 'comment') return 'app.newThread'
+  if (name === 'item.new' && kind === 'bug') return 'app.newBug'
+  if (name === 'item.closed' && kind === 'bug') return 'app.bugClosed'
+  return KIND[name].key
+}
 const toastIcon = (msg: unknown) => (msg as { data?: { icon?: string } }).data?.icon ?? 'pi pi-inbox'
 const toastPlatform = (msg: unknown) => (msg as { data?: { platform?: string } }).data?.platform ?? ''
 const jobLinks = (msg: unknown) => (msg as { data?: { links?: { label: string; to: string; note: string }[] } }).data?.links ?? []
@@ -96,9 +103,12 @@ function onLive(name: LiveEventName, data: unknown) {
     case 'sync.status':
       app.onSyncStatus(data as SyncProgress | null)
       return
-    case 'data.changed':
-      app.invalidate((data as DataChange | null) ?? undefined)
+    case 'data.changed': {
+      // A bulk read / resolve names no single item: views re-check every loaded row.
+      const c = (data as DataChange | null) ?? undefined
+      app.invalidate(c && !c.itemId && ['read', 'unread', 'resolve'].includes(c.reason) ? undefined : c)
       return
+    }
     case 'job.changed': {
       const done = jobs.emitJob(data)
       if (done) {
@@ -130,9 +140,11 @@ function onLive(name: LiveEventName, data: unknown) {
       if (!e || typeof e.id !== 'number') return
       app.pushActivity(name, e)
       const k = KIND[name]
-      const detail =
-        name === 'comment.new' ? `${e.repo}#${e.number} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${e.repo}#${e.number} · ${e.title}`
-      toast.add({ group: 'live', severity: k.severity, summary: t(k.key), detail, life: 8000, data: { id: e.id, icon: k.icon, platform: repoPlatform(e.repo, app.repos) } } as never)
+      const platform = repoPlatform(e.repo, app.repos)
+      const ref = itemRef({ repo: e.repo, number: e.number, platform })
+      const detail = name === 'comment.new' ? `${ref} · ${e.actor ?? ''}: ${e.body ?? ''}` : `${ref} · ${e.title}`
+      const icon = name === 'item.new' && e.kind === 'comment' ? 'pi pi-comments' : k.icon
+      toast.add({ group: 'live', severity: k.severity, summary: t(liveKey(name, e.kind)), detail, life: 8000, data: { id: e.id, icon, platform } } as never)
       app.invalidate({ reason: 'sync', itemId: e.id })
     }
   }

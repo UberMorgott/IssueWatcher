@@ -3,6 +3,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { useJobsStore } from '../stores/jobs'
+import { currentItemKind } from '../lib/currentItem'
 
 defineProps<{ mobile?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
@@ -14,14 +15,19 @@ const { t } = useI18n()
 const items: { to: string; icon: string; label: string; match: string[]; badge?: () => number }[] = [
   { to: '/', icon: 'pi pi-objects-column', label: 'nav.overview', match: ['overview'] },
   { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: () => app.unreadIssues },
-  { to: '/comments', icon: 'pi pi-comments', label: 'nav.comments', match: ['comments'], badge: () => app.unreadComments },
+  { to: '/comments', icon: 'pi pi-comments', label: 'nav.comments', match: ['comments', 'item:comment'], badge: () => app.unreadComments },
   { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
   { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'], badge: () => jobs.activeCount },
   { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },
   { to: '/settings', icon: 'pi pi-cog', label: 'nav.settings', match: ['settings'] },
 ]
 
-const active = (match: string[]) => match.includes(String(route.name))
+// The item page belongs to Comments for a mod page thread, to Issues otherwise.
+const active = (match: string[]) => {
+  const name = String(route.name)
+  if (name === 'item' && currentItemKind.value === 'comment') return match.includes('item:comment')
+  return match.includes(name)
+}
 </script>
 
 <template>

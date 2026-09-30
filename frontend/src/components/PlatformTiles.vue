@@ -5,8 +5,9 @@ import PlatformIcon from './PlatformIcon.vue'
 import { useAppStore } from '../stores/app'
 import { platformName } from '../lib/platforms'
 
-// Overview: one tile per mod platform with its real counts (mod pages, open
-// items, unread) and account state; a switched-off platform links to its card.
+// Overview: one tile per mod platform with its real counts (comment threads
+// waiting for an answer, open bug reports, unread, mod pages) and account state.
+// A tile opens the platform's comment threads; a switched-off one its card.
 const app = useAppStore()
 const { t } = useI18n()
 
@@ -18,7 +19,8 @@ const tiles = computed(() =>
       id,
       name: platformName(id),
       projects: repos.length,
-      open: repos.reduce((n, r) => n + r.open, 0),
+      waiting: repos.reduce((n, r) => n + (r.openComments ?? 0), 0),
+      bugs: repos.reduce((n, r) => n + r.open - (r.openComments ?? 0), 0),
       unread: repos.reduce((n, r) => n + r.unread, 0),
       state: st?.state ?? 'disabled',
       readOnly: st?.state === 'connected' && st.session === 'none',
@@ -33,7 +35,7 @@ const tiles = computed(() =>
     <RouterLink
       v-for="p in tiles"
       :key="p.id"
-      :to="p.on ? { name: 'issues', query: { source: p.id } } : '/settings/connections'"
+      :to="p.on ? { name: 'comments', query: { source: p.id } } : '/settings/connections'"
       class="p-tile panel"
       :class="{ off: !p.on }"
     >
@@ -50,7 +52,8 @@ const tiles = computed(() =>
           v-if="p.on"
           class="t-facts"
         >
-          <span><b class="mono">{{ p.open }}</b> {{ t('platforms.items', p.open) }}</span>
+          <span><b class="mono">{{ p.waiting }}</b> {{ t('platforms.waiting', p.waiting) }}</span>
+          <span v-if="p.bugs"><b class="mono">{{ p.bugs }}</b> {{ t('platforms.openBugs', p.bugs) }}</span>
           <span v-if="p.unread"><span class="unread-dot" /> <b class="mono">{{ p.unread }}</b> {{ t('platforms.unread', p.unread) }}</span>
           <span class="muted"><b class="mono">{{ p.projects }}</b> {{ t('platforms.projects', p.projects) }}</span>
         </div>
@@ -70,9 +73,10 @@ const tiles = computed(() =>
 </template>
 
 <style scoped>
+/* Four tiles: one row when wide, 2 × 2 below. */
 .platforms {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -130,7 +134,13 @@ const tiles = computed(() =>
   color: var(--iw-danger);
 }
 
-@media (width <= 899px) {
+@media (width <= 1439px) {
+  .platforms {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 699px) {
   .platforms {
     grid-template-columns: minmax(0, 1fr);
   }

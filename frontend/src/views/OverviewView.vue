@@ -47,9 +47,12 @@ async function loadRepoStats() {
   repoStats.value = r.ok ? r.data : null
 }
 
+const ATTENTION = 6
+const attentionTotal = cachedRef('overview.attentionTotal', 0)
 async function loadLists() {
-  const [a, b] = await Promise.all([api.issues({ unread: true, state: 'all', limit: 6 }), api.issues({ state: 'all', limit: 8 })])
+  const [a, b] = await Promise.all([api.issues({ unread: true, state: 'all', limit: ATTENTION }), api.issues({ state: 'all', limit: 8 })])
   attention.value = a.ok ? a.data.items : []
+  attentionTotal.value = a.ok ? (a.data.total ?? a.data.items.length) : 0
   recent.value = b.ok ? b.data.items : []
   listsLoading.value = false
 }
@@ -69,14 +72,27 @@ const showHero = computed(() => app.onboarding)
 /** Mod pages synced: unread comments get their own counter (and link) beside unread issues. */
 const hasComments = computed(() => app.repos.some((r) => isModPlatform(r.platform)))
 const shown = computed(() => repoStats.value ?? stats.value)
+// Issues and bug reports only: comment threads have their own tile and chart series.
 const closed26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.closed, 0) ?? null)
 const opened26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.opened, 0) ?? null)
-const repoOptions = computed(() => [{ label: t('overview.allProjects'), value: null as number | null }, ...app.repos.map((r) => ({ label: r.name, value: r.id as number | null }))])
-const topRepos = computed(() => [...app.repos].sort((a, b) => b.open - a.open).slice(0, 8))
+const repoOptions = computed(() => [
+  { label: t('overview.allProjects'), value: null as number | null, platform: '' },
+  ...app.repos.map((r) => ({ label: r.name, value: r.id as number | null, platform: r.platform })),
+])
+const selectedChartRepo = computed(() => repoOptions.value.find((o) => o.value === chartRepo.value))
+const topRepos = computed(() =>
+  [...app.repos]
+    .filter((r) => r.open > 0)
+    .sort((a, b) => b.open - a.open)
+    .slice(0, 8),
+)
+/** Item reference in the Overview lists: owner/repo#12, or the mod page's name (its numbers are internal ids). */
+const refLabel = (it: { repo: string; number: number; platform?: string }) => (isModPlatform(it.platform ?? '') ? shortRepo(it.repo) : `${shortRepo(it.repo)}#${it.number}`)
 
 const weeklyOption = computed(() => {
   const weekly = shown.value?.weekly ?? []
-  const names = { opened: t('overview.opened'), closed: t('overview.closed') }
+  const names = { opened: t('overview.opened'), closed: t('overview.closed'), comments: t('overview.threadsSeries') }
+  const withComments = hasComments.value
   const days = weekly.map((w) => shortDay(w.start))
   return (c: ChartTheme): EChartsCoreOption => ({
     grid: { left: 36, right: 12, top: 36, bottom: 28 },
@@ -99,6 +115,9 @@ const weeklyOption = computed(() => {
     series: [
       { name: names.opened, type: 'bar', data: weekly.map((w) => w.opened), itemStyle: { color: c.opened, borderRadius: [4, 4, 0, 0] }, barGap: '15%', barMaxWidth: 14 },
       { name: names.closed, type: 'bar', data: weekly.map((w) => w.closed), itemStyle: { color: c.closed, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 14 },
+      ...(withComments
+        ? [{ name: names.comments, type: 'bar', data: weekly.map((w) => w.comments ?? 0), itemStyle: { color: c.warn, borderRadius: [4, 4, 0, 0] }, barMaxWidth: 14 }]
+        : []),
     ],
   })
 })
@@ -127,7 +146,7 @@ const reposOption = computed(() => {
         const r = rows[ps[0]?.dataIndex ?? 0]
         if (!r) return ''
         const dot = (col: string) => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${col}"></span>`
-        const lines = [`<b>${escHtml(r.name)}</b>`, `${dot(c.opened)}${escHtml(names.issues)}: ${r.issues}`]
+        const lines = [`<b>${escHtml(r.name)}</b>`, `${dot(c.primary)}${escHtml(names.issues)}: ${r.issues}`]
         if (withComments) lines.push(`${dot(c.warn)}${escHtml(names.comments)}: ${r.comments}`, `${escHtml(names.total)}: ${r.total}`)
         return lines.join('<br>')
       },
@@ -140,7 +159,7 @@ const reposOption = computed(() => {
         type: 'bar',
         stack: 'open',
         data: rows.map((r) => ({ value: r.issues, itemStyle: { borderRadius: withComments && r.comments ? 0 : end } })),
-        itemStyle: { color: c.opened },
+        itemStyle: { color: c.primary },
         barMaxWidth: 16,
         label: withComments ? undefined : { show: true, position: 'right', color: c.muted },
       },
@@ -164,6 +183,12 @@ const reposOption = computed(() => {
 
 const activityIcon: Record<string, string> = { 'item.new': 'pi pi-inbox', 'comment.new': 'pi pi-comment', 'item.closed': 'pi pi-check-circle' }
 const activityKey: Record<string, string> = { 'item.new': 'overview.activity.issue', 'comment.new': 'overview.activity.comment', 'item.closed': 'overview.activity.closed' }
+/** Activity line by event and item kind: a new mod page thread or bug report is no «issue». */
+function activityPath(event: string, kind?: string) {
+  if (event === 'item.new' && kind === 'comment') return 'overview.activity.thread'
+  if (event === 'item.new' && kind === 'bug') return 'overview.activity.bug'
+  return activityKey[event]
+}
 </script>
 
 <template>
@@ -198,7 +223,8 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           :value="stats?.open ?? null"
           icon="pi pi-inbox"
           :loading="statsState === 'loading'"
-          :hint="app.repos.length ? t('overview.acrossProjects', app.repos.length) : undefined"
+          :hint="t('overview.openHint')"
+          :to="{ name: 'issues' }"
         />
         <StatCard
           :label="t('overview.statUnread')"
@@ -207,6 +233,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           tone="warn"
           :loading="!app.reposLoaded"
           :hint="t('overview.unreadHint')"
+          :to="{ name: 'issues', query: { unread: '1', state: 'all' } }"
         />
         <StatCard
           v-if="hasComments"
@@ -215,7 +242,8 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           icon="pi pi-comments"
           tone="warn"
           :loading="!app.reposLoaded"
-          :hint="t('overview.commentsHint')"
+          :hint="stats ? t('overview.commentsWaiting', { n: stats.openComments ?? 0 }) : t('overview.commentsHint')"
+          :to="{ name: 'comments', query: { unread: '1', state: 'all' } }"
         />
         <StatCard
           :label="t('overview.opened26')"
@@ -223,6 +251,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           icon="pi pi-arrow-up-right"
           tone="muted"
           :loading="statsState === 'loading'"
+          :hint="t('overview.opened26Hint')"
         />
         <StatCard
           :label="t('overview.closed26')"
@@ -231,6 +260,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           tone="success"
           :loading="statsState === 'loading'"
           :hint="stats ? t('overview.closedAllTime', { n: stats.closed }) : undefined"
+          :to="{ name: 'issues', query: { state: 'closed' } }"
         />
       </div>
 
@@ -249,7 +279,22 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
               class="repo-select"
               filter
               :aria-label="t('overview.project')"
-            />
+            >
+              <template #value>
+                <span class="opt"><PlatformIcon
+                  v-if="selectedChartRepo?.platform"
+                  :platform="selectedChartRepo.platform"
+                  :size="14"
+                />{{ selectedChartRepo?.label ?? t('overview.allProjects') }}</span>
+              </template>
+              <template #option="{ option }">
+                <span class="opt"><PlatformIcon
+                  v-if="option.platform"
+                  :platform="option.platform"
+                  :size="14"
+                />{{ option.label }}</span>
+              </template>
+            </Select>
           </div>
           <div class="panel-body">
             <EmptyState
@@ -316,9 +361,20 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                     :platform="it.platform || 'github'"
                     :size="12"
                     class="meta-mark"
-                  /><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ relTime(it.updatedAt) }}</span>
+                  /><span class="mono">{{ refLabel(it) }}</span> · {{ relTime(it.updatedAt) }}</span>
                 </span>
               </RouterLink>
+              <div
+                v-if="!listsLoading && attentionTotal > attention.length"
+                class="more-row"
+              >
+                <RouterLink
+                  :to="{ name: 'issues', query: { unread: '1', state: 'all' } }"
+                  class="more"
+                >
+                  {{ t('overview.moreUnread', { n: attentionTotal - attention.length }) }}
+                </RouterLink>
+              </div>
             </div>
           </section>
 
@@ -338,7 +394,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                 class="row-link"
               >
                 <i
-                  :class="activityIcon[a.kind]"
+                  :class="a.kind === 'item.new' && a.data.kind === 'comment' ? 'pi pi-comments' : activityIcon[a.kind]"
                   class="row-icon"
                 />
                 <span class="row-main">
@@ -349,9 +405,9 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                     :size="12"
                     class="meta-mark"
                   /><i18n-t
-                    :keypath="activityKey[a.kind]"
+                    :keypath="activityPath(a.kind, a.data.kind)"
                     scope="global"
-                  ><template #actor>{{ a.data.actor || t('common.someone') }}</template><template #ref><span class="mono">{{ shortRepo(a.data.repo) }}#{{ a.data.number }}</span></template></i18n-t> · {{ relTime(a.at) }}</span>
+                  ><template #actor>{{ a.data.actor || t('common.someone') }}</template><template #ref><span class="mono">{{ refLabel({ repo: a.data.repo, number: a.data.number, platform: repoPlatform(a.data.repo, app.repos) }) }}</span></template></i18n-t> · {{ relTime(a.at) }}</span>
                 </span>
               </RouterLink>
               <template v-if="listsLoading && !app.activity.length">
@@ -385,7 +441,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                     :platform="it.platform || 'github'"
                     :size="12"
                     class="meta-mark"
-                  /><span class="mono">{{ shortRepo(it.repo) }}#{{ it.number }}</span> · {{ t('overview.updated', { time: relTime(it.updatedAt) }) }}</span>
+                  /><span class="mono">{{ refLabel(it) }}</span> · {{ t('overview.updated', { time: relTime(it.updatedAt) }) }}</span>
                 </span>
               </RouterLink>
             </div>
@@ -440,6 +496,16 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
 
 .stats-row.five {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.more-row {
+  padding: 6px 0 2px;
 }
 
 .more-links {
@@ -551,9 +617,21 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
 }
 
 @media (width <= 1279px) {
-  .stats-row,
-  .stats-row.five {
+  .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Five tiles: 3 + 2 instead of 2 + 2 + 1. */
+  .stats-row.five {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .stats-row.five > :nth-child(-n + 3) {
+    grid-column: span 2;
+  }
+
+  .stats-row.five > :nth-child(n + 4) {
+    grid-column: span 3;
   }
 
   .grid {
@@ -565,6 +643,10 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
   .stats-row,
   .stats-row.five {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stats-row.five > :nth-child(n) {
+    grid-column: auto;
   }
 }
 </style>

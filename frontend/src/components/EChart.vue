@@ -17,6 +17,8 @@ export interface ChartTheme {
   opened: string
   closed: string
   warn: string
+  /** Accent for series that are not opened/closed flows (per-project bars). */
+  primary: string
 }
 
 const props = defineProps<{ option: (t: ChartTheme) => EChartsCoreOption; height?: string; label: string }>()
@@ -35,6 +37,7 @@ function themeColors(): ChartTheme {
     opened: v('--iw-chart-opened'),
     closed: v('--iw-chart-closed'),
     warn: v('--iw-warn'),
+    primary: v('--iw-primary'),
   }
 }
 
