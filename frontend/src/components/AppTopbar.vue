@@ -314,8 +314,8 @@ const accountItems = computed(() => [
   gap: 12px;
   height: var(--iw-topbar);
   padding: 0 var(--iw-gutter);
-  background: color-mix(in srgb, var(--iw-bg) 82%, transparent);
-  backdrop-filter: blur(12px);
+  /* Opaque like the list pages' sticky band under it: scrolled rows never show through. */
+  background: var(--iw-bg);
   border-bottom: 1px solid var(--iw-border);
 }
 
