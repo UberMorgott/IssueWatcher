@@ -342,16 +342,18 @@ func (b *Browser) openTab(ctx context.Context, c *Conn, origin, page string) (*t
 		SessionID string `json:"sessionId"`
 	}
 	if err := c.Call(ctx, "", "Target.attachToTarget", map[string]any{"targetId": created.TargetID, "flatten": true}, &att); err != nil {
+		b.closeTarget(ctx, c, created.TargetID)
 		return nil, err
 	}
 	t = &tab{target: created.TargetID, session: att.SessionID}
 	if ua != nil {
 		if err := c.Call(ctx, t.session, "Emulation.setUserAgentOverride", ua, nil); err != nil {
+			b.closeTarget(ctx, c, t.target)
 			return nil, err
 		}
 	}
 	if err := b.load(ctx, c, t, page); err != nil {
-		_ = c.Call(ctx, "", "Target.closeTarget", map[string]any{"targetId": t.target}, nil)
+		b.closeTarget(ctx, c, t.target)
 		return nil, err
 	}
 	b.mu.Lock()
@@ -518,7 +520,7 @@ func (b *Browser) Fetch(ctx context.Context, req Request) (Response, error) {
 	}
 	var resp Response
 	if err := b.eval(ctx, c, t, fetchJS+"("+string(args)+")", &resp); err != nil {
-		b.dropTab(origin) // a crashed / navigated page is reloaded next time
+		b.dropTab(ctx, c, origin) // a crashed / navigated page is reloaded next time
 		return Response{}, err
 	}
 	if resp.URL != "" {
@@ -527,7 +529,7 @@ func (b *Browser) Fetch(ctx context.Context, req Request) (Response, error) {
 		}
 	}
 	if resp.Status == 403 && challengeBody(resp.Body) {
-		b.dropTab(origin) // the clearance expired: the page is loaded (and checked) again
+		b.dropTab(ctx, c, origin) // the clearance expired: the page is loaded (and checked) again
 		return resp, ErrChallenge
 	}
 	return resp, nil
@@ -540,10 +542,27 @@ func challengeBody(s string) bool {
 	return challengeTitle(s) || strings.Contains(s, "cf-chl") || strings.Contains(s, "challenge-platform")
 }
 
-func (b *Browser) dropTab(origin string) {
+// dropTab forgets the tab of origin and closes its target (tabs must not pile
+// up across timeouts, challenges and site clears).
+func (b *Browser) dropTab(ctx context.Context, c *Conn, origin string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	t := b.tabs[origin]
 	delete(b.tabs, origin)
+	b.mu.Unlock()
+	if t != nil {
+		b.closeTarget(ctx, c, t.target)
+	}
+}
+
+// closeTarget closes a target best effort, on its own short deadline (the
+// caller's ctx may be what just expired).
+func (b *Browser) closeTarget(ctx context.Context, c *Conn, target string) {
+	if target == "" {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), b.stopWait)
+	defer cancel()
+	_ = c.Call(cctx, "", "Target.closeTarget", map[string]any{"targetId": target}, nil)
 }
 
 // Cookie is a browser cookie (Storage.getCookies).
@@ -632,7 +651,7 @@ func (b *Browser) ClearSite(ctx context.Context, domains, origins []string) erro
 		}
 	}
 	for _, o := range origins {
-		b.dropTab(o)
+		b.dropTab(ctx, c, o)
 	}
 	return nil
 }

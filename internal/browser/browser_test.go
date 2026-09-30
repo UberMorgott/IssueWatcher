@@ -22,6 +22,9 @@ type fakeChrome struct {
 	args    [][]string
 	uaSet   atomic.Int32
 	crash   chan struct{} // closed = the current process dies
+	// failAttach makes Target.attachToTarget fail; closed counts Target.closeTarget.
+	failAttach atomic.Bool
+	closed     atomic.Int32
 }
 
 func (f *fakeChrome) start(_ string, args []string) (*process, error) {
@@ -66,7 +69,13 @@ func (f *fakeChrome) serve(r io.Reader, w *io.PipeWriter, exited chan struct{}) 
 		case "Target.createTarget":
 			result = map[string]string{"targetId": "T1"}
 		case "Target.attachToTarget":
+			if f.failAttach.Load() {
+				send(map[string]any{"id": m.ID, "error": map[string]any{"code": -32000, "message": "attach failed"}})
+				continue
+			}
 			result = map[string]string{"sessionId": "S1"}
+		case "Target.closeTarget":
+			f.closed.Add(1)
 		case "Emulation.setUserAgentOverride":
 			var ua uaOverride
 			_ = json.Unmarshal(m.Params, &ua)
@@ -273,6 +282,36 @@ func TestCloseDuringStartKillsLaunch(t *testing.T) {
 	}
 	if b.Running() || !killed.Load() {
 		t.Fatalf("running = %v, killed = %v: the launch outlived Close", b.Running(), killed.Load())
+	}
+}
+
+func TestDroppedTabsAreClosed(t *testing.T) {
+	f, b := newFake(t)
+	ctx := context.Background()
+	u := "https://www.example.com/a"
+	f.setFetch(func(u string) Response { return Response{Status: 403, URL: u, Body: "<title>Just a moment...</title>"} })
+	if _, err := b.Fetch(ctx, Request{URL: u}); !errors.Is(err, ErrChallenge) {
+		t.Fatalf("challenged fetch: err = %v", err)
+	}
+	if n := f.closed.Load(); n != 1 {
+		t.Fatalf("after challenge: closeTarget = %d, want 1", n)
+	}
+	f.setFetch(func(u string) Response { return Response{Status: 200, URL: u} })
+	if _, err := b.Fetch(ctx, Request{URL: u}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClearSite(ctx, []string{"example.com"}, []string{"https://www.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.closed.Load(); n != 2 {
+		t.Fatalf("after ClearSite: closeTarget = %d, want 2", n)
+	}
+	f.failAttach.Store(true)
+	if _, err := b.Fetch(ctx, Request{URL: u}); err == nil {
+		t.Fatal("fetch with a failing attach succeeded")
+	}
+	if n := f.closed.Load(); n != 3 {
+		t.Fatalf("after a failed attach: closeTarget = %d, want 3 (the half-made target)", n)
 	}
 }
 
