@@ -178,6 +178,11 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
   contain: strict;
 }
 
+/* Unread: faint accent tint (weaker than selected / active, overridden by hover). */
+.vrow.unread {
+  background: color-mix(in srgb, var(--iw-primary) 6%, transparent);
+}
+
 .vrow:hover {
   background: var(--iw-hover);
 }
@@ -245,8 +250,10 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
   min-width: 0;
 }
 
+/* Read rows: regular weight, muted title; unread rows: bold, full-contrast title. */
 .t-title {
-  font-weight: 500;
+  font-weight: 400;
+  color: var(--iw-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -254,6 +261,7 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
 
 .unread .t-title {
   font-weight: 650;
+  color: var(--iw-text);
 }
 
 .t-meta {

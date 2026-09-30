@@ -305,6 +305,9 @@ async function markSelectedRead() {
   const ids = selected.value.map((i) => i.id)
   const results = await Promise.all(ids.map((id) => api.markRead(id)))
   const failed = results.filter((r) => !r.ok).length
+  // Show the new state at once; the refetch below (via invalidate) confirms it or drops rows the filter hides.
+  const done = new Set(ids.filter((_, i) => results[i].ok))
+  items.value = items.value.map((it) => (done.has(it.id) && it.unread ? { ...it, unread: false } : it))
   toast.add({
     severity: failed ? 'warn' : 'success',
     summary: failed ? t('issues.markFailed', { failed, total: ids.length }) : t('issues.marked', { n: ids.length }),
