@@ -88,8 +88,9 @@ type lease struct {
 var leases sync.Map // Browser → *lease
 
 func leaseOf(br Browser) *lease {
-	l, _ := leases.LoadOrStore(br, &lease{})
-	return l.(*lease)
+	v, _ := leases.LoadOrStore(br, &lease{})
+	l, _ := v.(*lease) // only *lease is stored
+	return l
 }
 
 // take makes m the window's owner; else it returns the current one.
