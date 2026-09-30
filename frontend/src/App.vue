@@ -260,10 +260,17 @@ const shortcuts = computed(() => [
       ['Enter', t('app.keys.open')],
       ['X', t('app.keys.toggle')],
       ['Shift + X', t('app.keys.range')],
+      ['U', t('app.keys.readList')],
       ['Esc', t('app.keys.clear')],
     ],
   },
-  { title: t('app.keys.item'), keys: [['Ctrl + Enter', t('app.keys.send')]] },
+  {
+    title: t('app.keys.item'),
+    keys: [
+      ['U', t('app.keys.readItem')],
+      ['Ctrl + Enter', t('app.keys.send')],
+    ],
+  },
 ])
 </script>
 

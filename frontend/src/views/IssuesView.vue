@@ -395,10 +395,30 @@ function onKey(e: KeyboardEvent) {
     case 'KeyX':
       if (cursor.value >= 0) toggleAt(cursor.value, e.shiftKey)
       break
+    case 'KeyU':
+      e.preventDefault()
+      void toggleRead()
+      break
     case 'Escape':
       if (selected.value.length) selected.value = []
       break
   }
+}
+/** U: the selection (any unread → all read, else all unread), or the cursor row, flips read / unread. */
+async function toggleRead() {
+  if (selected.value.length) return bulk(selected.value.some((s) => s.unread) ? 'read' : 'unread')
+  const it = items.value[cursor.value]
+  if (!it || busy.value) return
+  const unread = !it.unread
+  busy.value = true
+  const r = await api.setRead([it.id], unread)
+  busy.value = false
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: r.error, life: 5000 })
+    return
+  }
+  items.value = items.value.map((x) => (x.id === it.id ? { ...x, unread } : x))
+  app.invalidate()
 }
 const selectedIds = computed(() => new Set(selected.value.map((s) => s.id)))
 const cursorId = computed(() => items.value[cursor.value]?.id)

@@ -27,6 +27,7 @@ import { useChunks } from '../lib/chunks'
 import { commentsCache, itemCache, itemJobsCache } from '../lib/cache'
 import { isModPlatform, itemRef, platformName } from '../lib/platforms'
 import { currentItemKind } from '../lib/currentItem'
+import { typing } from '../lib/shortcuts'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -138,13 +139,35 @@ async function markUnread() {
   const r = await api.markUnread(it.id)
   marking.value = false
   if (!r.ok) {
-    toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: itemRef(it), life: 5000 })
     return
   }
   keptUnread = true
   if (String(it.id) === props.id) item.value = { ...it, unread: true }
   void app.loadRepos()
 }
+async function markReadAgain() {
+  const it = item.value
+  if (!it || marking.value) return
+  marking.value = true
+  const r = await api.markRead(it.id)
+  marking.value = false
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: itemRef(it), life: 5000 })
+    return
+  }
+  keptUnread = false
+  if (String(it.id) === props.id) item.value = { ...it, unread: false }
+  void app.loadRepos()
+}
+// U (physical key, any layout): flips read / unread of the open item.
+function onKey(e: KeyboardEvent) {
+  if (e.code !== 'KeyU' || e.ctrlKey || e.metaKey || e.altKey || typing(e) || !item.value) return
+  e.preventDefault()
+  void (item.value.unread ? markReadAgain() : markUnread())
+}
+window.addEventListener('keydown', onKey)
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 async function setResolved(resolved: boolean) {
   const it = item.value
   if (!it || marking.value) return
@@ -201,7 +224,7 @@ const fixHint = computed(() => {
   return t('folder.needed')
 })
 const folderOpen = ref(false)
-/** Issue flows (a triage is per project: Projects › «Запустить проект»). */
+/** Issue flows (a triage is per project: Projects › «Разобрать проект»). */
 const ITEM_FLOWS = computed(() => JOB_FLOWS.filter((f) => f !== 'triage' && (f !== 'label' || caps.value.setLabels)))
 
 // The top bar is the page heading: Issues › owner/repo#12.
