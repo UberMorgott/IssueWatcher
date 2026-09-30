@@ -128,3 +128,80 @@ func TestProjectGroups(t *testing.T) {
 		t.Fatalf("unknown project: %v", err)
 	}
 }
+
+// One mod on several mod platforms without a repository (owner 2026-09-30): a
+// mod page heads the group, the others are its members; no code folder is
+// borrowed from a mod page head, and linking the head to a repository brings
+// the whole group along (groups stay one level deep).
+func TestModPageGroups(t *testing.T) {
+	ctx := t.Context()
+	s := newStore(t)
+	src := func(platform string, ps ...provider.Project) []Project {
+		t.Helper()
+		id, err := s.UpsertSource(ctx, platform, "me")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s.SyncProjects(ctx, id, ps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range out {
+			if _, err := s.ApplyItems(ctx, id, p.ID, []provider.Item{item("x:"+p.ExternalID, 1, true, t0)}, "me"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out
+	}
+	gh := src("github", provider.Project{ExternalID: "o/app", Name: "o/app", URL: "https://github.com/o/app"})[0]
+	nx := src("nexus", provider.Project{ExternalID: "sky/1", Name: "Mod", URL: "https://nexus/1"}, provider.Project{ExternalID: "sky/2", Name: "Other"})
+	st := src("steam", provider.Project{ExternalID: "77", Name: "Mod (Steam)", URL: "https://steam/77"})[0]
+
+	if err := s.SetProjectLinks(ctx, nx[0].ID, []int64{st.ID}); err != nil {
+		t.Fatalf("mod page head: %v", err)
+	}
+	g, err := s.ReposChunk(ctx, RepoQuery{Group: true, Sort: "name", Limit: 10})
+	if err != nil || g.Total != 3 {
+		t.Fatalf("grouped: %+v %v", g, err)
+	}
+	for _, r := range g.Items {
+		if r.ID == st.ID {
+			t.Fatalf("member listed as a row: %+v", g.Items)
+		}
+		if r.ID == nx[0].ID && (len(r.Integrations) != 2 || r.Integrations[1].ID != st.ID || r.Open != 2 || len(r.Links) != 1) {
+			t.Fatalf("mod group row: %+v", r)
+		}
+	}
+	if l, err := s.Links(ctx, st.ID); err != nil || l.LinkedTo == nil || l.LinkedTo.ID != nx[0].ID {
+		t.Fatalf("member links: %+v %v", l, err)
+	}
+	// No code project: the member still needs a repository for fixes.
+	fx, err := s.fixTargets(ctx, []int64{st.ID})
+	if err != nil || !fx[st.ID].NeedsLink || fx[st.ID].ProjectID != st.ID || fx[st.ID].Folder != "" {
+		t.Fatalf("member fix target: %+v %v", fx, err)
+	}
+	in, err := s.JobInput(ctx, itemID(t, s, "x:77"))
+	if err != nil || !in.Mod || in.CodeProject != "" || in.CodeRepo() != "" {
+		t.Fatalf("member job input: %+v %v", in, err)
+	}
+	// One level deep: a member heads nothing, a repository joins nothing.
+	if err := s.SetProjectLinks(ctx, st.ID, []int64{nx[1].ID}); !errors.Is(err, ErrBadLink) {
+		t.Fatalf("member as head: %v", err)
+	}
+	if err := s.SetProjectLinks(ctx, nx[0].ID, []int64{st.ID, gh.ID}); !errors.Is(err, ErrBadLink) {
+		t.Fatalf("repository as member: %v", err)
+	}
+	// Linking the head to the repository moves its members too.
+	if err := s.SetProjectLinks(ctx, gh.ID, []int64{nx[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := s.Links(ctx, gh.ID); err != nil || len(l.Links) != 2 {
+		t.Fatalf("repository links: %+v %v", l, err)
+	}
+	if l, err := s.Links(ctx, st.ID); err != nil || l.LinkedTo == nil || l.LinkedTo.ID != gh.ID {
+		t.Fatalf("moved member: %+v %v", l, err)
+	}
+	if in, err := s.JobInput(ctx, itemID(t, s, "x:77")); err != nil || in.CodeProject != "o/app" {
+		t.Fatalf("moved member job input: %+v %v", in, err)
+	}
+}

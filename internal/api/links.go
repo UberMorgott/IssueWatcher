@@ -77,7 +77,7 @@ func (s *Server) linkError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, store.ErrNotFound):
 		errJSON(w, http.StatusNotFound, "not found")
 	case errors.Is(err, store.ErrBadLink):
-		errJSON(w, http.StatusBadRequest, err.Error())
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_link"})
 	default:
 		s.internalError(w, "project links", err)
 	}

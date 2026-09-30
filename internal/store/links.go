@@ -12,24 +12,30 @@ import (
 )
 
 // Project links (migration 009): a mod page (a project of a non-GitHub source)
-// linked to the code project (a GitHub repo) that holds its code.
+// linked to the head of its group — the code project (a GitHub repo) that holds
+// its code, or (owner 2026-09-30) another mod page: the same mod on several mod
+// platforms without a repository. Groups are one level deep: a head is never
+// itself linked, and a GitHub project is never a member.
 
 // CodePlatform is the platform of code projects; every other platform's
 // projects are mod pages.
 const CodePlatform = "github"
 
-// ErrBadLink means a link that is not mod page → code project.
-var ErrBadLink = errors.New("store: a mod page can only be linked to a code project (GitHub repository)")
+// ErrBadLink means a link that is not mod page → group head (a code project or
+// an unlinked mod page).
+var ErrBadLink = errors.New("store: only a mod page can join a group, headed by a GitHub repository or a mod page that is not in a group itself")
 
-// linkJoin adds the linked code project cp (if any) of project p.
-const linkJoin = ` LEFT JOIN project_links pl ON pl.mod_project_id = p.id LEFT JOIN projects cp ON cp.id = pl.code_project_id`
+// linkJoin adds the linked code project cp (if any) of project p: the group
+// head when it is a GitHub repository (a mod page head has no code folder).
+const linkJoin = ` LEFT JOIN project_links pl ON pl.mod_project_id = p.id LEFT JOIN projects cp ON cp.id = pl.code_project_id
+	AND cp.source_id IN (SELECT id FROM sources WHERE platform = '` + CodePlatform + `')`
 
 // folderCols are the folder and remote URL a fix of project p's items uses:
 // the linked code project's for a mod page, else p's own (needs linkJoin).
 const folderCols = `coalesce(cp.local_path, p.local_path), coalesce(cp.url, p.url)`
 
 // needsLinkCol is true for a mod page p with no linked code project (needs linkJoin).
-const needsLinkCol = `(pl.code_project_id IS NULL AND (SELECT platform FROM sources WHERE id = p.source_id) <> '` + CodePlatform + `')`
+const needsLinkCol = `(cp.id IS NULL AND (SELECT platform FROM sources WHERE id = p.source_id) <> '` + CodePlatform + `')`
 
 // Fix is where fixes of a project's items run — the one answer the UI and the
 // runner share: the project's own folder, or a linked mod page's code project's.
@@ -155,18 +161,25 @@ func (s *Store) projectPlatform(ctx context.Context, q interface {
 	return platform, nil
 }
 
-// SetProjectLinks makes modIDs the mod pages of code project codeID: links of
-// other mod pages to it are removed, a listed mod page linked elsewhere moves here.
+// SetProjectLinks makes modIDs the mod pages of group head codeID (a code
+// project, or a mod page not linked itself): links of other mod pages to it
+// are removed, a listed mod page linked elsewhere moves here, and a listed mod
+// page that heads a group brings its members along (groups stay one level deep).
 func (s *Store) SetProjectLinks(ctx context.Context, codeID int64, modIDs []int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if p, err := s.projectPlatform(ctx, tx, codeID); err != nil {
+	if _, err := s.projectPlatform(ctx, tx, codeID); err != nil {
 		return err
-	} else if p != CodePlatform {
-		return ErrBadLink
+	}
+	var member bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM project_links WHERE mod_project_id = ?)`, codeID).Scan(&member); err != nil {
+		return fmt.Errorf("store: link head: %w", err)
+	}
+	if member && len(modIDs) > 0 {
+		return ErrBadLink // a member of another group cannot head one
 	}
 	// Mod pages dropped here and those linked below were decided by hand.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO project_link_decisions (mod_project_id)
@@ -179,8 +192,16 @@ func (s *Store) SetProjectLinks(ctx context.Context, codeID int64, modIDs []int6
 	for _, m := range modIDs {
 		if p, err := s.projectPlatform(ctx, tx, m); err != nil {
 			return err
-		} else if p == CodePlatform {
+		} else if p == CodePlatform || m == codeID {
 			return ErrBadLink
+		}
+		// A mod page that heads a group: its members join codeID's group too.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO project_link_decisions (mod_project_id)
+			SELECT mod_project_id FROM project_links WHERE code_project_id = ? ON CONFLICT DO NOTHING`, m); err != nil {
+			return fmt.Errorf("store: link decisions: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE project_links SET code_project_id = ? WHERE code_project_id = ?`, codeID, m); err != nil {
+			return fmt.Errorf("store: move group %d: %w", m, err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_links (mod_project_id, code_project_id) VALUES (?, ?)
 			ON CONFLICT (mod_project_id) DO UPDATE SET code_project_id = excluded.code_project_id`, m, codeID); err != nil {

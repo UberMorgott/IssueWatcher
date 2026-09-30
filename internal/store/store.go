@@ -268,7 +268,7 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 func (s *Store) linkedCodeKey(ctx context.Context, id int64) string {
 	var key string
 	_ = s.rd.QueryRowContext(ctx, `SELECT s.platform || ':' || p.external_id FROM project_links pl
-		JOIN projects p ON p.id = pl.code_project_id JOIN sources s ON s.id = p.source_id WHERE pl.mod_project_id = ?`, id).Scan(&key)
+		JOIN projects p ON p.id = pl.code_project_id JOIN sources s ON s.id = p.source_id WHERE pl.mod_project_id = ? AND s.platform = '`+CodePlatform+`'`, id).Scan(&key)
 	return key
 }
 

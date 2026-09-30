@@ -393,6 +393,7 @@ func (s *Store) autoLinkOne(ctx context.Context, mod, code int64) (int, error) {
 	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `INSERT INTO project_links (mod_project_id, code_project_id)
 		SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM project_link_decisions WHERE mod_project_id = ?1)
+		AND NOT EXISTS (SELECT 1 FROM project_links WHERE code_project_id = ?1) -- a mod page heading a group (one level deep)
 		ON CONFLICT (mod_project_id) DO NOTHING`, mod, code)
 	if err != nil {
 		return 0, fmt.Errorf("store: auto-link %d: %w", mod, err)

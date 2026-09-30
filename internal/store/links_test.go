@@ -67,8 +67,8 @@ func TestMigration009ProjectLinks(t *testing.T) {
 		t.Fatalf("unlinked mod input: %+v %v", in, err)
 	}
 
-	// Links: mod pages → a GitHub project only.
-	for _, bad := range []struct{ code, mod int64 }{{mods[1].ID, mods[0].ID}, {code[0].ID, code[1].ID}} {
+	// Links: only mod pages join a group, never the head itself.
+	for _, bad := range []struct{ code, mod int64 }{{mods[0].ID, mods[0].ID}, {code[0].ID, code[1].ID}, {mods[1].ID, code[0].ID}} {
 		if err := s.SetProjectLinks(ctx, bad.code, []int64{bad.mod}); !errors.Is(err, ErrBadLink) {
 			t.Fatalf("link %v: %v", bad, err)
 		}
