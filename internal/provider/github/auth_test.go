@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -204,6 +205,47 @@ func TestDeviceFlow(t *testing.T) {
 	tok, err := a.DevicePoll(t.Context(), dc)
 	if _, hits := gh.Counts(); err != nil || tok.Login != githubtest.Login || hits != 2 {
 		t.Fatalf("device poll %+v err %v hits %d", tok, err, hits)
+	}
+}
+
+// holdToken delays token endpoint calls: started gets a value when one
+// arrives, which waits for release before reaching the fake.
+type holdToken struct {
+	next             http.RoundTripper
+	started, release chan struct{}
+}
+
+func (h holdToken) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/login/oauth/access_token" {
+		h.started <- struct{}{}
+		<-h.release
+	}
+	return h.next.RoundTrip(r)
+}
+
+// A refresh that completes after Logout must not sign the user back in.
+func TestLogoutDropsLateRefresh(t *testing.T) {
+	gh := githubtest.New(t)
+	a := newAuth(t, gh)
+	signIn(t, gh, a)
+	h := holdToken{next: gh.Client().Transport, started: make(chan struct{}, 1), release: make(chan struct{})}
+	a.HTTP = &http.Client{Transport: h}
+	a.Now = func() time.Time { return time.Now().Add(8 * time.Hour) } // past expiry: AccessToken refreshes
+	done := make(chan error, 1)
+	go func() { _, err := a.AccessToken(t.Context()); done <- err }()
+	<-h.started
+	if err := a.Logout(); err != nil {
+		t.Fatal(err)
+	}
+	close(h.release)
+	if err := <-done; !errors.Is(err, provider.ErrNotSignedIn) {
+		t.Fatalf("late refresh: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(a.Dir, tokenFile)); !os.IsNotExist(err) {
+		t.Fatalf("token file after logout: %v", err)
+	}
+	if a.Login() != "" {
+		t.Fatal("signed back in by a late refresh")
 	}
 }
 

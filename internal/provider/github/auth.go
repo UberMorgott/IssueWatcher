@@ -94,6 +94,7 @@ type Auth struct {
 
 	mu        sync.Mutex
 	token     *Token     // cached; nil = not loaded or signed out
+	gen       uint64     // bumped by Logout: a token request begun before it is dropped
 	refreshMu sync.Mutex // one refresh at a time: a used refresh token dies
 }
 
@@ -275,6 +276,9 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login, avatar 
 		RefreshToken          string `json:"refresh_token"`
 		RefreshTokenExpiresIn int64  `json:"refresh_token_expires_in"`
 	}
+	a.mu.Lock()
+	gen := a.gen
+	a.mu.Unlock()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.WebURL+"/login/oauth/access_token",
 		strings.NewReader(form.Encode()))
 	if err != nil {
@@ -305,7 +309,7 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values, login, avatar 
 			return Token{}, err
 		}
 	}
-	if err := a.saveToken(&t); err != nil {
+	if err := a.saveToken(&t, gen); err != nil {
 		return Token{}, err
 	}
 	return t, nil
@@ -328,9 +332,14 @@ func (a *Auth) userProfile(ctx context.Context, accessToken string) (login, avat
 	return u.Login, u.AvatarURL, nil
 }
 
-func (a *Auth) saveToken(t *Token) error {
+// saveToken stores t unless Logout ran since the request began (gen): a late
+// refresh or exchange must not sign the user back in.
+func (a *Auth) saveToken(t *Token, gen uint64) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.gen != gen {
+		return fmt.Errorf("%w: signed out while the token request ran", provider.ErrNotSignedIn)
+	}
 	if err := secret.WriteJSON(filepath.Join(a.Dir, tokenFile), t); err != nil {
 		return err
 	}
@@ -420,6 +429,7 @@ func (a *Auth) Logout() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.token = nil
+	a.gen++
 	return secret.Remove(filepath.Join(a.Dir, tokenFile))
 }
 
