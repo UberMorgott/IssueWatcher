@@ -2,7 +2,6 @@ package nexus
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,13 +9,14 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 )
 
 const canReply = true
 
 // ErrUnknownOutcome: the post may or may not have landed and a read-back did
 // not find it.
-var ErrUnknownOutcome = errors.New("исход неизвестен — проверьте страницу")
+var ErrUnknownOutcome = modkit.ErrUnknownOutcome
 
 type postResult struct {
 	Posted   bool    `json:"posted"`
@@ -45,7 +45,7 @@ type match struct {
 }
 
 func (m match) ok(id, author, body string, created time.Time) bool {
-	return !m.before[id] && author == m.account && mcpbridge.SameText(body, m.body) &&
+	return !m.before[id] && author == m.account && modkit.SameText(body, m.body) &&
 		(created.IsZero() || !created.Before(m.sent.Add(-readBackSkew)))
 }
 
@@ -72,12 +72,12 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 			return provider.Comment{}, err
 		}
 		tool, url = "post_mod_comment", commentURL(game, mod, id)
-		args = map[string]any{"game": game, "mod_id": mod, "text": body, "parent_id": mcpbridge.Number(id)}
+		args = map[string]any{"game": game, "mod_id": mod, "text": body, "parent_id": modkit.Number(id)}
 		snapshot = func(ctx context.Context) (map[string]bool, error) { return p.commentReplyIDs(ctx, game, mod, id) }
 		find = func(ctx context.Context, m match) (string, error) { return p.findCommentReply(ctx, game, mod, id, m) }
 	case "bug":
 		tool = "reply_mod_bug"
-		args = map[string]any{"issue_id": mcpbridge.Number(rest), "text": body}
+		args = map[string]any{"issue_id": modkit.Number(rest), "text": body}
 		snapshot = func(ctx context.Context) (map[string]bool, error) { return p.bugReplyIDs(ctx, rest) }
 		find = func(ctx context.Context, m match) (string, error) { return p.findBugReply(ctx, rest, m) }
 	default:
@@ -175,7 +175,7 @@ func parseComment(s string) (string, int, string, error) {
 func newest(ids []string) string {
 	best, bestN := "", -1
 	for _, id := range ids {
-		if n := mcpbridge.Number(id); n > bestN {
+		if n := modkit.Number(id); n > bestN {
 			best, bestN = id, n
 		}
 	}
@@ -217,7 +217,7 @@ func (p *Provider) findCommentReply(ctx context.Context, game string, mod int, p
 	var hits []string // the thread may show up twice while pages shift
 	err := p.threadReplies(ctx, game, mod, parent, func(rs []post) bool {
 		for _, rp := range rs {
-			if m.ok(rp.ID, rp.Author, rp.Body, mcpbridge.Time(rp.CreatedAt)) {
+			if m.ok(rp.ID, rp.Author, rp.Body, modkit.Time(rp.CreatedAt)) {
 				hits = append(hits, rp.ID)
 			}
 		}
@@ -231,7 +231,7 @@ func (p *Provider) findCommentReply(ctx context.Context, game string, mod int, p
 
 func (p *Provider) bugReplies(ctx context.Context, issue string) ([]bugPost, error) {
 	var r bugResult
-	if err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": mcpbridge.Number(issue)}, &r); err != nil {
+	if err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": modkit.Number(issue)}, &r); err != nil {
 		return nil, err
 	}
 	return r.Replies, nil

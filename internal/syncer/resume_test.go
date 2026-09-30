@@ -14,7 +14,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -341,7 +341,7 @@ func TestReconcileStopsOnRateLimit(t *testing.T) {
 }
 
 // pageFake is a mod-platform poller: a page-1 fingerprint (sig) checked with
-// mcpbridge.PageChanged, full reads counted.
+// modkit.PageChanged, full reads counted.
 type pageFake struct {
 	fakeProvider
 	sig          string
@@ -353,7 +353,7 @@ func (f *pageFake) Scheduling() provider.Scheduling { return provider.Scheduling
 
 func (f *pageFake) DetectChanges(_ context.Context, _ provider.Project, st *provider.PollState) (provider.Changes, error) {
 	f.checks.Add(1)
-	return provider.Changes{Requests: 1, Overflow: mcpbridge.PageChanged(st, "fake:page1", f.sig, f.now(), time.Hour)}, nil
+	return provider.Changes{Requests: 1, Overflow: modkit.PageChanged(st, "fake:page1", f.sig, f.now(), time.Hour)}, nil
 }
 
 func (f *pageFake) FetchChanged(ctx context.Context, p provider.Project, _ []int) ([]provider.Item, error) {

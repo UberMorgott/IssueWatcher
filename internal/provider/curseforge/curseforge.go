@@ -18,6 +18,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -30,7 +31,7 @@ var ErrRelogin = fmt.Errorf("curseforge: re-login needed (%w)", provider.ErrRelo
 
 // ErrUnknownOutcome: the post may or may not have landed and a read-back did
 // not find it.
-var ErrUnknownOutcome = errors.New("исход неизвестен — проверьте страницу")
+var ErrUnknownOutcome = modkit.ErrUnknownOutcome
 
 // Caller is the bridge side the provider needs (*mcpbridge.Client).
 type Caller interface {
@@ -279,7 +280,7 @@ func (p *Provider) projectURL(ctx context.Context, id int) string {
 	}
 	u = "https://www.curseforge.com/projects/" + key
 	if err := p.call(ctx, "get_project", map[string]any{"project": key}, &r); err == nil && r.URL != nil && *r.URL != "" {
-		u = mcpbridge.HTTPS(*r.URL, u) // CFWidget data: never a javascript: href
+		u = modkit.HTTPS(*r.URL, u) // CFWidget data: never a javascript: href
 		p.mu.Lock()
 		p.urls[key] = u
 		p.codes[key] = provider.GitHubRepoURL(r.Summary)
@@ -365,16 +366,16 @@ func threadItem(project provider.Project, mod int, t thread) provider.Item {
 		url = fmt.Sprintf("https://www.curseforge.com/projects/%d", mod)
 	}
 	url = strings.TrimSuffix(url, "/") + "/comments"
-	created := mcpbridge.Time(t.CreatedAt)
+	created := modkit.Time(t.CreatedAt)
 	it := provider.Item{
-		ExternalID: externalID(mod, t.ID), Kind: store.KindComment, Number: mcpbridge.Number(t.ID),
-		Title: mcpbridge.Title(t.Body), Body: t.Body, URL: url, Author: t.Author, Open: true,
-		CreatedAt: created, UpdatedAt: mcpbridge.Latest(created, mcpbridge.Time(t.UpdatedAt)),
+		ExternalID: externalID(mod, t.ID), Kind: store.KindComment, Number: modkit.Number(t.ID),
+		Title: modkit.Title(t.Body), Body: t.Body, URL: url, Author: t.Author, Open: true,
+		CreatedAt: created, UpdatedAt: modkit.Latest(created, modkit.Time(t.UpdatedAt)),
 	}
 	for _, r := range t.Replies {
-		c := mcpbridge.Time(r.CreatedAt)
-		u := mcpbridge.Latest(c, mcpbridge.Time(r.UpdatedAt))
-		it.UpdatedAt = mcpbridge.Latest(it.UpdatedAt, u)
+		c := modkit.Time(r.CreatedAt)
+		u := modkit.Latest(c, modkit.Time(r.UpdatedAt))
+		it.UpdatedAt = modkit.Latest(it.UpdatedAt, u)
 		it.Comments = append(it.Comments, provider.Comment{ExternalID: r.ID, Author: r.Author, Body: r.Body,
 			URL: url, CreatedAt: c, UpdatedAt: u})
 	}
@@ -405,7 +406,7 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 	for _, t := range r.Comments {
 		parts = append(parts, t.ID+":"+strconv.Itoa(len(t.Replies)))
 	}
-	ch.Overflow = mcpbridge.PageChanged(st, sigKey, mcpbridge.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, sigKey, modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
@@ -452,7 +453,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	rest, ok := strings.CutPrefix(itemExternalID, "comment:")
 	ms, root, ok2 := strings.Cut(rest, "/")
 	mod, err := modID(ms)
-	if !ok || !ok2 || err != nil || mcpbridge.Number(root) <= 0 {
+	if !ok || !ok2 || err != nil || modkit.Number(root) <= 0 {
 		return provider.Comment{}, fmt.Errorf("curseforge: bad item id %q", itemExternalID)
 	}
 	account, err := p.self(ctx)
@@ -470,7 +471,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 		Posted bool    `json:"posted"`
 		ID     *string `json:"id"`
 	}
-	err = p.opts.Bridge.Call(ctx, "post_comment", map[string]any{"mod_id": mod, "comment_text": htmlBody(body), "reply_to_id": mcpbridge.Number(root)}, &r, false)
+	err = p.opts.Bridge.Call(ctx, "post_comment", map[string]any{"mod_id": mod, "comment_text": htmlBody(body), "reply_to_id": modkit.Number(root)}, &r, false)
 	switch {
 	case err == nil && r.Posted && r.ID != nil && *r.ID != "":
 		return p.posted(*r.ID, account, body), nil
@@ -532,10 +533,10 @@ func (p *Provider) eachReply(ctx context.Context, mod int, root string, fn func(
 func (p *Provider) findReply(ctx context.Context, mod int, root, account, body string, before map[string]bool, sent time.Time) (string, error) {
 	best, bestN := "", -1
 	err := p.eachReply(ctx, mod, root, func(c comment) bool {
-		created := mcpbridge.Time(c.CreatedAt)
-		if !before[c.ID] && c.Author == account && sameReply(c.Body, body) && mcpbridge.Number(c.ID) > bestN &&
+		created := modkit.Time(c.CreatedAt)
+		if !before[c.ID] && c.Author == account && sameReply(c.Body, body) && modkit.Number(c.ID) > bestN &&
 			(created.IsZero() || !created.Before(sent.Add(-readBackSkew))) {
-			best, bestN = c.ID, mcpbridge.Number(c.ID)
+			best, bestN = c.ID, modkit.Number(c.ID)
 		}
 		return false
 	})
@@ -546,7 +547,7 @@ func (p *Provider) findReply(ctx context.Context, mod int, root, account, body s
 // site may prefix replies with "In reply to X:" and may return markup.
 func sameReply(got, sent string) bool {
 	g := dropReplyPrefix(got)
-	return mcpbridge.SameText(g, sent) || mcpbridge.SameText(html.UnescapeString(stripTags(g)), sent)
+	return modkit.SameText(g, sent) || modkit.SameText(html.UnescapeString(stripTags(g)), sent)
 }
 
 func dropReplyPrefix(s string) string {

@@ -29,7 +29,7 @@ type PollState struct {
 	CommentsSince time.Time         `json:"commentsSince,omitzero"` // newest comment update seen
 	// FullAt is the last full read of the project (a reconcile or an overflow
 	// re-read), set by the syncer: a page fingerprint taken before it is
-	// superseded by that read (mcpbridge.PageChanged).
+	// superseded by that read (modkit.PageChanged).
 	FullAt time.Time `json:"fullAt,omitzero"`
 }
 

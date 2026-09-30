@@ -16,6 +16,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -227,7 +228,7 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 			if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
 				return nil, errOldServer
 			}
-			url := mcpbridge.HTTPS(m.URL, fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID))
+			url := modkit.HTTPS(m.URL, fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID))
 			out = append(out, provider.Project{ExternalID: fmt.Sprintf("%s/%d", m.Game, m.ModID), Name: m.Name, URL: url})
 		}
 		offset += len(r.Mods)
@@ -355,15 +356,15 @@ func commentURL(game string, mod int, id string) string {
 }
 
 func threadItem(game string, mod int, t thread) provider.Item {
-	created := mcpbridge.Time(t.CreatedAt)
+	created := modkit.Time(t.CreatedAt)
 	it := provider.Item{
-		ExternalID: commentExternalID(game, mod, t.ID), Kind: store.KindComment, Number: mcpbridge.Number(t.ID),
-		Title: mcpbridge.Title(t.Body), Body: t.Body, URL: commentURL(game, mod, t.ID), Author: t.Author,
+		ExternalID: commentExternalID(game, mod, t.ID), Kind: store.KindComment, Number: modkit.Number(t.ID),
+		Title: modkit.Title(t.Body), Body: t.Body, URL: commentURL(game, mod, t.ID), Author: t.Author,
 		Open: true, CreatedAt: created, UpdatedAt: created,
 	}
 	for _, r := range t.Replies {
-		at := mcpbridge.Time(r.CreatedAt)
-		it.UpdatedAt = mcpbridge.Latest(it.UpdatedAt, at)
+		at := modkit.Time(r.CreatedAt)
+		it.UpdatedAt = modkit.Latest(it.UpdatedAt, at)
 		it.Comments = append(it.Comments, provider.Comment{ExternalID: r.ID, Author: r.Author, Body: r.Body,
 			URL: commentURL(game, mod, r.ID), CreatedAt: at, UpdatedAt: at})
 	}
@@ -412,7 +413,7 @@ func (p *Provider) bugItems(ctx context.Context, game string, mod int) ([]provid
 // bug returns one bug report with its replies; ok=false when it vanished.
 // The report is re-read only when its list row (replies, last post) changed.
 func (p *Provider) bug(ctx context.Context, game string, mod int, listURL string, b bugRow) (provider.Item, bool, error) {
-	last := mcpbridge.Time(b.LastPostAt)
+	last := modkit.Time(b.LastPostAt)
 	stamp := fmt.Sprintf("%d|%s|%s|%s", b.Replies, last.Format(time.RFC3339), b.Status, b.Title)
 	p.mu.Lock()
 	c, ok := p.bugs[b.ID]
@@ -421,7 +422,7 @@ func (p *Provider) bug(ctx context.Context, game string, mod int, listURL string
 		return c.item, true, nil
 	}
 	var r bugResult
-	err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": mcpbridge.Number(b.ID)}, &r)
+	err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": modkit.Number(b.ID)}, &r)
 	if mcpbridge.IsCode(err, mcpbridge.CodeNotFound) {
 		return provider.Item{}, false, nil
 	}
@@ -441,9 +442,9 @@ func (p *Provider) bug(ctx context.Context, game string, mod int, listURL string
 		created = last
 	}
 	it := provider.Item{
-		ExternalID: bugExternalID(b.ID), Kind: store.KindBug, Number: mcpbridge.Number(b.ID),
+		ExternalID: bugExternalID(b.ID), Kind: store.KindBug, Number: modkit.Number(b.ID),
 		Title: b.Title, Body: r.Report.Body, URL: listURL, Author: r.Report.Author,
-		Open: b.Open, RawStatus: status, CreatedAt: created, UpdatedAt: mcpbridge.Latest(created, last),
+		Open: b.Open, RawStatus: status, CreatedAt: created, UpdatedAt: modkit.Latest(created, last),
 	}
 	if !b.Open {
 		it.ClosedAt = it.UpdatedAt
@@ -472,7 +473,7 @@ func localTime(s *string) time.Time {
 			return t.UTC()
 		}
 	}
-	return mcpbridge.Time(s)
+	return modkit.Time(s)
 }
 
 // ── change check ─────────────────────────────────────────────────
@@ -513,10 +514,10 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 	default:
 		parts = append(parts, "bugs", strconv.Itoa(b.Pages))
 		for _, r := range b.Bugs {
-			parts = append(parts, fmt.Sprintf("%s:%d:%s:%s", r.ID, r.Replies, r.Status, mcpbridge.Time(r.LastPostAt).Format(time.RFC3339)))
+			parts = append(parts, fmt.Sprintf("%s:%d:%s:%s", r.ID, r.Replies, r.Status, modkit.Time(r.LastPostAt).Format(time.RFC3339)))
 		}
 	}
-	ch.Overflow = mcpbridge.PageChanged(st, sigKey, mcpbridge.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, sigKey, modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
