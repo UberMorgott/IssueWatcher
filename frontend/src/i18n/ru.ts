@@ -772,7 +772,7 @@ const ru: Messages = {
     kindFilter: 'Тип',
     openOn: 'Открыть на {platform}',
     replyOn: 'Ответ на {platform}',
-    replySteamHint: 'В Steam нет веток: ответ — новый комментарий, начинающийся с @{author}.',
+    replySteamHint: "В Steam нет веток: ответ — новый комментарий, начинающийся с {'@'}{author}.",
     replyNoCap: 'Ответы на {platform} из дашборда пока недоступны.',
     markup: { github: 'Markdown', nexus: 'BBCode', curseforge: 'Текст / HTML', factorio: 'Текст', steam: 'Простой текст' },
     markupHint: 'Разметка: {markup}',

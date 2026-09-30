@@ -773,7 +773,7 @@ const en = {
     // item page
     openOn: 'Open on {platform}',
     replyOn: 'Reply on {platform}',
-    replySteamHint: 'Steam has no threads: the reply is a new comment starting with @{author}.',
+    replySteamHint: "Steam has no threads: the reply is a new comment starting with {'@'}{author}.",
     replyNoCap: 'Replies to {platform} are not available from the dashboard yet.',
     markup: { github: 'Markdown', nexus: 'BBCode', curseforge: 'Plain text / HTML', factorio: 'Plain text', steam: 'Plain text' },
     markupHint: 'Formatting: {markup}',
