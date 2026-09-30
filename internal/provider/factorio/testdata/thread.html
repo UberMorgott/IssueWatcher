@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+
+        <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+        <link href="https://factorio.com/static/css/main.css?v=485a359d" rel="stylesheet" type="text/css"/>
+        
+        
+
+        <link href="https://cdn.factorio.com/assets/fonts/titillium-web.css" rel="stylesheet">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/fontawesome.min.css" rel="stylesheet" crossorigin="anonymous">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/solid.min.css" rel="stylesheet" crossorigin="anonymous">
+
+        <script src="https://factorio.com/static/js/jquery-3.7.0.min.js"></script>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js" integrity="sha512-JvpjarJlOl4sW26MnEb3IdSAcGdeTeOaAlu2gUZtfFrRgnChdzELOZKl0mN6ZvI0X+xiX5UMvxjK2Rx2z/fliw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/head-support.min.js" integrity="sha512-ZXZrgVLRbVwG6i/w2/iT/YtrxH7yXqhMFj+KDBgRNqTPdHkKQ/hzj9enGUPienVX0Cu8OhegZ1LcULuemfWHRg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/preload.min.js" integrity="sha512-2lqd++ZVVmZg5LU//IabHHKQBV3qL6kPMjXvtzLfd+Fn99uOw7MmWLlVQhF2uVzH0yOuVzV3/BIC5w5QUP6uTw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <title>Lazy Builder - Factorio Mods</title>
+
+        
+  
+  
+  <meta name="twitter:site" content="@factoriogame">
+  <meta name="twitter:title" content="Wires - Lazy Builder">
+  <meta name="twitter:description" content="1. Place 2 poles and connect them with a wire. ">
+
+  <meta property="og:site_name" content="Factorio Mod Portal">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Wires - Lazy Builder">
+  <meta property="og:description" content="1. Place 2 poles and connect them with a wire. ">
+
+
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-core@1.0.1.js"></script>
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-dom@1.0.4.js"></script>
+
+        
+
+        
+    </head>
+
+    <body>
+
+        
+            
+
+
+    <div class="top-bar">
+        <div class="top-bar-inner">
+            <div class="sites links flex flex-items-baseline">
+                
+                
+                    <a href="https://factorio.com" class="">
+                        Factorio.com</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://forums.factorio.com/" class="">
+                        Forums</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://wiki.factorio.com/" class="">
+                        Wiki</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://mods.factorio.com" class="sites-current">
+                        Mod Portal</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://lua-api.factorio.com/latest/" class="">
+                        API Docs</a>
+                    
+                
+            </div>
+            <div class="user-controls links">
+                <!-- TODO icons -->
+                <a href="/login?next=/mod/auto-build-and-deconstruct/discussion/6ab8e16ca3e387a150232548"><i class="fas fa-user"></i>Log in</a>
+            </div>
+            <style>
+                .top-banner {
+                    margin-top: 12px;
+                    font-size: larger;
+                    text-decoration: underline;
+                    text-decoration-color: red;
+                }
+                .top-banner a {
+                    color: white;
+                }
+                .top-banner i {
+                    color: #ffa200;
+                }
+                .top-banner-divider {
+                    margin-top: 12px;
+                    margin-left: 12px;
+                    margin-right: 12px;
+                    font-size: larger;
+                }
+            </style>
+
+            <div class="top-banner">
+                
+
+            </div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-inner">
+            <a href="/" class="header-logo">
+                <!-- TODO cdn -->
+                <img src="https://cdn.factorio.com/assets/img/web/factorio-logo2.png">
+            </a>
+            
+            
+        </div>
+    </div>
+
+
+            <div class="container">
+                <div class="container-inner">
+                    
+<div id="flashed-messages" class="small-center float-to-center">
+    
+</div>
+
+                    
+  
+<div
+  id="tabs-header"
+  
+>
+  
+  <ul class="tabs tabs-for-panel tabs-header flex-end">
+      
+      
+      <li>
+        <a href="/highlights">
+          <i class="fa fa-star"></i>
+          Highlighted mods
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/updated">
+          <i class="fa fa-history"></i>
+          Recently updated
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/downloaded">
+          <i class="fa fa-sort-amount-down"></i>
+          Most downloaded
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/trending">
+          <i class="fa fa-chart-line"></i>
+          Trending
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/search">
+          <i class="fa fa-search"></i>
+          Search mods
+        </a>
+      </li>
+    
+  </ul>
+</div>
+
+  <div class="panel pt0 pb0 mb32">
+    
+  
+  <div class="panel-inset-lighter flex-column p0">
+    <div class="flex z1">
+      <div class="panel-inset-lighter m0 w100p mr2">
+        <div class="flex">
+          <div class="mt0 mb0 mr12 fs0">
+            <a href="/mod/auto-build-and-deconstruct" class="block">
+              <div class="panel-inset-lighter mod-thumbnail m0 p0">
+                
+                  <img src="https://assets-mod.factorio.com/assets/31ed2c39dcf7e93c887ad5fefebec3cf956fcaac.thumb.png">
+                  <div class="shadow-overlay"></div>
+                
+              </div>
+            </a>
+          </div>
+          <div class="w100p">
+            <h2 class="mb0">
+              <a href="/mod/auto-build-and-deconstruct">Lazy Builder</a>
+              
+            </h2>
+            <div>
+              by <a class="orange bold" href="/user/Morgott">Morgott</a>
+            </div>
+            <hr>
+            <p class="pre-line ">Another mod for auto-construction/upgrade of ghost structures and auto-dismantling of objects, but as non-cheaty as possible.
+          </div>
+        </div>
+      </div>
+      <div class="panel-inset-lighter m0 w256 sm-none">
+          
+            <div class="pb8">
+              <i class="fa fa-cubes"></i>
+              Utilities
+            </div>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod category: Utilities
+                </div>
+                <div class="panel-tooltip">
+                    <p>Providing the player with new tools or adjusting the game interface, without fundamentally changing gameplay.
+                </div>
+            </div>
+          
+        <div class="mod-card-info">
+          <div class="pb8" title="Last updated">
+            <i class="fa fa-history"></i>
+            <span title="2026-09-28T21:08:10.541000">a day ago</span>
+          </div>
+          <div class="pb8" title="Available for these Factorio versions">
+            <i class="fa fa-cog"></i>
+            2.0
+          </div>
+          <div class="pb8" title="Downloads, updated daily">
+            <i class="fa fa-download"></i>
+            <span title="4164">4.16K</span>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+    <div class="panel-inset m0 w100 p4">
+      <div class="flex flex-space-between mod-tags-download">
+        <div class="flex flex-wrap mod-tags">
+          
+            <a class="slot-button-inline" href="/?tag=blueprints">
+              Blueprints
+            </a>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod tag: Blueprints
+                </div>
+                <div class="panel-tooltip">
+                    <p>Change blueprint behavior.
+                </div>
+            </div>
+          
+            <a class="slot-button-inline" href="/?tag=cheats">
+              Cheats
+            </a>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod tag: Cheats
+                </div>
+                <div class="panel-tooltip">
+                    <p>Play it your way.
+                </div>
+            </div>
+          
+        </div>
+        <div class="text-right flex flex-items-baseline flex-end mod-download-section" style="margin-top: auto;">
+          <div class="mr12">
+            
+              <a href="https://github.com/UberMorgott/Factorio-Mod-Lazy_Builder" class="nowrap">source code</a></li>
+            
+          </div>
+          <div class="mr12">
+            
+          </div>
+          <div class="btn mod-download-button btn-download">
+            
+              
+                
+                <a class="button-green text-center" href="/login?next=/mod/auto-build-and-deconstruct">
+                  <i class="fa fa-download"></i> Download
+                </a>
+              
+            
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <div class="panel-inset p0">
+      
+  <ul class="tabs">
+    <li>
+      <a href="/mod/auto-build-and-deconstruct" >
+        Information
+      </a>
+    </li>
+
+    
+      <li>
+        <a href="/mod/auto-build-and-deconstruct/changelog" >
+          Changelog
+        </a>
+    </li>
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/downloads" >
+        Downloads
+      </a>
+    </li>
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/dependencies" >
+        Dependencies
+        <span class="badge">0 / 2 </span>
+      </a>
+    </li>
+
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/discussion" class="active">
+        Discussion
+        <span class="badge">27</span>
+        
+      </a>
+    </li>
+
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/metrics" >
+        Metrics
+      </a>
+    </li>
+
+  </ul>
+
+      <div class="panel-lighter mb0">
+        
+          <div class="discussion">
+            
+<div class="discussion-detail">
+    <div class="float-right flex flex-wrap flex-end">
+        <form method="POST" action="/notifications/subscribe">
+          <input type="hidden" name="thread_id" value="6ab8e16ca3e387a150232548">
+          <input type="hidden" name="type" value="message">
+          
+            
+          
+        </form>
+        
+    </div>
+    <h2 class="discussion-detail-title  pt8">
+        
+          <span class="badge tag discussion-message-tag discussion-tag-style-b" title="Bugs">b</span>
+        
+        
+        
+        
+        
+            <span>Wires</span>
+        
+    </h2>
+    
+    
+    
+    
+    <div class="discussion-message flex mt12 mb12">
+        <div class="discussion-message-avatar mr12 fs0">
+            <img src="/static/no-avatar.png" class="panel-inset bottom-shadow-border p0" style="width: 72px;">
+        </div>
+        <div class="discussion-message-content panel-inset-lighter m0 p0 w100p">
+            <div class="
+              m0
+              panel-inset
+              flex flex-space-between
+              discussion-message-header
+              
+            ">
+              <div class="flex">
+                
+                <div class="discussion-message-author">
+                  <a href="/user/dzbanek" class="orange">
+                    dzbanek
+                  </a>
+                  
+                </div>
+                <div class="ml8 grey" title="2026-09-27T09:27:08.720000">
+                  2 days ago
+                </div>
+                
+              </div>
+              <div>
+                
+              </div>
+            </div>
+            <div class="discussion-message-body p16">
+                <ol>
+<li>Place 2 poles and connect them with a wire. </li>
+<li>Ctrl+c</li>
+<li>Crlt+v</li>
+</ol>
+<p>There are just poles, not wires between them.
+            </div>
+        </div>
+    </div>
+    
+    
+    
+    
+    
+    
+    <div class="discussion-message flex mt12 mb12">
+        <div class="discussion-message-avatar mr12 fs0">
+            <img src="https://assets-mod.factorio.com/assets/4b5b3c4ca704c30463e924f4bb4af5a3a22e8278.thumb.png" class="panel-inset bottom-shadow-border p0" style="width: 72px;">
+        </div>
+        <div class="discussion-message-content panel-inset-lighter m0 p0 w100p">
+            <div class="
+              m0
+              panel-inset
+              flex flex-space-between
+              discussion-message-header
+               discussion-message-header-owner
+              
+            ">
+              <div class="flex">
+                
+                <div class="discussion-message-author">
+                  <a href="/user/Morgott" class="orange">
+                    Morgott
+                  </a>
+                  
+                    <i class="fa fa-star" title="Mod author"></i>
+                  
+                </div>
+                <div class="ml8 grey" title="2026-09-28T21:08:52.316000">
+                  a day ago
+                </div>
+                
+              </div>
+              <div>
+                
+              </div>
+            </div>
+            <div class="discussion-message-body p16">
+                <p>hi!<br>
+Fixed
+            </div>
+        </div>
+    </div>
+    
+    
+    
+    
+        <div class="discussion-message-new-info">
+            
+        </div>
+        
+            <h3 class="mb8">New response</h3>
+            <form class="discussion-message-editor" method="post">
+                
+                <div class="flex flex-space-between mt8">
+                    <div>
+                      
+                    </div>
+                    <div>
+                      <button
+                        
+                          class="button-green disabled" disabled title="You need to own Factorio to participate in mod portal discussions."
+                        
+                        type="submit"
+                      >
+                          
+                          Log in to reply
+                          
+                      </button>
+                    </div>
+                </div>
+            </form>
+        
+    
+</div>
+
+          </div>
+        
+      </div>
+    </div>
+  </div>
+
+                </div>
+            </div>
+
+            
+<div class="footer">
+    <div class="footer-inner panel">
+
+        <div class="footer-links flex flex-wrap flex-center panel-inset m0">
+            <a href="https://factorio.com/terms-of-service">Terms of Service</a><span class="separator">|</span><a href="https://factorio.com/privacy-policy">Privacy</a><span class="separator">|</span><a href="https://factorio.com/imprint">Imprint</a><span class="separator">|</span><a href="https://factorio.com/press-kit">Presskit</a><span class="separator">|</span><a href="https://factorio.com/support/contact">Contact</a><span class="separator">|</span><a href="https://factorio.com/faq">FAQ</a><span class="separator">|</span><a href="https://factorio.com/jobs">Jobs</a>
+        </div>
+        <div class="footer-rocket panel-inset m0 p0">
+            <div id="rocket" class="rocket"></div>
+            <div class="shadow-overlay"></div>
+            <div class="shadow-overlay-bottom"></div>
+        </div>
+        <div class="footer-copyright panel-inset m0">
+            Copyright © 2015 - 2026 Wube Software - all rights reserved.
+        </div>
+    </div>
+</div>
+            
+                <script src="/static/js/factorio_mod_portal.js?v=485a359d"></script>
+                <script>
+                  var messages = [
+                  ];
+                  Factorio.main({
+                      // old url for compatibility with cached JS
+                      contentServerUrl: 'https://assets-mod.factorio.com',
+                      assetCDNUrl: 'https://assets-mod.factorio.com',
+                      messages: messages
+                  });
+                </script>
+                
+                
+            
+        
+        <script src="https://factorio.com/static/js/factorio.js?v=485a359d" type="module"></script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"c302d1d53a934aaeb4f306620e7ed42d","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

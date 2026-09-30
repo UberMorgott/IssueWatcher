@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+
+        <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+        <link href="https://factorio.com/static/css/main.css?v=485a359d" rel="stylesheet" type="text/css"/>
+        
+        
+
+        <link href="https://cdn.factorio.com/assets/fonts/titillium-web.css" rel="stylesheet">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/fontawesome.min.css" rel="stylesheet" crossorigin="anonymous">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/solid.min.css" rel="stylesheet" crossorigin="anonymous">
+
+        <script src="https://factorio.com/static/js/jquery-3.7.0.min.js"></script>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js" integrity="sha512-JvpjarJlOl4sW26MnEb3IdSAcGdeTeOaAlu2gUZtfFrRgnChdzELOZKl0mN6ZvI0X+xiX5UMvxjK2Rx2z/fliw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/head-support.min.js" integrity="sha512-ZXZrgVLRbVwG6i/w2/iT/YtrxH7yXqhMFj+KDBgRNqTPdHkKQ/hzj9enGUPienVX0Cu8OhegZ1LcULuemfWHRg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/preload.min.js" integrity="sha512-2lqd++ZVVmZg5LU//IabHHKQBV3qL6kPMjXvtzLfd+Fn99uOw7MmWLlVQhF2uVzH0yOuVzV3/BIC5w5QUP6uTw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <title>Lazy Builder - Factorio Mods</title>
+
+        
+  
+  
+  <meta name="twitter:image:src" content="/opengraph/mod/auto-build-and-deconstruct.png">
+  <meta name="twitter:site" content="@factoriogame">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Lazy Builder - Factorio Mods">
+  <meta name="twitter:description" content="Another mod for auto-construction/upgrade of ghost structures and auto-dismantling of objects, but as non-cheaty as possible.">
+
+  <meta property="og:image" content="/opengraph/mod/auto-build-and-deconstruct.png">
+  <meta property="og:image:alt" content="Lazy Builder - Factorio Mod Portal">
+  <meta property="og:image:width" content="800"><meta property="og:image:height" content="400">
+  <meta property="og:site_name" content="Factorio Mod Portal">
+  <meta property="og:type" content="object">
+  <meta property="og:title" content="Lazy Builder">
+  <meta property="og:description" content="Another mod for auto-construction/upgrade of ghost structures and auto-dismantling of objects, but as non-cheaty as possible.">
+
+
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-core@1.0.1.js"></script>
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-dom@1.0.4.js"></script>
+
+        
+
+        
+    </head>
+
+    <body>
+
+        
+            
+
+
+    <div class="top-bar">
+        <div class="top-bar-inner">
+            <div class="sites links flex flex-items-baseline">
+                
+                
+                    <a href="https://factorio.com" class="">
+                        Factorio.com</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://forums.factorio.com/" class="">
+                        Forums</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://wiki.factorio.com/" class="">
+                        Wiki</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://mods.factorio.com" class="sites-current">
+                        Mod Portal</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://lua-api.factorio.com/latest/" class="">
+                        API Docs</a>
+                    
+                
+            </div>
+            <div class="user-controls links">
+                <!-- TODO icons -->
+                <a href="/login?next=/mod/auto-build-and-deconstruct/discussion"><i class="fas fa-user"></i>Log in</a>
+            </div>
+            <style>
+                .top-banner {
+                    margin-top: 12px;
+                    font-size: larger;
+                    text-decoration: underline;
+                    text-decoration-color: red;
+                }
+                .top-banner a {
+                    color: white;
+                }
+                .top-banner i {
+                    color: #ffa200;
+                }
+                .top-banner-divider {
+                    margin-top: 12px;
+                    margin-left: 12px;
+                    margin-right: 12px;
+                    font-size: larger;
+                }
+            </style>
+
+            <div class="top-banner">
+                
+
+            </div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-inner">
+            <a href="/" class="header-logo">
+                <!-- TODO cdn -->
+                <img src="https://cdn.factorio.com/assets/img/web/factorio-logo2.png">
+            </a>
+            
+            
+        </div>
+    </div>
+
+
+            <div class="container">
+                <div class="container-inner">
+                    
+<div id="flashed-messages" class="small-center float-to-center">
+    
+</div>
+
+                    
+  
+<div
+  id="tabs-header"
+  
+>
+  
+  <ul class="tabs tabs-for-panel tabs-header flex-end">
+      
+      
+      <li>
+        <a href="/highlights">
+          <i class="fa fa-star"></i>
+          Highlighted mods
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/updated">
+          <i class="fa fa-history"></i>
+          Recently updated
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/downloaded">
+          <i class="fa fa-sort-amount-down"></i>
+          Most downloaded
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/trending">
+          <i class="fa fa-chart-line"></i>
+          Trending
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/search">
+          <i class="fa fa-search"></i>
+          Search mods
+        </a>
+      </li>
+    
+  </ul>
+</div>
+
+  <div class="panel pt0 pb0 mb32">
+    
+  
+  <div class="panel-inset-lighter flex-column p0">
+    <div class="flex z1">
+      <div class="panel-inset-lighter m0 w100p mr2">
+        <div class="flex">
+          <div class="mt0 mb0 mr12 fs0">
+            <a href="/mod/auto-build-and-deconstruct" class="block">
+              <div class="panel-inset-lighter mod-thumbnail m0 p0">
+                
+                  <img src="https://assets-mod.factorio.com/assets/31ed2c39dcf7e93c887ad5fefebec3cf956fcaac.thumb.png">
+                  <div class="shadow-overlay"></div>
+                
+              </div>
+            </a>
+          </div>
+          <div class="w100p">
+            <h2 class="mb0">
+              <a href="/mod/auto-build-and-deconstruct">Lazy Builder</a>
+              
+            </h2>
+            <div>
+              by <a class="orange bold" href="/user/Morgott">Morgott</a>
+            </div>
+            <hr>
+            <p class="pre-line ">Another mod for auto-construction/upgrade of ghost structures and auto-dismantling of objects, but as non-cheaty as possible.
+          </div>
+        </div>
+      </div>
+      <div class="panel-inset-lighter m0 w256 sm-none">
+          
+            <div class="pb8">
+              <i class="fa fa-cubes"></i>
+              Utilities
+            </div>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod category: Utilities
+                </div>
+                <div class="panel-tooltip">
+                    <p>Providing the player with new tools or adjusting the game interface, without fundamentally changing gameplay.
+                </div>
+            </div>
+          
+        <div class="mod-card-info">
+          <div class="pb8" title="Last updated">
+            <i class="fa fa-history"></i>
+            <span title="2026-09-28T21:08:10.541000">a day ago</span>
+          </div>
+          <div class="pb8" title="Available for these Factorio versions">
+            <i class="fa fa-cog"></i>
+            2.0
+          </div>
+          <div class="pb8" title="Downloads, updated daily">
+            <i class="fa fa-download"></i>
+            <span title="4164">4.16K</span>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+    <div class="panel-inset m0 w100 p4">
+      <div class="flex flex-space-between mod-tags-download">
+        <div class="flex flex-wrap mod-tags">
+          
+            <a class="slot-button-inline" href="/?tag=blueprints">
+              Blueprints
+            </a>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod tag: Blueprints
+                </div>
+                <div class="panel-tooltip">
+                    <p>Change blueprint behavior.
+                </div>
+            </div>
+          
+            <a class="slot-button-inline" href="/?tag=cheats">
+              Cheats
+            </a>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod tag: Cheats
+                </div>
+                <div class="panel-tooltip">
+                    <p>Play it your way.
+                </div>
+            </div>
+          
+        </div>
+        <div class="text-right flex flex-items-baseline flex-end mod-download-section" style="margin-top: auto;">
+          <div class="mr12">
+            
+              <a href="https://github.com/UberMorgott/Factorio-Mod-Lazy_Builder" class="nowrap">source code</a></li>
+            
+          </div>
+          <div class="mr12">
+            
+          </div>
+          <div class="btn mod-download-button btn-download">
+            
+              
+                
+                <a class="button-green text-center" href="/login?next=/mod/auto-build-and-deconstruct">
+                  <i class="fa fa-download"></i> Download
+                </a>
+              
+            
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <div class="panel-inset p0">
+      
+  <ul class="tabs">
+    <li>
+      <a href="/mod/auto-build-and-deconstruct" >
+        Information
+      </a>
+    </li>
+
+    
+      <li>
+        <a href="/mod/auto-build-and-deconstruct/changelog" >
+          Changelog
+        </a>
+    </li>
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/downloads" >
+        Downloads
+      </a>
+    </li>
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/dependencies" >
+        Dependencies
+        <span class="badge">0 / 2 </span>
+      </a>
+    </li>
+
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/discussion" class="active">
+        Discussion
+        <span class="badge">27</span>
+        
+      </a>
+    </li>
+
+    
+
+    <li>
+      <a href="/mod/auto-build-and-deconstruct/metrics" >
+        Metrics
+      </a>
+    </li>
+
+  </ul>
+
+      <div class="panel-lighter mb0">
+        
+          <div class="discussion">
+            
+    <div class="discussion-list">
+        
+        
+        <div class="panel-inset p0">
+            <div class="panel-inset flex flex-space-between flex-align-center p4 m0">
+                <div class="flex">
+                    
+                        
+                        
+                            <a class="button discussion-list-new-message disabled" title="You need to own Factorio to participate in mod portal discussions.">New Thread</a>
+                        
+                        
+                    
+                </div>
+                <div class="w100p text-right">
+                    Filter:
+                    <div class="discussion-tags-filter inline-flex flex-wrap flex-end">
+                        
+                            <a href="/mod/auto-build-and-deconstruct/discussion/g">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">General</span>
+                            </a>
+                        
+                            <a href="/mod/auto-build-and-deconstruct/discussion/b">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Bugs</span>
+                            </a>
+                        
+                            <a href="/mod/auto-build-and-deconstruct/discussion/a">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Announcements</span>
+                            </a>
+                        
+                            <a href="/mod/auto-build-and-deconstruct/discussion/i">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Ideas &amp; suggestions</span>
+                            </a>
+                        
+                    </div>
+                </div>
+            </div>
+            
+                <table class="discussion-list-messages  panel-hole m0 ms0">
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6ab8e16ca3e387a150232548" title="Wires">Wires</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/dzbanek" class="orange">dzbanek</a>
+                                    
+                                    <span title="2026-09-27T09:27:08.720000">2 days ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-09-28T21:08:52.319000">a day ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/68f87a4f67ef4b911874af22" title="[CLOSE]The mod Lazy Builder (1.0.8) caused a non-recoverable error.">[CLOSE]The mod Lazy Builder (1.0.8) caused a non-recoverable error.</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/GriimVT" class="orange">GriimVT</a>
+                                    
+                                    <span title="2025-10-22T06:31:43.389000">11 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/GriimVT" class="orange">GriimVT</a>
+                                    <span title="2026-08-30T00:37:11.522000">a month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6a72314f1beafec9c99dd911" title="Mod improvement suggestions">Mod improvement suggestions</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/longneck" class="orange">longneck</a>
+                                    
+                                    <span title="2026-08-04T18:37:03.048000">2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-08-08T10:07:55.125000">2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6a36f671341e062248beeef8" title="[CLOSE]Error - scan / modules / ghosts">[CLOSE]Error - scan / modules / ghosts</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/satans_empathy" class="orange">satans_empathy</a>
+                                    
+                                    <span title="2026-06-20T20:22:09.668000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/satans_empathy" class="orange">satans_empathy</a>
+                                    <span title="2026-07-01T02:30:36.269000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6a23349dc92c9900baf2fa25" title="[WIP]Incompatible with Bob&#39;s Inserters?">[WIP]Incompatible with Bob&#39;s Inserters?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/TriggerBill" class="orange">TriggerBill</a>
+                                    
+                                    <span title="2026-06-05T20:42:05.113000">4 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-06-25T22:33:31.726000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/69a99a84e533ec0d64cd7816" title="[CLOSE]crash in spill_item_stack">[CLOSE]crash in spill_item_stack</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/longneck" class="orange">longneck</a>
+                                    
+                                    <span title="2026-03-05T15:00:20.607000">7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    4
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-06-03T15:25:20.864000">4 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/697a0a208d2aeccfda3835ec" title="[CLOSE]Pole connections lost aftre undo deleting">[CLOSE]Pole connections lost aftre undo deleting</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/dzbanek" class="orange">dzbanek</a>
+                                    
+                                    <span title="2026-01-28T13:07:44.396000">8 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-31T13:13:36.240000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/69268b9960a2ae2b0aa8fbfd" title="[CLOSE]Replaced tiles are destroyed">[CLOSE]Replaced tiles are destroyed</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/cgamesplay" class="orange">cgamesplay</a>
+                                    
+                                    <span title="2025-11-26T05:09:45.821000">10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-31T13:13:14.996000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/68ee972db89de23e471c2484" title="[CLOSE]Bug with belt balancer 2">[CLOSE]Bug with belt balancer 2</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/emelrad12" class="orange">emelrad12</a>
+                                    
+                                    <span title="2025-10-14T18:32:13.850000">11 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-18T17:14:25.930000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/68e30b8f74deb69b52a9be51" title="[CLOSE]Far Reach + Lazy Builder Lag">[CLOSE]Far Reach + Lazy Builder Lag</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/JaceTheSage" class="orange">JaceTheSage</a>
+                                    
+                                    <span title="2025-10-06T00:21:35.361000">a year ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-18T17:11:17.885000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/68baf5144343cd92eda423de" title="[CLOSE]Too slow, lags, lack of buildingand something else">[CLOSE]Too slow, lags, lack of buildingand something else</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Checon56" class="orange">Checon56</a>
+                                    
+                                    <span title="2025-09-05T14:35:00.932000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-18T16:56:57.496000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/679b44dcc053296b8c1fcd5b" title="[CLOSE]Does not insert modules">[CLOSE]Does not insert modules</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/dzbanek" class="orange">dzbanek</a>
+                                    
+                                    <span title="2025-01-30T09:22:36.341000">1 year, 8 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2026-01-18T16:54:07.272000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/67ddddc8f81db2eadd6b68dd" title="[CLOSE]Crash Report">[CLOSE]Crash Report</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/ESUESU001" class="orange">ESUESU001</a>
+                                    
+                                    <span title="2025-03-21T21:44:40.447000">1 year, 6 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/ESUESU001" class="orange">ESUESU001</a>
+                                    <span title="2025-04-09T04:29:46.312000">1 year, 6 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/675359d4129d9bcaf50a5a37" title="[CLOSE]Crash">[CLOSE]Crash</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/alincrys" class="orange">alincrys</a>
+                                    
+                                    <span title="2024-12-06T20:08:52.348000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    5
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-07T20:43:43.972000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6751b5b29bbc8ffe13b7293a" title="[CLOSE]Request for ingame changelog">[CLOSE]Request for ingame changelog</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/aeryen" class="orange">aeryen</a>
+                                    
+                                    <span title="2024-12-05T14:16:18.412000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-05T14:57:15.306000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6751aa134886a9676338a6f9" title="[CLOSE]Ghost Placement - Crash">[CLOSE]Ghost Placement - Crash</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/aR_HellSoldier" class="orange">aR_HellSoldier</a>
+                                    
+                                    <span title="2024-12-05T13:26:43.266000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-05T14:06:24.410000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/674ff64050c5ff6aab26b3fa" title="[CLOSE]Latest version tanks UPS">[CLOSE]Latest version tanks UPS</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/mpwoz" class="orange">mpwoz</a>
+                                    
+                                    <span title="2024-12-04T06:27:12.495000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    6
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/mpwoz" class="orange">mpwoz</a>
+                                    <span title="2024-12-05T13:22:59.502000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/67411008acb25e28c28d9fbe" title="[CLOSE]Issue with splitters not auto-placing">[CLOSE]Issue with splitters not auto-placing</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/techwolf359" class="orange">techwolf359</a>
+                                    
+                                    <span title="2024-11-22T23:13:12.858000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    6
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-05T09:13:36.025000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/6750574350c5ff6aab26b41d" title="[CLOSE]Cut and paste broke">[CLOSE]Cut and paste broke</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/jmbsoft" class="orange">jmbsoft</a>
+                                    
+                                    <span title="2024-12-04T13:21:07.530000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/jmbsoft" class="orange">jmbsoft</a>
+                                    <span title="2024-12-05T01:07:08.477000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/674fcb6336b15f088fcbdd22" title="[CLOSE]Upgrading Belts removes their content">[CLOSE]Upgrading Belts removes their content</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Naito" class="orange">Naito</a>
+                                    
+                                    <span title="2024-12-04T03:24:19.698000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-04T10:58:31.866000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/674fca547cd28d6ac001efd3" title="[CLOSE]Upgrades don&#39;t keep configurations">[CLOSE]Upgrades don&#39;t keep configurations</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Naito" class="orange">Naito</a>
+                                    
+                                    <span title="2024-12-04T03:19:48.453000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-04T10:57:21.610000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/67445be20d3dc4584b5c9738" title="[CLOSE]Does this work with Upgrading Plans?">[CLOSE]Does this work with Upgrading Plans?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/aR_HellSoldier" class="orange">aR_HellSoldier</a>
+                                    
+                                    <span title="2024-11-25T11:13:38.656000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-12-03T23:20:15.145000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/673db8a9916ae2dac0dd3993" title="[CLOSE]Creates different quality">[CLOSE]Creates different quality</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Shadowsand" class="orange">Shadowsand</a>
+                                    
+                                    <span title="2024-11-20T10:23:37.375000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    7
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-11-25T12:56:11.250000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/67350a1c2c18d10d9b027641" title="[CLOSE]Perfect">[CLOSE]Perfect</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/JazzMano" class="orange">JazzMano</a>
+                                    
+                                    <span title="2024-11-13T20:20:44.392000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/JazzMano" class="orange">JazzMano</a>
+                                    <span title="2024-11-18T18:14:45.317000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/673905f8688e478921adb3de" title="[CLOSE]How to make this mod work">[CLOSE]How to make this mod work</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/slapma" class="orange">slapma</a>
+                                    
+                                    <span title="2024-11-16T20:52:08.731000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-11-18T09:11:28.501000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/673a19fa688e478921adb4ea" title="[CLOSE]Where does stuff go when deconstructed?">[CLOSE]Where does stuff go when deconstructed?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/bschultz0" class="orange">bschultz0</a>
+                                    
+                                    <span title="2024-11-17T16:29:46.747000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-11-18T09:09:53.973000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/auto-build-and-deconstruct/discussion/673777714316b926db6f64bd" title="[CLOSE]It doesn&#39;t destroy.">[CLOSE]It doesn&#39;t destroy.</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/oyunbagimlisi" class="orange">oyunbagimlisi</a>
+                                    
+                                    <span title="2024-11-15T16:31:45.013000">1 year, 10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Morgott" class="orange">Morgott</a>
+                                    <span title="2024-11-16T17:02:42.481000">1 year, 10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                </table>
+            
+        </div>
+        
+        <div class="text-right discussion-list-options">
+            
+        </div>
+    </div>
+
+          </div>
+        
+      </div>
+    </div>
+  </div>
+
+                </div>
+            </div>
+
+            
+<div class="footer">
+    <div class="footer-inner panel">
+
+        <div class="footer-links flex flex-wrap flex-center panel-inset m0">
+            <a href="https://factorio.com/terms-of-service">Terms of Service</a><span class="separator">|</span><a href="https://factorio.com/privacy-policy">Privacy</a><span class="separator">|</span><a href="https://factorio.com/imprint">Imprint</a><span class="separator">|</span><a href="https://factorio.com/press-kit">Presskit</a><span class="separator">|</span><a href="https://factorio.com/support/contact">Contact</a><span class="separator">|</span><a href="https://factorio.com/faq">FAQ</a><span class="separator">|</span><a href="https://factorio.com/jobs">Jobs</a>
+        </div>
+        <div class="footer-rocket panel-inset m0 p0">
+            <div id="rocket" class="rocket"></div>
+            <div class="shadow-overlay"></div>
+            <div class="shadow-overlay-bottom"></div>
+        </div>
+        <div class="footer-copyright panel-inset m0">
+            Copyright © 2015 - 2026 Wube Software - all rights reserved.
+        </div>
+    </div>
+</div>
+            
+                <script src="/static/js/factorio_mod_portal.js?v=485a359d"></script>
+                <script>
+                  var messages = [
+                  ];
+                  Factorio.main({
+                      // old url for compatibility with cached JS
+                      contentServerUrl: 'https://assets-mod.factorio.com',
+                      assetCDNUrl: 'https://assets-mod.factorio.com',
+                      messages: messages
+                  });
+                </script>
+                
+                
+            
+        
+        <script src="https://factorio.com/static/js/factorio.js?v=485a359d" type="module"></script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"c302d1d53a934aaeb4f306620e7ed42d","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>

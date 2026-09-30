@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+
+        <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+        <link href="https://factorio.com/static/css/main.css?v=485a359d" rel="stylesheet" type="text/css"/>
+        
+        
+
+        <link href="https://cdn.factorio.com/assets/fonts/titillium-web.css" rel="stylesheet">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/fontawesome.min.css" rel="stylesheet" crossorigin="anonymous">
+        <link href="https://cdn.factorio.com/assets/vendor/fontawesome/css/solid.min.css" rel="stylesheet" crossorigin="anonymous">
+
+        <script src="https://factorio.com/static/js/jquery-3.7.0.min.js"></script>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js" integrity="sha512-JvpjarJlOl4sW26MnEb3IdSAcGdeTeOaAlu2gUZtfFrRgnChdzELOZKl0mN6ZvI0X+xiX5UMvxjK2Rx2z/fliw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/head-support.min.js" integrity="sha512-ZXZrgVLRbVwG6i/w2/iT/YtrxH7yXqhMFj+KDBgRNqTPdHkKQ/hzj9enGUPienVX0Cu8OhegZ1LcULuemfWHRg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/ext/preload.min.js" integrity="sha512-2lqd++ZVVmZg5LU//IabHHKQBV3qL6kPMjXvtzLfd+Fn99uOw7MmWLlVQhF2uVzH0yOuVzV3/BIC5w5QUP6uTw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <title>Helmod: Assistant for planning your factory - Factorio Mods</title>
+
+        
+  
+  
+  <meta name="twitter:image:src" content="/opengraph/mod/helmod.png">
+  <meta name="twitter:site" content="@factoriogame">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Helmod: Assistant for planning your factory - Factorio Mods">
+  <meta name="twitter:description" content="Assistant for planning your factory. Can calculate required ingredients, products, machines, modules, and beacons. Can also calculate power production / consumption.">
+
+  <meta property="og:image" content="/opengraph/mod/helmod.png">
+  <meta property="og:image:alt" content="Helmod: Assistant for planning your factory - Factorio Mod Portal">
+  <meta property="og:image:width" content="800"><meta property="og:image:height" content="400">
+  <meta property="og:site_name" content="Factorio Mod Portal">
+  <meta property="og:type" content="object">
+  <meta property="og:title" content="Helmod: Assistant for planning your factory">
+  <meta property="og:description" content="Assistant for planning your factory. Can calculate required ingredients, products, machines, modules, and beacons. Can also calculate power production / consumption.">
+
+
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-core@1.0.1.js"></script>
+        <script src="https://cdn.factorio.com/assets/js/floating-ui-dom@1.0.4.js"></script>
+
+        
+
+        
+    </head>
+
+    <body>
+
+        
+            
+
+
+    <div class="top-bar">
+        <div class="top-bar-inner">
+            <div class="sites links flex flex-items-baseline">
+                
+                
+                    <a href="https://factorio.com" class="">
+                        Factorio.com</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://forums.factorio.com/" class="">
+                        Forums</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://wiki.factorio.com/" class="">
+                        Wiki</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://mods.factorio.com" class="sites-current">
+                        Mod Portal</a>
+                    
+                        <span class="separator separator-blue">|</span>
+                    
+                
+                    <a href="https://lua-api.factorio.com/latest/" class="">
+                        API Docs</a>
+                    
+                
+            </div>
+            <div class="user-controls links">
+                <!-- TODO icons -->
+                <a href="/login?next=/mod/helmod/discussion"><i class="fas fa-user"></i>Log in</a>
+            </div>
+            <style>
+                .top-banner {
+                    margin-top: 12px;
+                    font-size: larger;
+                    text-decoration: underline;
+                    text-decoration-color: red;
+                }
+                .top-banner a {
+                    color: white;
+                }
+                .top-banner i {
+                    color: #ffa200;
+                }
+                .top-banner-divider {
+                    margin-top: 12px;
+                    margin-left: 12px;
+                    margin-right: 12px;
+                    font-size: larger;
+                }
+            </style>
+
+            <div class="top-banner">
+                
+
+            </div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div class="header-inner">
+            <a href="/" class="header-logo">
+                <!-- TODO cdn -->
+                <img src="https://cdn.factorio.com/assets/img/web/factorio-logo2.png">
+            </a>
+            
+            
+        </div>
+    </div>
+
+
+            <div class="container">
+                <div class="container-inner">
+                    
+<div id="flashed-messages" class="small-center float-to-center">
+    
+</div>
+
+                    
+  
+<div
+  id="tabs-header"
+  
+>
+  
+  <ul class="tabs tabs-for-panel tabs-header flex-end">
+      
+      
+      <li>
+        <a href="/highlights">
+          <i class="fa fa-star"></i>
+          Highlighted mods
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/updated">
+          <i class="fa fa-history"></i>
+          Recently updated
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/downloaded">
+          <i class="fa fa-sort-amount-down"></i>
+          Most downloaded
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/browse/trending">
+          <i class="fa fa-chart-line"></i>
+          Trending
+        </a>
+      </li>
+    
+      
+      
+      <li>
+        <a href="/search">
+          <i class="fa fa-search"></i>
+          Search mods
+        </a>
+      </li>
+    
+  </ul>
+</div>
+
+  <div class="panel pt0 pb0 mb32">
+    
+  
+  <div class="panel-inset-lighter flex-column p0">
+    <div class="flex z1">
+      <div class="panel-inset-lighter m0 w100p mr2">
+        <div class="flex">
+          <div class="mt0 mb0 mr12 fs0">
+            <a href="/mod/helmod" class="block">
+              <div class="panel-inset-lighter mod-thumbnail m0 p0">
+                
+                  <img src="https://assets-mod.factorio.com/assets/2d074ddbb9bb947305733a92aae968a2977f2445.thumb.png">
+                  <div class="shadow-overlay"></div>
+                
+              </div>
+            </a>
+          </div>
+          <div class="w100p">
+            <h2 class="mb0">
+              <a href="/mod/helmod">Helmod: Assistant for planning your factory</a>
+              
+            </h2>
+            <div>
+              by <a class="orange bold" href="/user/Helfima">Helfima</a>
+            </div>
+            <hr>
+            <p class="pre-line ">Assistant for planning your factory. Can calculate required ingredients, products, machines, modules, and beacons. Can also calculate power production / consumption.
+          </div>
+        </div>
+      </div>
+      <div class="panel-inset-lighter m0 w256 sm-none">
+          
+            <div class="pb8">
+              <i class="fa fa-cubes"></i>
+              Utilities
+            </div>
+            <div class="tooltip" role="tooltip">
+                <div class="panel-tooltip-title">
+                    Mod category: Utilities
+                </div>
+                <div class="panel-tooltip">
+                    <p>Providing the player with new tools or adjusting the game interface, without fundamentally changing gameplay.
+                </div>
+            </div>
+          
+        <div class="mod-card-info">
+          <div class="pb8" title="Last updated">
+            <i class="fa fa-history"></i>
+            <span title="2026-07-05T11:28:23.157000">3 months ago</span>
+          </div>
+          <div class="pb8" title="Available for these Factorio versions">
+            <i class="fa fa-cog"></i>
+            0.14 - 2.1
+          </div>
+          <div class="pb8" title="Downloads, updated daily">
+            <i class="fa fa-download"></i>
+            <span title="545107">545K</span>
+          </div>
+          
+        </div>
+      </div>
+    </div>
+    <div class="panel-inset m0 w100 p4">
+      <div class="flex flex-space-between mod-tags-download">
+        <div class="flex flex-wrap mod-tags">
+          
+        </div>
+        <div class="text-right flex flex-items-baseline flex-end mod-download-section" style="margin-top: auto;">
+          <div class="mr12">
+            
+              <a href="https://github.com/Helfima/helmod" class="nowrap">source code</a></li>
+            
+          </div>
+          <div class="mr12">
+            
+          </div>
+          <div class="btn mod-download-button btn-download">
+            
+              
+                
+                <a class="button-green text-center" href="/login?next=/mod/helmod">
+                  <i class="fa fa-download"></i> Download
+                </a>
+              
+            
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <div class="panel-inset p0">
+      
+  <ul class="tabs">
+    <li>
+      <a href="/mod/helmod" >
+        Information
+      </a>
+    </li>
+
+    
+      <li>
+        <a href="/mod/helmod/changelog" >
+          Changelog
+        </a>
+    </li>
+    
+
+    <li>
+      <a href="/mod/helmod/downloads" >
+        Downloads
+      </a>
+    </li>
+
+    <li>
+      <a href="/mod/helmod/dependencies" >
+        Dependencies
+        <span class="badge">1 / 242 </span>
+      </a>
+    </li>
+
+    
+      <li>
+        <a href="/mod/helmod/faq" >
+          FAQ
+        </a>
+      </li>
+    
+
+    <li>
+      <a href="/mod/helmod/discussion" class="active">
+        Discussion
+        <span class="badge">460</span>
+        
+      </a>
+    </li>
+
+    
+
+    <li>
+      <a href="/mod/helmod/metrics" >
+        Metrics
+      </a>
+    </li>
+
+  </ul>
+
+      <div class="panel-lighter mb0">
+        
+          <div class="discussion">
+            
+    <div class="discussion-list">
+        
+        
+            <div class="alert alert-info panel">
+                <p>Join Discord <a href="https://discord.gg/mKEeAKb">https://discord.gg/mKEeAKb</a></p>
+            </div>
+        
+        <div class="panel-inset p0">
+            <div class="panel-inset flex flex-space-between flex-align-center p4 m0">
+                <div class="flex">
+                    
+                        
+                        
+                            <a class="button discussion-list-new-message disabled" title="You need to own Factorio to participate in mod portal discussions.">New Thread</a>
+                        
+                        
+                    
+                </div>
+                <div class="w100p text-right">
+                    Filter:
+                    <div class="discussion-tags-filter inline-flex flex-wrap flex-end">
+                        
+                            <a href="/mod/helmod/discussion/g">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">General</span>
+                            </a>
+                        
+                            <a href="/mod/helmod/discussion/b">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Bugs</span>
+                            </a>
+                        
+                            <a href="/mod/helmod/discussion/a">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Announcements</span>
+                            </a>
+                        
+                            <a href="/mod/helmod/discussion/i">
+                                <span class="discussion-tag-style-g discussion-tags-filter-tag slot-button-inline tag">Ideas &amp; suggestions</span>
+                            </a>
+                        
+                    </div>
+                </div>
+            </div>
+            
+                <table class="discussion-list-messages  panel-hole m0 ms0">
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a9bd05c4f2702323d845a3f" title="Multiple default factories per crafting type ">Multiple default factories per crafting type </a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Schaeberlej" class="orange">Schaeberlej</a>
+                                    
+                                    <span title="2026-09-05T08:18:36.411000">a month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Schaeberlej" class="orange">Schaeberlej</a>
+                                    <span title="2026-09-05T08:18:36.411000">a month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a890c2cce7b990bc69ec735" title="Rubia compression productivity not showing up">Rubia compression productivity not showing up</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/McFrugal" class="orange">McFrugal</a>
+                                    
+                                    <span title="2026-08-22T02:40:44.332000">a month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/McFrugal" class="orange">McFrugal</a>
+                                    <span title="2026-08-22T02:40:44.332000">a month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a783f0a7c5a30afb4787bf8" title="Fusion temperature and neighbor bonus">Fusion temperature and neighbor bonus</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/egladil" class="orange">egladil</a>
+                                    
+                                    <span title="2026-08-09T08:49:14.781000">2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/egladil" class="orange">egladil</a>
+                                    <span title="2026-08-09T08:49:14.781000">2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a77d882197e3c1895029077" title="Feature Request: Mark recipes as completed/built">Feature Request: Mark recipes as completed/built</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/yuna495" class="orange">yuna495</a>
+                                    
+                                    <span title="2026-08-09T01:31:46.804000">2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/yuna495" class="orange">yuna495</a>
+                                    <span title="2026-08-09T01:31:46.804000">2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a48ef684b4b6190a5e1920d" title="Зачем сломали мод?">Зачем сломали мод?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Otetz" class="orange">Otetz</a>
+                                    
+                                    <span title="2026-07-04T11:32:56.757000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/KiwiHawk" class="orange">KiwiHawk</a>
+                                    <span title="2026-07-04T11:47:38.881000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a4604143cbb3669cd0de8b3" title="2.1 Quality Bugs">2.1 Quality Bugs</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/cd" class="orange">cd</a>
+                                    
+                                    <span title="2026-07-02T06:24:20.069000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/cd" class="orange">cd</a>
+                                    <span title="2026-07-02T06:24:20.069000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a401ad1cbdf263660d1877a" title="Unable to select ores">Unable to select ores</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/DirtyZeek" class="orange">DirtyZeek</a>
+                                    
+                                    <span title="2026-06-27T18:47:45.292000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    7
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-30T07:43:08.492000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a416ba836c1e72a79028e64" title="A possible bug and getting errors when selecting burner miner and furnaces">A possible bug and getting errors when selecting burner miner and furnaces</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/zorro2083" class="orange">zorro2083</a>
+                                    
+                                    <span title="2026-06-28T18:44:56.061000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-30T07:43:00.798000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a3d7caf64d8a2502da6055a" title="Filter Recipes by Planet">Filter Recipes by Planet</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Mazzelfassel" class="orange">Mazzelfassel</a>
+                                    
+                                    <span title="2026-06-25T19:08:31.007000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Mazzelfassel" class="orange">Mazzelfassel</a>
+                                    <span title="2026-06-25T19:08:31.007000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a19bb7c477f204ca943f66b" title="[Fixed] Module bug with Carna&#39;s assemblers">[Fixed] Module bug with Carna&#39;s assemblers</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/math345126" class="orange">math345126</a>
+                                    
+                                    <span title="2026-05-29T16:14:52.087000">4 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    5
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-21T08:44:01.325000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6a30441641ee37f05f6c5fd4" title="Display main icon feature not working">Display main icon feature not working</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Lenskop" class="orange">Lenskop</a>
+                                    
+                                    <span title="2026-06-15T18:27:34.385000">3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    6
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-21T08:34:00.409000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69d4b9f4be071b8b82410b7a" title="Compatibility with Crucible">Compatibility with Crucible</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Vitaminchic" class="orange">Vitaminchic</a>
+                                    
+                                    <span title="2026-04-07T08:01:56.970000">6 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-19T14:58:30.261000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/699ca283e803c4abde149c52" title="[Feature request] Constant combinator containing inputs/sec">[Feature request] Constant combinator containing inputs/sec</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2026-02-23T18:54:59.229000">7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-06-19T14:56:57.957000">3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69e3dd4525a21a6147df6e6d" title="How to Unhid Products and Ingredients in Production Block">How to Unhid Products and Ingredients in Production Block</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/cosstrig" class="orange">cosstrig</a>
+                                    
+                                    <span title="2026-04-18T19:36:37.245000">5 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    4
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/cosstrig" class="orange">cosstrig</a>
+                                    <span title="2026-04-26T08:00:38.735000">5 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69b374b4f2dde9b6930b1d4d" title="Reverse Production Line Order">Reverse Production Line Order</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/rjex" class="orange">rjex</a>
+                                    
+                                    <span title="2026-03-13T02:21:40.162000">7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/rjex" class="orange">rjex</a>
+                                    <span title="2026-03-31T06:17:11.422000">6 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69a1acdd2a59890a79b97830" title="[Various bugs]">[Various bugs]</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2026-02-27T14:40:29.764000">7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-03-20T08:34:07.224000">6 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69985bc574088d12a9fb70e4" title="copatibility mod cerys">copatibility mod cerys</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/ShinoHarvest" class="orange">ShinoHarvest</a>
+                                    
+                                    <span title="2026-02-20T13:04:05.332000">7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    6
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-03-10T16:05:23.433000">7 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69725d4927d6a972b66f2f41" title="Drill">Drill</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Vano0o0o" class="orange">Vano0o0o</a>
+                                    
+                                    <span title="2026-01-22T17:24:25.391000">8 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Vano0o0o" class="orange">Vano0o0o</a>
+                                    <span title="2026-01-22T17:24:25.391000">8 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69595664ab81785f42cabea6" title="[Fixed] SA Integration buildings recipe favority/force bug">[Fixed] SA Integration buildings recipe favority/force bug</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Cosmoros" class="orange">Cosmoros</a>
+                                    
+                                    <span title="2026-01-03T17:48:20.310000">9 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    4
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-01-04T14:11:47.846000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/69596d48cbd1f96ac7dfdc44" title="[Fixed] Fuel?">[Fixed] Fuel?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/SHOOROOP" class="orange">SHOOROOP</a>
+                                    
+                                    <span title="2026-01-03T19:26:00.390000">9 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2026-01-03T21:00:32.354000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/695017426e183e89695c6789" title="[Fixed] Quality Filter">[Fixed] Quality Filter</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/SHOOROOP" class="orange">SHOOROOP</a>
+                                    
+                                    <span title="2025-12-27T17:28:34.274000">9 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/SHOOROOP" class="orange">SHOOROOP</a>
+                                    <span title="2026-01-03T19:29:02.729000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6944a3e4ae9e9db1cdae750c" title="[Fixed] Crash when using /alerts">[Fixed] Crash when using /alerts</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Driku" class="orange">Driku</a>
+                                    
+                                    <span title="2025-12-19T01:01:24.374000">9 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Driku" class="orange">Driku</a>
+                                    <span title="2025-12-19T14:02:13.596000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/692321013c0ef4c5451e79ab" title="[Fixed] [bug] Buildings with 0 modules slots don&#39;t properly allow beacon modules">[Fixed] [bug] Buildings with 0 modules slots don&#39;t properly allow beacon modules</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-11-23T14:58:09.611000">10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-12-17T13:31:43.545000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6925b86460a2ae2b0aa8fbb0" title="[Fixed] [bug] smart pipette for &#34;shopping list&#34; fails with pY beacons">[Fixed] [bug] smart pipette for &#34;shopping list&#34; fails with pY beacons</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-11-25T14:08:36.423000">10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-12-17T13:31:19.314000">9 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6928751ebd9ac1102ea58268" title="Helmod Wiped on Name Change?">Helmod Wiped on Name Change?</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/DonnJeetz" class="orange">DonnJeetz</a>
+                                    
+                                    <span title="2025-11-27T15:58:22.065000">10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-11-28T15:15:43.598000">10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/691dd6db1da035e29f01ff87" title="[Fixed] Modded Beacons Not Using Correct &#34;reduced effect&#34; table">[Fixed] Modded Beacons Not Using Correct &#34;reduced effect&#34; table</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-11-19T14:40:27.744000">10 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Krydax" class="orange">Krydax</a>
+                                    <span title="2025-11-23T14:56:07.049000">10 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/690dbfb8b1b14559e48dcf9b" title="&#34;Consumption&#34; field on tooltip makes no sense">&#34;Consumption&#34; field on tooltip makes no sense</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/McFrugal" class="orange">McFrugal</a>
+                                    
+                                    <span title="2025-11-07T09:45:28.799000">11 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/McFrugal" class="orange">McFrugal</a>
+                                    <span title="2025-11-07T09:45:28.799000">11 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68d64f38c28d636c581383b1" title="[Fixed] Beacon quality lost with copy/paste">[Fixed] Beacon quality lost with copy/paste</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/amirah" class="orange">amirah</a>
+                                    
+                                    <span title="2025-09-26T08:30:48.262000">1 year, 3 days ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-09-30T12:19:15.566000">a year ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68cc2525faab4a9619e97d3b" title="Bug + QOL Issue">Bug + QOL Issue</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-09-18T15:28:37.466000">1 year, 11 days ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    5
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-09-24T09:13:01.980000">1 year, 5 days ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68b87ce76daf12dd0a2bc0f0" title="Make the production line srollable">Make the production line srollable</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-09-03T17:37:43.025000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    7
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-09-23T10:54:07.271000">1 year, 6 days ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68c96921b120f68fab796b54" title="HELP">HELP</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/LandBoat0721" class="orange">LandBoat0721</a>
+                                    
+                                    <span title="2025-09-16T13:41:53.644000">1 year, 13 days ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    4
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/LandBoat0721" class="orange">LandBoat0721</a>
+                                    <span title="2025-09-16T13:54:36.785000">1 year, 13 days ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68bafb93adf56674cc76f138" title="Title of production line not saved">Title of production line not saved</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/domisPL" class="orange">domisPL</a>
+                                    
+                                    <span title="2025-09-05T15:02:43.017000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/domisPL" class="orange">domisPL</a>
+                                    <span title="2025-09-05T15:59:25.074000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68b40ebf22111d4e0920e090" title="[Fixed] Download/upload of production line should retain title/group">[Fixed] Download/upload of production line should retain title/group</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-08-31T08:58:39.351000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    <span title="2025-09-02T05:53:25.793000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68b46473449feeac05536639" title="[Fixed]  Can&#39;t set localized name and energy in the &#34;Recipe customization&#34;">[Fixed]  Can&#39;t set localized name and energy in the &#34;Recipe customization&#34;</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/OwlsForever" class="orange">OwlsForever</a>
+                                    
+                                    <span title="2025-08-31T15:04:19.653000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    2
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-09-01T17:28:48.499000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/67ca0e4849169e1050901832" title="[Fixed] Bug with matrix-solved sub-block not figuring out the output based on above ingredients">[Fixed] Bug with matrix-solved sub-block not figuring out the output based on above ingredients</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-03-06T21:06:16.242000">1 year, 7 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-29T15:35:51.258000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68adf3df486e3f076b1c6a36" title="Helmod does not work in old saves, it gives an error.">Helmod does not work in old saves, it gives an error.</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/HHustonn" class="orange">HHustonn</a>
+                                    
+                                    <span title="2025-08-26T17:50:23.737000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-29T15:35:00.404000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68a83d7fa898ffe7bc8cafdd" title="[Fixed] Helmod thinks the Wood Processing Unit from Pyanadons doesn not exist">[Fixed] Helmod thinks the Wood Processing Unit from Pyanadons doesn not exist</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/WeNdKa" class="orange">WeNdKa</a>
+                                    
+                                    <span title="2025-08-22T09:50:55.972000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    12
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-29T15:34:23.589000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68aa6bbfb7574e7a0a18ba63" title="Crash when opening">Crash when opening</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Burrasaurs" class="orange">Burrasaurs</a>
+                                    
+                                    <span title="2025-08-24T01:32:47.914000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-25T12:11:50.154000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/689eefbc9d8b0d850e31f125" title="[Fixed] Generation map error">[Fixed] Generation map error</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/qbGrayMan" class="orange">qbGrayMan</a>
+                                    
+                                    <span title="2025-08-15T08:28:44.195000">1 year, 1 month ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/qbGrayMan" class="orange">qbGrayMan</a>
+                                    <span title="2025-08-23T02:58:25.703000">1 year, 1 month ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6889ef6e8cc5bdd6a8e04d70" title="[Fixed] Helmod energy recipe selects wrong fluid for modded entities">[Fixed] Helmod energy recipe selects wrong fluid for modded entities</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-07-30T10:09:50.655000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    6
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    <span title="2025-08-13T11:07:29.093000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68930eb2485625ba3435c680" title="[Fixed] Smart pipette options for ingredients/products">[Fixed] Smart pipette options for ingredients/products</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-08-06T08:13:38.820000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    4
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    <span title="2025-08-12T10:43:48.695000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/689231b1d361cf892fd57036" title="[Fixed] Add note &#34;recipe&#34;">[Fixed] Add note &#34;recipe&#34;</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-08-05T16:30:41.181000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-11T02:29:33.473000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/68979adfd12ef814a2bcf599" title="[Fixed]BUG: Setting a default miner type forces it on resources that can&#39;t use the miner type">[Fixed]BUG: Setting a default miner type forces it on resources that can&#39;t use the miner type</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/McFrugal" class="orange">McFrugal</a>
+                                    
+                                    <span title="2025-08-09T19:00:47.086000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-08-11T02:24:16.221000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/685abfe9ad10e1263ff02348" title="[Fixed] New bugs">[Fixed] New bugs</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-06-24T15:10:33.320000">1 year, 3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    5
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-07-31T10:18:37.359000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6889465e74cc68165b2dce46" title="💡 Proposal: Solid Fuel Consumption Calculator for Boilers">💡 Proposal: Solid Fuel Consumption Calculator for Boilers</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Python38" class="orange">Python38</a>
+                                    
+                                    <span title="2025-07-29T22:08:30.283000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/KiwiHawk" class="orange">KiwiHawk</a>
+                                    <span title="2025-07-29T22:19:25.571000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6887da7d4558a85fd2625520" title="Steam turbine productivity is wrong in energy calculations">Steam turbine productivity is wrong in energy calculations</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    
+                                    <span title="2025-07-28T20:15:57.125000">1 year, 2 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/QuingKhaos" class="orange">QuingKhaos</a>
+                                    <span title="2025-07-28T20:15:57.125000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6864184ffdccb10cbd5d4793" title="[Implemented] [Feature Request] Building list for ONLY this layer of production block">[Implemented] [Feature Request] Building list for ONLY this layer of production block</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Krydax" class="orange">Krydax</a>
+                                    
+                                    <span title="2025-07-01T17:18:07.822000">1 year, 3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Helfima" class="orange">Helfima</a>
+                                    <span title="2025-07-18T21:19:50.841000">1 year, 2 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/686ffb9ebb74f77d3c130f3e" title="different beacons - same deminishing returns">different beacons - same deminishing returns</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/J_nas" class="orange">J_nas</a>
+                                    
+                                    <span title="2025-07-10T17:42:54.023000">1 year, 3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Bugs
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    1
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/KiwiHawk" class="orange">KiwiHawk</a>
+                                    <span title="2025-07-10T20:49:45.805000">1 year, 3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/6862ba0cad5b6d2feb82b359" title="[Fixed] Prototype error">[Fixed] Prototype error</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/Vano0o0o" class="orange">Vano0o0o</a>
+                                    
+                                    <span title="2025-06-30T16:23:40.285000">1 year, 3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                General
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    3
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/Vano0o0o" class="orange">Vano0o0o</a>
+                                    <span title="2025-07-01T04:49:12.104000">1 year, 3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                        <tr class="discussion-list-message">
+                            <td class="discussion-list-message-title w60p">
+                                <h3 class="m0">
+                                    
+                                    
+                                    
+                                    <a href="/mod/helmod/discussion/685ed7f045bf029cfbc89afe" title="Quality fuel">Quality fuel</a>
+                                </h3>
+                                <div>
+                                    posted by
+                                    
+                                        <a href="/user/hsp9513" class="orange">hsp9513</a>
+                                    
+                                    <span title="2025-06-27T17:42:08.622000">1 year, 3 months ago</span>
+                                </div>
+                            </td>
+                            <td class="text-center sm-none">
+                                Ideas &amp; suggestions
+                            </td>
+                            <td class="nowrap sm-none">
+                                <div class="text-right">
+                                    0
+                                    <i class="fa fa-comments"></i>
+                                </div>
+                                
+                                <div class="text-right">
+                                    last message by
+                                    <a href="/user/hsp9513" class="orange">hsp9513</a>
+                                    <span title="2025-06-27T17:42:08.622000">1 year, 3 months ago</span>
+                                </div>
+                                
+                            </td>
+                        </tr>
+                    
+                </table>
+            
+        </div>
+        
+  <div class="text-right flex flex-end">
+      
+      
+
+      
+          <a
+              class="button square-sm disabled "
+              
+          >
+              
+                  <i class="fas fa-angle-double-left"></i>
+              
+          </a>
+      
+
+      
+          
+          <a
+              class="button square-sm  active"
+              
+              href="/mod/helmod/discussion/page/1"
+              
+          >
+              
+                  1
+              
+          </a>
+      
+        
+      
+          
+          <a
+              class="button square-sm  "
+              
+              href="/mod/helmod/discussion/page/2"
+              
+          >
+              
+                  2
+              
+          </a>
+      
+        
+      
+            
+          <div class="square-sm">
+              <i class="fas fa-ellipsis-h"></i>
+          </div>
+      
+        
+      
+          
+          <a
+              class="button square-sm  "
+              
+              href="/mod/helmod/discussion/page/9"
+              
+          >
+              
+                  9
+              
+          </a>
+      
+        
+      
+          
+          <a
+              class="button square-sm  "
+              
+              href="/mod/helmod/discussion/page/10"
+              
+          >
+              
+                  10
+              
+          </a>
+      
+        
+      
+
+      
+          <a
+              class="button square-sm  "
+              
+              href="/mod/helmod/discussion/page/2"
+              
+          >
+              
+                  <i class="fas fa-angle-double-right"></i>
+              
+          </a>
+      
+  </div>
+
+        <div class="text-right discussion-list-options">
+            
+        </div>
+    </div>
+
+          </div>
+        
+      </div>
+    </div>
+  </div>
+
+                </div>
+            </div>
+
+            
+<div class="footer">
+    <div class="footer-inner panel">
+
+        <div class="footer-links flex flex-wrap flex-center panel-inset m0">
+            <a href="https://factorio.com/terms-of-service">Terms of Service</a><span class="separator">|</span><a href="https://factorio.com/privacy-policy">Privacy</a><span class="separator">|</span><a href="https://factorio.com/imprint">Imprint</a><span class="separator">|</span><a href="https://factorio.com/press-kit">Presskit</a><span class="separator">|</span><a href="https://factorio.com/support/contact">Contact</a><span class="separator">|</span><a href="https://factorio.com/faq">FAQ</a><span class="separator">|</span><a href="https://factorio.com/jobs">Jobs</a>
+        </div>
+        <div class="footer-rocket panel-inset m0 p0">
+            <div id="rocket" class="rocket"></div>
+            <div class="shadow-overlay"></div>
+            <div class="shadow-overlay-bottom"></div>
+        </div>
+        <div class="footer-copyright panel-inset m0">
+            Copyright © 2015 - 2026 Wube Software - all rights reserved.
+        </div>
+    </div>
+</div>
+            
+                <script src="/static/js/factorio_mod_portal.js?v=485a359d"></script>
+                <script>
+                  var messages = [
+                  ];
+                  Factorio.main({
+                      // old url for compatibility with cached JS
+                      contentServerUrl: 'https://assets-mod.factorio.com',
+                      assetCDNUrl: 'https://assets-mod.factorio.com',
+                      messages: messages
+                  });
+                </script>
+                
+                
+            
+        
+        <script src="https://factorio.com/static/js/factorio.js?v=485a359d" type="module"></script>
+    <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"c302d1d53a934aaeb4f306620e7ed42d","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
