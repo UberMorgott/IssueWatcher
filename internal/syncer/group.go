@@ -210,6 +210,17 @@ func (g *Group) ReplyThreaded(platform string) bool {
 	return true
 }
 
+// ReplyMarkdown reports the Markdown capability of platform's provider (false
+// when no syncer of platform exists: plain text reads fine anywhere).
+func (g *Group) ReplyMarkdown(platform string) bool {
+	for _, s := range g.Syncers() {
+		if s.opts.Provider.Platform() == platform {
+			return s.opts.Provider.Capabilities().Markdown
+		}
+	}
+	return false
+}
+
 // MaxReply is the Capabilities.MaxReply of platform's provider: the longest
 // reply it accepts, 0 when the platform has no limit of its own.
 func (g *Group) MaxReply(platform string) int {

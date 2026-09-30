@@ -156,8 +156,8 @@ Discussion:
 {comments}
 
 The project's source is in the current directory (read-only); check facts there before you answer.
-Write in the language the issue uses. Be concise, friendly and concrete; ask for missing details when needed. Do not promise dates.
-Output only the reply text (Markdown), nothing else.`
+Write in the language the issue uses, the way the maintainer would type a comment: short, casual, direct and concrete; ask for missing details when needed. Do not promise dates.
+Output only the reply text, nothing else.`
 	DefaultReviewPrompt = `Review this change, meant to fix issue #{issue.number} "{issue.title}" in {repo}. The changed repository is the current directory (read-only).
 
 Issue:

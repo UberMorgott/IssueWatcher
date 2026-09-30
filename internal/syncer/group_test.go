@@ -202,6 +202,10 @@ func TestReplyOffPlatformRefused(t *testing.T) {
 	if g := NewGroup(s); g.ReplyThreaded("steam") || !g.ReplyThreaded("github") {
 		t.Fatal("ReplyThreaded")
 	}
+	// The fake (steam) renders no Markdown; neither does a platform without a syncer.
+	if g := NewGroup(s); g.ReplyMarkdown("steam") || g.ReplyMarkdown("github") {
+		t.Fatal("ReplyMarkdown")
+	}
 }
 
 // A reply longer than the platform accepts (Steam: under 1000 characters) is

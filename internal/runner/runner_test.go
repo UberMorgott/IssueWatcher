@@ -498,6 +498,45 @@ func TestReplyLimitNote(t *testing.T) {
 	}
 }
 
+// The reply prompt asks for a short first-person comment without AI framing;
+// a platform without Markdown (Steam) gets plain text only, one with it
+// (GitHub) plain prose with Markdown for code or links only.
+func TestReplyStyleNote(t *testing.T) {
+	for _, md := range []bool{false, true} {
+		n := replyStyleNote("steam", md)
+		for _, want := range []string{"first person, casual and direct", "No headings", `"Short answer:"`, "no bullet lists or bold labels",
+			"no sign-off", `"I hope this helps"`} {
+			if !strings.Contains(n, want) {
+				t.Fatalf("markdown=%v: %q lacks %q", md, n, want)
+			}
+		}
+	}
+	plain := "steam shows comments as plain text, not Markdown: write plain text only, with no **, #, backticks, > quotes or list markers; give links as bare URLs."
+	if n := replyStyleNote("steam", false); !strings.HasSuffix(n, "\n"+plain) {
+		t.Fatalf("plain: %q", n)
+	}
+	md := "github renders Markdown, but keep the reply plain prose: use Markdown only for code or a link when it is really needed."
+	if n := replyStyleNote("github", true); !strings.HasSuffix(n, "\n"+md) || strings.Contains(n, "plain text only") {
+		t.Fatalf("markdown: %q", n)
+	}
+}
+
+// A plain-text platform's draft loses **bold** markers; unpaired or
+// multi-line ** and other text stay as written.
+func TestStripBold(t *testing.T) {
+	for in, want := range map[string]string{
+		"- **Highlighting:** works, **really**.": "- Highlighting: works, really.",
+		"2 ** 3 and **/*.lua":                    "2 ** 3 and **/*.lua",
+		"2 ** 3 ** 4":                            "2 ** 3 ** 4",
+		"**a\nb**":                               "**a\nb**",
+		"__init__ stays":                         "__init__ stays",
+	} {
+		if got := stripBold(in); got != want {
+			t.Fatalf("stripBold(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestReplyDraftThreadedHasNoMention(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, nil)

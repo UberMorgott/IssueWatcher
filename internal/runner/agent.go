@@ -50,7 +50,7 @@ var schemas = map[string]string{
 		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
 		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
 	flowReply: `{"type":"object","additionalProperties":false,"required":["reply","notes"],"properties":{` +
-		`"reply":{"type":"string","description":"The reply text in Markdown, ready to post"},` +
+		`"reply":{"type":"string","description":"The reply text, ready to post as written"},` +
 		`"notes":{"type":"string","description":"Private notes for the maintainer; empty if nothing"}}}`,
 	flowReview: `{"type":"object","additionalProperties":false,"required":["verdict","summary"],"properties":{` +
 		`"verdict":{"type":"string","enum":["ok","concerns"]},` +

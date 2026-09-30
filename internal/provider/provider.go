@@ -42,6 +42,10 @@ type Capabilities struct {
 	// (Steam: «Comments must be less than 1000 characters»); 0 = not known,
 	// DefaultMaxReply applies.
 	MaxReply int `json:"maxReply,omitempty"`
+	// Markdown: the platform renders Markdown in a reply (GitHub); off, the
+	// reply shows as plain text (Steam's plain comments, CurseForge's escaped
+	// HTML), so ** or # would show literally.
+	Markdown bool `json:"markdown,omitempty"`
 }
 
 // DefaultMaxReply is the reply limit of a platform without its own

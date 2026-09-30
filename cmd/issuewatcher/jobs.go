@@ -27,7 +27,7 @@ func newRunner(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.S
 		log.Warn("runner: no executable path, jobs run without the MCP server", "err", err)
 	}
 	return runner.New(runner.Options{
-		Store: st, Settings: cfgs.Get, DataDir: dataDir, Publisher: gh, Reply: sy.Reply, ReplyThreaded: sy.ReplyThreaded, MaxReply: sy.MaxReply, Labels: gh, Log: log, Exe: exe,
+		Store: st, Settings: cfgs.Get, DataDir: dataDir, Publisher: gh, Reply: sy.Reply, ReplyThreaded: sy.ReplyThreaded, ReplyMarkdown: sy.ReplyMarkdown, MaxReply: sy.MaxReply, Labels: gh, Log: log, Exe: exe,
 		OnJob: func(j store.Job) {
 			s := srv()
 			if s == nil {

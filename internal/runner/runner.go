@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -64,6 +65,9 @@ type Options struct {
 	// thread (provider Capabilities.ReplyThreaded); off, a reply draft starts
 	// with @author. nil = every platform is threaded.
 	ReplyThreaded func(platform string) bool
+	// ReplyMarkdown reports whether platform renders Markdown in a reply
+	// (provider Capabilities.Markdown); off or nil, the draft is plain text.
+	ReplyMarkdown func(platform string) bool
 	// MaxReply is the longest reply platform accepts in characters (provider
 	// Capabilities.MaxReply); 0 or nil = no limit of its own, the prompt says none.
 	MaxReply func(platform string) int
@@ -640,6 +644,8 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 		task += "\n\n" + in.Platform + " has no reply threads: the reply is posted as a new comment that starts with @" + in.Author +
 			" (IssueWatcher adds it; do not write it yourself)."
 	}
+	markdown := r.opts.ReplyMarkdown != nil && r.opts.ReplyMarkdown(in.Platform)
+	task += replyStyleNote(in.Platform, markdown)
 	task += replyLimitNote(r.maxReply(in.Platform), in, mention)
 	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
@@ -656,11 +662,35 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	if res.Draft == "" {
 		return "", coded(CodeAgent, errors.New("the agent returned no reply text"))
 	}
+	if !markdown {
+		res.Draft = stripBold(res.Draft)
+	}
 	if mention {
 		res.Draft = provider.WithMention(res.Draft, in.Author)
 	}
 	return store.JobNeedsReview, nil
 }
+
+// replyStyleNote tells the agent how a reply reads: the maintainer's own short
+// comment, and plain text where platform shows no Markdown (it posts as typed).
+func replyStyleNote(platform string, markdown bool) string {
+	note := "\n\nWrite the reply as the maintainer typing a comment yourself: first person, casual and direct, like a person, not a support bot. " +
+		"Keep it short, usually a few sentences in one or two conversational paragraphs; answer the point without restating the question. " +
+		"No headings, no \"Short answer:\" or \"TL;DR\" lead-ins, no bullet lists or bold labels, no sign-off or signature, " +
+		"and no stock phrases such as \"Great question\", \"I hope this helps\" or \"Feel free to\"."
+	if markdown {
+		return note + "\n" + platform + " renders Markdown, but keep the reply plain prose: use Markdown only for code or a link when it is really needed."
+	}
+	return note + "\n" + platform + " shows comments as plain text, not Markdown: write plain text only, with no **, #, backticks, > quotes or list markers; give links as bare URLs."
+}
+
+// boldRe matches **text** within a line, text starting and ending with a
+// non-space as Markdown requires (2 ** 3 ** 4 is no bold).
+var boldRe = regexp.MustCompile(`\*\*(\S(?:[^*\n]*\S)?)\*\*`)
+
+// stripBold drops the ** markers around bold text of a draft for a platform
+// that shows them literally; unpaired or multi-line ** stay as written.
+func stripBold(s string) string { return boldRe.ReplaceAllString(s, "$1") }
 
 // needsMention: a reply to in goes to a platform without reply threads, so
 // the draft addresses the item's author with @author (not the owner's own item).
