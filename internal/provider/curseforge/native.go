@@ -46,7 +46,9 @@ var Origins = []string{"https://www.curseforge.com"}
 const (
 	siteOrigin   = "https://www.curseforge.com"
 	widgetOrigin = "https://api.cfwidget.com"
-	signInURL    = "https://www.curseforge.com/login"
+	// signInURL is the site's own «Sign in» (kLoginUrl, served under /api/v1):
+	// it redirects to the sso.curseforge.com OIDC form. /login is a 404 page.
+	signInURL = "https://www.curseforge.com/api/v1/auth/login"
 )
 
 // SignInSpec is the CurseForge «Подключить» for signin.New (probe = the
