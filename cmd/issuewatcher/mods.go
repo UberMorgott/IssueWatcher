@@ -176,7 +176,7 @@ func (m *modPlatforms) buildNative(id string, author func() string) (provider.Pr
 		mgr := signin.New(factorio.SignInSpec(nil, m.log), jar, br)
 		return factorio.New(factorio.Options{Session: mgr, Author: author, Log: m.log}), mgr
 	}
-	mgr := signin.New(curseforge.SignInSpec(nil, m.log), jar, br)
+	mgr := signin.New(curseforge.SignInSpecBrowser(nil, m.log, br), jar, br)
 	return curseforge.New(curseforge.Options{Native: &curseforge.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log}), mgr
 }
 
