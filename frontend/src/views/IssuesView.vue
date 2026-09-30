@@ -3,13 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
-import InputText from 'primevue/inputtext'
-import IconField from 'primevue/iconfield'
-import InputIcon from 'primevue/inputicon'
 import Button from 'primevue/button'
 import ToggleButton from 'primevue/togglebutton'
 import { useToast } from 'primevue/usetoast'
 import EmptyState from '../components/EmptyState.vue'
+import ListPage from '../components/ListPage.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import IssueRow from '../components/IssueRow.vue'
 import DispatchDialog from '../components/DispatchDialog.vue'
@@ -73,7 +71,8 @@ function setQuery(patch: Partial<Record<'source' | 'kind' | 'repo' | 'state' | '
   void router.replace({ query: q })
 }
 
-const list = useChunks<Issue>((cursor) => api.issues({ ...query(), cursor, limit: CHUNK }))
+// Stale-while-revalidate per filter: a revisit (or a filter seen before) renders its last rows at once.
+const list = useChunks<Issue>((cursor) => api.issues({ ...query(), cursor, limit: CHUNK }), { cacheKey: () => 'items:' + JSON.stringify(query()) })
 const items = list.items
 const total = list.total
 const listError = list.error
@@ -316,9 +315,9 @@ async function markSelectedRead() {
 const dispatchOpen = ref(false)
 
 // --- keyboard: J/K move, Enter opens, X selects
-const searchBox = ref<{ $el: HTMLElement } | null>(null)
+const listPage = ref<InstanceType<typeof ListPage> | null>(null)
 function focusSearch() {
-  void nextTick(() => searchBox.value?.$el?.querySelector?.('input')?.focus() ?? (searchBox.value?.$el as HTMLInputElement | undefined)?.focus())
+  listPage.value?.focusSearch()
 }
 function ensureVisible(i: number) {
   virtualizer.value.scrollToIndex(i, { align: 'auto' })
@@ -376,243 +375,232 @@ onBeforeUnmount(() => {
     <ConnectHero v-if="app.onboarding" />
 
     <template v-else>
-      <div class="filters panel">
-        <IconField class="f-search">
-          <InputIcon class="pi pi-search" />
-          <InputText
-            ref="searchBox"
-            v-model="search"
-            :placeholder="isComments ? t('comments.searchPlaceholder') : t('issues.searchPlaceholder')"
-            :aria-label="isComments ? t('comments.searchAria') : t('issues.searchAria')"
-            fluid
+      <ListPage
+        ref="listPage"
+        v-model:search="search"
+        :search-placeholder="isComments ? t('comments.searchPlaceholder') : t('issues.searchPlaceholder')"
+        :search-aria="isComments ? t('comments.searchAria') : t('issues.searchAria')"
+        :resettable="anyFilter"
+        :total="total !== stateCount ? total : null"
+        :total-label="total === null ? '' : isComments ? t('words.commentItems', total) : t('words.issues', total)"
+        @reset="reset"
+      >
+        <template #filters>
+          <Select
+            :model-value="filters.source"
+            :options="sourceOptions"
+            option-label="label"
+            option-value="value"
+            option-disabled="disabled"
+            :aria-label="t('issues.source')"
+            class="f-source"
+            @update:model-value="setSource"
+          >
+            <template #value="{ value }">
+              <span class="opt"><PlatformIcon
+                v-if="value"
+                :platform="value"
+                :size="14"
+              />{{ value ? platformName(value) : t('platforms.allPlatforms') }}</span>
+            </template>
+            <template #option="{ option }">
+              <span class="opt"><PlatformIcon
+                v-if="option.value"
+                :platform="option.value"
+                :size="14"
+              />{{ option.label }}</span>
+            </template>
+          </Select>
+          <Select
+            v-if="!isComments"
+            :model-value="filters.kind"
+            :options="kindOptions"
+            option-label="label"
+            option-value="value"
+            :aria-label="t('platforms.kindFilter')"
+            class="f-kind"
+            @update:model-value="(v: string) => setQuery({ kind: v })"
           />
-        </IconField>
-        <Select
-          :model-value="filters.source"
-          :options="sourceOptions"
-          option-label="label"
-          option-value="value"
-          option-disabled="disabled"
-          :aria-label="t('issues.source')"
-          class="f-source"
-          @update:model-value="setSource"
-        >
-          <template #value="{ value }">
-            <span class="opt"><PlatformIcon
-              v-if="value"
-              :platform="value"
-              :size="14"
-            />{{ value ? platformName(value) : t('platforms.allPlatforms') }}</span>
-          </template>
-          <template #option="{ option }">
-            <span class="opt"><PlatformIcon
-              v-if="option.value"
-              :platform="option.value"
-              :size="14"
-            />{{ option.label }}</span>
-          </template>
-        </Select>
-        <Select
-          v-if="!isComments"
-          :model-value="filters.kind"
-          :options="kindOptions"
-          option-label="label"
-          option-value="value"
-          :aria-label="t('platforms.kindFilter')"
-          class="f-kind"
-          @update:model-value="(v: string) => setQuery({ kind: v })"
-        />
-        <Select
-          :model-value="filters.repo"
-          :options="repoOptions"
-          option-label="label"
-          option-value="value"
-          filter
-          :placeholder="t('issues.allProjects')"
-          :aria-label="t('issues.project')"
-          class="f-repo"
-          @update:model-value="(v: number) => setQuery({ repo: v })"
-        >
-          <template #value="{ placeholder }">
-            <span
-              v-if="selectedRepo"
-              class="opt"
-            ><PlatformIcon
-              v-if="selectedRepo.platform"
-              :platform="selectedRepo.platform"
-              :size="14"
-            />{{ selectedRepo.label }}</span>
-            <span v-else>{{ placeholder }}</span>
-          </template>
-          <template #option="{ option }">
-            <span class="opt"><PlatformIcon
-              v-if="option.platform"
-              :platform="option.platform"
-              :size="14"
-            />{{ option.label }}</span>
-          </template>
-        </Select>
-        <Select
-          :model-value="filters.label"
-          :options="labelOptions"
-          option-label="label"
-          option-value="value"
-          filter
-          :aria-label="t('issues.label')"
-          class="f-label"
-          @update:model-value="(v: string) => setQuery({ label: v })"
-        />
-        <SelectButton
-          :model-value="filters.state"
-          :options="stateOptions"
-          option-label="label"
-          option-value="value"
-          :allow-empty="false"
-          :aria-label="t('issues.state')"
-          @update:model-value="(v: string) => setQuery({ state: v === 'open' ? '' : v })"
-        />
-        <ToggleButton
-          :model-value="filters.unread"
-          :on-label="t('issues.unread')"
-          :off-label="t('issues.unread')"
-          on-icon="pi pi-circle-fill"
-          off-icon="pi pi-circle"
-          :aria-label="t('issues.onlyUnread')"
-          @update:model-value="(v: boolean) => setQuery({ unread: v })"
-        />
-        <Button
-          v-if="anyFilter"
-          :label="t('issues.reset')"
-          icon="pi pi-filter-slash"
-          severity="secondary"
-          text
-          @click="reset"
-        />
-        <span
-          v-if="total !== null && total !== stateCount"
-          class="f-total"
-        ><b class="mono">{{ total }}</b> {{ isComments ? t('words.commentItems', total) : t('words.issues', total) }}</span>
-      </div>
+          <Select
+            :model-value="filters.repo"
+            :options="repoOptions"
+            option-label="label"
+            option-value="value"
+            filter
+            :placeholder="t('issues.allProjects')"
+            :aria-label="t('issues.project')"
+            class="f-repo"
+            @update:model-value="(v: number) => setQuery({ repo: v })"
+          >
+            <template #value="{ placeholder }">
+              <span
+                v-if="selectedRepo"
+                class="opt"
+              ><PlatformIcon
+                v-if="selectedRepo.platform"
+                :platform="selectedRepo.platform"
+                :size="14"
+              />{{ selectedRepo.label }}</span>
+              <span v-else>{{ placeholder }}</span>
+            </template>
+            <template #option="{ option }">
+              <span class="opt"><PlatformIcon
+                v-if="option.platform"
+                :platform="option.platform"
+                :size="14"
+              />{{ option.label }}</span>
+            </template>
+          </Select>
+          <Select
+            :model-value="filters.label"
+            :options="labelOptions"
+            option-label="label"
+            option-value="value"
+            filter
+            :aria-label="t('issues.label')"
+            class="f-label"
+            @update:model-value="(v: string) => setQuery({ label: v })"
+          />
+          <SelectButton
+            :model-value="filters.state"
+            :options="stateOptions"
+            option-label="label"
+            option-value="value"
+            :allow-empty="false"
+            :aria-label="t('issues.state')"
+            @update:model-value="(v: string) => setQuery({ state: v === 'open' ? '' : v })"
+          />
+          <ToggleButton
+            :model-value="filters.unread"
+            :on-label="t('issues.unread')"
+            :off-label="t('issues.unread')"
+            on-icon="pi pi-circle-fill"
+            off-icon="pi pi-circle"
+            :aria-label="t('issues.onlyUnread')"
+            @update:model-value="(v: boolean) => setQuery({ unread: v })"
+          />
+        </template>
 
-      <div class="panel table-panel">
-        <button
-          v-if="newAbove > 0"
-          type="button"
-          class="new-pill"
-          @click="toTop"
-        >
-          <i class="pi pi-arrow-up" /> {{ t('issues.newAbove', newAbove) }}
-        </button>
-        <div
-          class="vt"
-          role="grid"
-          :aria-rowcount="total ?? undefined"
-          :style="{ '--row': ROW + 'px' }"
-        >
-          <div
-            class="vt-head"
-            role="row"
+        <div class="panel table-panel">
+          <button
+            v-if="newAbove > 0"
+            type="button"
+            class="new-pill"
+            @click="toTop"
           >
-            <span class="c-sel"><input
-              type="checkbox"
-              :checked="allSelected"
-              :indeterminate="selected.length > 0 && !allSelected"
-              :disabled="!items.length"
-              :aria-label="t('issues.selectAll')"
-              @change="toggleAll"
-            ></span>
-            <span role="columnheader">{{ isComments ? t('comments.colItem') : t('issues.colIssue') }}</span>
-            <span
-              class="c-project"
-              role="columnheader"
-            >{{ t('issues.colProject') }}</span>
-            <span
-              class="c-labels"
-              role="columnheader"
-            >{{ t('issues.colLabels') }}</span>
-            <span
-              class="c-num"
-              role="columnheader"
-            >{{ t('issues.colComments') }}</span>
-            <span role="columnheader">{{ t('issues.colUpdated') }}</span>
-          </div>
+            <i class="pi pi-arrow-up" /> {{ t('issues.newAbove', newAbove) }}
+          </button>
           <div
-            v-if="!rows.length"
-            class="vt-empty"
-          >
-            <EmptyState
-              v-if="state === 'unavailable'"
-              icon="pi pi-server"
-              :title="isComments ? t('comments.unavailable') : t('issues.unavailable')"
-              :text="t('issues.unavailableText')"
-            />
-            <EmptyState
-              v-else-if="state === 'error'"
-              icon="pi pi-exclamation-triangle"
-              :title="isComments ? t('comments.loadError') : t('issues.loadError')"
-              :text="listError"
-            >
-              <Button
-                :label="t('common.retry')"
-                icon="pi pi-refresh"
-                size="small"
-                @click="reload()"
-              />
-            </EmptyState>
-            <EmptyState
-              v-else-if="anyFilter"
-              icon="pi pi-filter"
-              :title="t('issues.noMatch')"
-              :text="t('issues.noMatchText')"
-            >
-              <Button
-                :label="t('issues.resetFilters')"
-                icon="pi pi-filter-slash"
-                size="small"
-                severity="secondary"
-                @click="reset"
-              />
-            </EmptyState>
-            <EmptyState
-              v-else
-              :icon="isComments ? 'pi pi-comments' : 'pi pi-inbox'"
-              :title="isComments ? t('comments.noOpen') : t('issues.noOpen')"
-              :text="app.sync?.lastSync ? (isComments ? t('comments.nothingOpen') : t('issues.nothingOpen')) : t('issues.nothingSynced')"
-            >
-              <Button
-                v-if="!app.sync?.lastSync"
-                :label="t('common.syncNow')"
-                icon="pi pi-sync"
-                size="small"
-                :loading="app.syncing"
-                @click="app.syncNow()"
-              />
-            </EmptyState>
-          </div>
-          <div
-            v-else
-            ref="scrollEl"
-            class="vt-body"
-            @scroll.passive="onScroll"
+            class="vt"
+            role="grid"
+            :aria-rowcount="total ?? undefined"
+            :style="{ '--row': ROW + 'px' }"
           >
             <div
-              class="vt-space"
-              :style="{ height: totalSize + 'px' }"
+              class="vt-head"
+              role="row"
             >
-              <IssueRow
-                v-for="v in virtualRows"
-                :key="v.key as number"
-                :item="rows[v.index]"
-                :top="v.start"
-                :selected="selectedIds.has(rows[v.index].id)"
-                :active="cursorId === rows[v.index].id"
-                @toggle="toggle(rows[v.index])"
-                @open="open(rows[v.index])"
+              <span class="c-sel"><input
+                type="checkbox"
+                :checked="allSelected"
+                :indeterminate="selected.length > 0 && !allSelected"
+                :disabled="!items.length"
+                :aria-label="t('issues.selectAll')"
+                @change="toggleAll"
+              ></span>
+              <span role="columnheader">{{ isComments ? t('comments.colItem') : t('issues.colIssue') }}</span>
+              <span
+                class="c-project"
+                role="columnheader"
+              >{{ t('issues.colProject') }}</span>
+              <span
+                class="c-labels"
+                role="columnheader"
+              >{{ t('issues.colLabels') }}</span>
+              <span
+                class="c-num"
+                role="columnheader"
+              >{{ t('issues.colComments') }}</span>
+              <span role="columnheader">{{ t('issues.colUpdated') }}</span>
+            </div>
+            <div
+              v-if="!rows.length"
+              class="vt-empty"
+            >
+              <EmptyState
+                v-if="state === 'unavailable'"
+                icon="pi pi-server"
+                :title="isComments ? t('comments.unavailable') : t('issues.unavailable')"
+                :text="t('issues.unavailableText')"
               />
+              <EmptyState
+                v-else-if="state === 'error'"
+                icon="pi pi-exclamation-triangle"
+                :title="isComments ? t('comments.loadError') : t('issues.loadError')"
+                :text="listError"
+              >
+                <Button
+                  :label="t('common.retry')"
+                  icon="pi pi-refresh"
+                  size="small"
+                  @click="reload()"
+                />
+              </EmptyState>
+              <EmptyState
+                v-else-if="anyFilter"
+                icon="pi pi-filter"
+                :title="t('issues.noMatch')"
+                :text="t('issues.noMatchText')"
+              >
+                <Button
+                  :label="t('issues.resetFilters')"
+                  icon="pi pi-filter-slash"
+                  size="small"
+                  severity="secondary"
+                  @click="reset"
+                />
+              </EmptyState>
+              <EmptyState
+                v-else
+                :icon="isComments ? 'pi pi-comments' : 'pi pi-inbox'"
+                :title="isComments ? t('comments.noOpen') : t('issues.noOpen')"
+                :text="app.sync?.lastSync ? (isComments ? t('comments.nothingOpen') : t('issues.nothingOpen')) : t('issues.nothingSynced')"
+              >
+                <Button
+                  v-if="!app.sync?.lastSync"
+                  :label="t('common.syncNow')"
+                  icon="pi pi-sync"
+                  size="small"
+                  :loading="app.syncing"
+                  @click="app.syncNow()"
+                />
+              </EmptyState>
+            </div>
+            <div
+              v-else
+              ref="scrollEl"
+              class="vt-body"
+              @scroll.passive="onScroll"
+            >
+              <div
+                class="vt-space"
+                :style="{ height: totalSize + 'px' }"
+              >
+                <IssueRow
+                  v-for="v in virtualRows"
+                  :key="v.key as number"
+                  :item="rows[v.index]"
+                  :top="v.start"
+                  :selected="selectedIds.has(rows[v.index].id)"
+                  :active="cursorId === rows[v.index].id"
+                  @toggle="toggle(rows[v.index])"
+                  @open="open(rows[v.index])"
+                />
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </ListPage>
 
       <Transition name="bulk">
         <div
@@ -685,19 +673,6 @@ onBeforeUnmount(() => {
 
 .c-dot.closed {
   background: var(--iw-dimmed);
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-}
-
-.f-search {
-  flex: 1 1 220px;
-  min-width: 200px;
 }
 
 .f-source {
@@ -773,17 +748,6 @@ onBeforeUnmount(() => {
 
 .table-panel {
   position: relative;
-}
-
-.f-total {
-  margin-left: auto;
-  color: var(--iw-muted);
-  font-size: calc(13px * var(--iw-fs, 1));
-  white-space: nowrap;
-}
-
-.f-total b {
-  color: var(--iw-text);
 }
 
 .new-pill {

@@ -4,13 +4,11 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
-import IconField from 'primevue/iconfield'
-import InputIcon from 'primevue/inputicon'
 import Skeleton from 'primevue/skeleton'
 import type { EChartsCoreOption } from 'echarts/core'
 import EChart, { type ChartTheme } from '../components/EChart.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ListPage from '../components/ListPage.vue'
 import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import FolderDialog from '../components/FolderDialog.vue'
@@ -46,7 +44,9 @@ const repoStats = reactive<Record<number, Stats | 'loading' | 'error'>>({})
 const sortField = ref('open')
 const sortOrder = ref<1 | -1>(-1)
 // One row per project: the server folds linked mod pages into Repo.integrations.
-const list = useChunks<Repo>((cursor) => api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), cursor, 50, true))
+const list = useChunks<Repo>((cursor) => api.reposChunk(sortField.value, sortOrder.value < 0, filter.value.trim(), cursor, 50, true), {
+  cacheKey: () => `projects:${sortField.value}:${sortOrder.value}:${filter.value.trim()}`,
+})
 const rows = list.items
 const listLoading = list.loading
 function reload() {
@@ -231,427 +231,428 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
     <ConnectHero v-if="app.onboarding" />
 
     <template v-else>
-      <div class="toolbar">
-        <IconField class="search">
-          <InputIcon class="pi pi-search" />
-          <InputText
-            v-model="filter"
-            :placeholder="t('projects.filter')"
-            :aria-label="t('projects.filter')"
-            fluid
+      <ListPage
+        v-model:search="filter"
+        :search-placeholder="t('projects.filter')"
+        :resettable="!!filter"
+        :total="filter.trim() ? list.total.value : null"
+        :total-label="list.total.value === null ? '' : t('words.projects', list.total.value)"
+        :skeleton="!rows.length && listLoading"
+        @reset="filter = ''"
+      >
+        <template #actions>
+          <Button
+            v-tooltip.bottom="t('projects.discoverTip')"
+            as="router-link"
+            to="/settings/projects"
+            :label="t('projects.discover')"
+            icon="pi pi-folder-open"
+            severity="secondary"
+            outlined
           />
-        </IconField>
-        <Button
-          v-tooltip.bottom="t('projects.discoverTip')"
-          as="router-link"
-          to="/settings/projects"
-          :label="t('projects.discover')"
-          icon="pi pi-folder-open"
-          severity="secondary"
-          outlined
+        </template>
+        <FolderDialog
+          v-model:visible="folderOpen"
+          :project="folderProject"
+          @saved="(p: string) => folderProject && setRowFolder(folderProject.id, p)"
         />
-      </div>
-      <FolderDialog
-        v-model:visible="folderOpen"
-        :project="folderProject"
-        @saved="(p: string) => folderProject && setRowFolder(folderProject.id, p)"
-      />
-      <LinkDialog
-        v-model:visible="linkOpen"
-        :project="linkProject"
-      />
+        <LinkDialog
+          v-model:visible="linkOpen"
+          :project="linkProject"
+        />
 
-      <div class="panel table-panel">
-        <DataTable
-          v-model:expanded-rows="expanded"
-          class="iw-projects"
-          :value="rows"
-          data-key="id"
-          lazy
-          :sort-field="sortField"
-          :sort-order="sortOrder"
-          @sort="onSort"
-          @row-expand="onExpand"
-        >
-          <template #empty>
-            <EmptyState
-              v-if="!app.reposAvailable"
-              icon="pi pi-server"
-              :title="t('projects.unavailable')"
-              :text="t('projects.unavailableText')"
+        <div class="panel table-panel">
+          <DataTable
+            v-model:expanded-rows="expanded"
+            class="iw-projects"
+            :value="rows"
+            data-key="id"
+            lazy
+            :sort-field="sortField"
+            :sort-order="sortOrder"
+            @sort="onSort"
+            @row-expand="onExpand"
+          >
+            <template #empty>
+              <EmptyState
+                v-if="!app.reposAvailable"
+                icon="pi pi-server"
+                :title="t('projects.unavailable')"
+                :text="t('projects.unavailableText')"
+              />
+              <EmptyState
+                v-else-if="filter"
+                icon="pi pi-filter"
+                :title="t('projects.noMatch')"
+                :text="t('projects.noMatchText', { filter })"
+              />
+              <EmptyState
+                v-else-if="!listLoading"
+                icon="pi pi-folder"
+                :title="t('projects.empty')"
+                :text="t('projects.emptyText')"
+              >
+                <Button
+                  :label="t('common.syncNow')"
+                  icon="pi pi-sync"
+                  size="small"
+                  :loading="app.syncing"
+                  :disabled="!app.anyConnected"
+                  @click="app.syncNow()"
+                />
+              </EmptyState>
+            </template>
+
+            <Column
+              expander
+              header-style="width: 3rem"
             />
-            <EmptyState
-              v-else-if="filter"
-              icon="pi pi-filter"
-              :title="t('projects.noMatch')"
-              :text="t('projects.noMatchText', { filter })"
-            />
-            <EmptyState
-              v-else-if="!listLoading"
-              icon="pi pi-folder"
-              :title="t('projects.empty')"
-              :text="t('projects.emptyText')"
+            <Column
+              field="name"
+              :header="t('projects.colProject')"
+              sortable
             >
-              <Button
-                :label="t('common.syncNow')"
-                icon="pi pi-sync"
-                size="small"
-                :loading="app.syncing"
-                :disabled="!app.anyConnected"
-                @click="app.syncNow()"
-              />
-            </EmptyState>
-          </template>
-
-          <Column
-            expander
-            header-style="width: 3rem"
-          />
-          <Column
-            field="name"
-            :header="t('projects.colProject')"
-            sortable
-          >
-            <template #body="{ data }: { data: Repo }">
-              <div class="name-cell">
-                <span
-                  class="swatch"
-                  :style="{ background: repoColor(data.id) }"
-                />
-                <PlatformIcon
-                  :platform="data.platform || 'github'"
-                  :size="16"
-                />
-                <div class="name-main">
-                  <RouterLink
-                    :to="{ name: 'issues', query: { repo: String(data.id) } }"
-                    class="name"
-                  >
-                    {{ isModPlatform(data.platform) ? data.name : shortRepo(data.name) }}
-                  </RouterLink>
-                  <span class="owner">{{ isModPlatform(data.platform) ? platformName(data.platform) : repoOwner(data.name) }}</span>
-                  <!-- Channels: the project itself + its linked mod pages, each with its counters -->
-                  <span class="chips">
-                    <span
-                      v-for="c in channels(data)"
-                      :key="c.id"
-                      class="chip channel"
-                      :class="{ trouble: !!channelTrouble(c.platform) }"
-                    >
-                      <a
-                        v-if="c.id !== data.id"
-                        v-tooltip.top="channelTip(c, t('projects.openModPage') + ' · ' + channelLabel(c))"
-                        :href="safeUrl(c.url)"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="chip-link"
-                        :aria-label="channelTip(c)"
-                      ><PlatformIcon
-                        :platform="c.platform"
-                        :size="12"
-                      /></a>
-                      <PlatformIcon
-                        v-else
-                        :platform="c.platform"
-                        :size="12"
-                      />
-                      <RouterLink
-                        v-tooltip.top="channelTip(c, t('projects.channelIssues', { platform: channelLabel(c) }) + ' · ' + openIssues(c) + ' ' + t('words.open', openIssues(c)))"
-                        :to="issuesTo(data, c.platform)"
-                        class="count mono"
-                      >{{ openIssues(c) }}</RouterLink>
-                      <RouterLink
-                        v-if="unreadIssues(c)"
-                        v-tooltip.top="channelTip(c, t('projects.channelUnread', { platform: channelLabel(c) }) + ' · ' + unreadIssues(c) + ' ' + t('words.unread', unreadIssues(c)))"
-                        :to="issuesTo(data, c.platform, true)"
-                        class="count unread mono"
-                      >{{ unreadIssues(c) }}</RouterLink>
-                      <!-- A mod page's comment thread: its own counters, deep-linked to the Comments page -->
-                      <template v-if="c.openComments || c.unreadComments">
-                        <RouterLink
-                          v-tooltip.top="channelTip(c, t('projects.channelComments', { platform: channelLabel(c) }) + ' · ' + (c.openComments ?? 0) + ' ' + t('words.open', c.openComments ?? 0))"
-                          :to="issuesTo(data, c.platform, false, 'comments')"
-                          class="count comments mono"
-                        ><i class="pi pi-comments" />{{ c.openComments ?? 0 }}</RouterLink>
-                        <RouterLink
-                          v-if="c.unreadComments"
-                          v-tooltip.top="channelTip(c, t('projects.channelUnreadComments', { platform: channelLabel(c) }) + ' · ' + c.unreadComments + ' ' + t('words.unread', c.unreadComments))"
-                          :to="issuesTo(data, c.platform, true, 'comments')"
-                          class="count unread mono"
-                        >{{ c.unreadComments }}</RouterLink>
-                      </template>
-                      <i
-                        v-if="channelTrouble(c.platform)"
-                        v-tooltip.top="channelTrouble(c.platform)"
-                        class="pi pi-exclamation-triangle warn"
-                      />
-                    </span>
-                    <button
-                      v-if="!isModPlatform(data.platform) && (channels(data).length > 1 || hasMods)"
-                      type="button"
-                      class="chip add"
-                      :aria-label="t('platforms.linkMods')"
-                      @click.stop="openLinks(data)"
-                    ><i class="pi pi-link" />{{ channels(data).length > 1 ? '' : t('platforms.mods') }}</button>
-                  </span>
-                  <!-- A mod page without a code project: «не привязан», link / one-click suggestion -->
+              <template #body="{ data }: { data: Repo }">
+                <div class="name-cell">
                   <span
-                    v-if="isModPlatform(data.platform)"
-                    class="chips"
-                  >
-                    <span
-                      v-if="!codeOf(data)"
-                      class="chip tag"
-                    >{{ t('platforms.notLinked') }}</span>
+                    class="swatch"
+                    :style="{ background: repoColor(data.id) }"
+                  />
+                  <PlatformIcon
+                    :platform="data.platform || 'github'"
+                    :size="16"
+                  />
+                  <div class="name-main">
                     <RouterLink
-                      v-if="codeOf(data)"
-                      :to="{ name: 'issues', query: { repo: String(codeOf(data)?.id), state: 'all' } }"
-                      class="chip"
-                    ><PlatformIcon
-                      platform="github"
-                      :size="12"
-                    /><span class="chip-name">{{ codeOf(data)?.name }}</span></RouterLink>
-                    <button
-                      type="button"
-                      class="chip add"
-                      :aria-label="t('platforms.linkedCode')"
-                      @click.stop="openLinks(data)"
-                    ><i :class="codeOf(data) ? 'pi pi-pencil' : 'pi pi-link'" />{{ codeOf(data) ? '' : t('platforms.linkShort') }}</button>
-                    <button
-                      v-for="s in suggestionsOf(data)"
-                      :key="'s' + s.id"
-                      v-tooltip.top="t('platforms.suggestHint')"
-                      type="button"
-                      class="chip suggest"
-                      @click.stop="acceptSuggestion(data, s)"
-                    ><PlatformIcon
-                      platform="github"
-                      :size="12"
-                    /><span class="chip-name">{{ t('platforms.suggestLink', { name: s.name }) }}</span></button>
-                  </span>
+                      :to="{ name: 'issues', query: { repo: String(data.id) } }"
+                      class="name"
+                    >
+                      {{ isModPlatform(data.platform) ? data.name : shortRepo(data.name) }}
+                    </RouterLink>
+                    <span class="owner">{{ isModPlatform(data.platform) ? platformName(data.platform) : repoOwner(data.name) }}</span>
+                    <!-- Channels: the project itself + its linked mod pages, each with its counters -->
+                    <span class="chips">
+                      <span
+                        v-for="c in channels(data)"
+                        :key="c.id"
+                        class="chip channel"
+                        :class="{ trouble: !!channelTrouble(c.platform) }"
+                      >
+                        <a
+                          v-if="c.id !== data.id"
+                          v-tooltip.top="channelTip(c, t('projects.openModPage') + ' · ' + channelLabel(c))"
+                          :href="safeUrl(c.url)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="chip-link"
+                          :aria-label="channelTip(c)"
+                        ><PlatformIcon
+                          :platform="c.platform"
+                          :size="12"
+                        /></a>
+                        <PlatformIcon
+                          v-else
+                          :platform="c.platform"
+                          :size="12"
+                        />
+                        <RouterLink
+                          v-tooltip.top="channelTip(c, t('projects.channelIssues', { platform: channelLabel(c) }) + ' · ' + openIssues(c) + ' ' + t('words.open', openIssues(c)))"
+                          :to="issuesTo(data, c.platform)"
+                          class="count mono"
+                        >{{ openIssues(c) }}</RouterLink>
+                        <RouterLink
+                          v-if="unreadIssues(c)"
+                          v-tooltip.top="channelTip(c, t('projects.channelUnread', { platform: channelLabel(c) }) + ' · ' + unreadIssues(c) + ' ' + t('words.unread', unreadIssues(c)))"
+                          :to="issuesTo(data, c.platform, true)"
+                          class="count unread mono"
+                        >{{ unreadIssues(c) }}</RouterLink>
+                        <!-- A mod page's comment thread: its own counters, deep-linked to the Comments page -->
+                        <template v-if="c.openComments || c.unreadComments">
+                          <RouterLink
+                            v-tooltip.top="channelTip(c, t('projects.channelComments', { platform: channelLabel(c) }) + ' · ' + (c.openComments ?? 0) + ' ' + t('words.open', c.openComments ?? 0))"
+                            :to="issuesTo(data, c.platform, false, 'comments')"
+                            class="count comments mono"
+                          ><i class="pi pi-comments" />{{ c.openComments ?? 0 }}</RouterLink>
+                          <RouterLink
+                            v-if="c.unreadComments"
+                            v-tooltip.top="channelTip(c, t('projects.channelUnreadComments', { platform: channelLabel(c) }) + ' · ' + c.unreadComments + ' ' + t('words.unread', c.unreadComments))"
+                            :to="issuesTo(data, c.platform, true, 'comments')"
+                            class="count unread mono"
+                          >{{ c.unreadComments }}</RouterLink>
+                        </template>
+                        <i
+                          v-if="channelTrouble(c.platform)"
+                          v-tooltip.top="channelTrouble(c.platform)"
+                          class="pi pi-exclamation-triangle warn"
+                        />
+                      </span>
+                      <button
+                        v-if="!isModPlatform(data.platform) && (channels(data).length > 1 || hasMods)"
+                        type="button"
+                        class="chip add"
+                        :aria-label="t('platforms.linkMods')"
+                        @click.stop="openLinks(data)"
+                      ><i class="pi pi-link" />{{ channels(data).length > 1 ? '' : t('platforms.mods') }}</button>
+                    </span>
+                    <!-- A mod page without a code project: «не привязан», link / one-click suggestion -->
+                    <span
+                      v-if="isModPlatform(data.platform)"
+                      class="chips"
+                    >
+                      <span
+                        v-if="!codeOf(data)"
+                        class="chip tag"
+                      >{{ t('platforms.notLinked') }}</span>
+                      <RouterLink
+                        v-if="codeOf(data)"
+                        :to="{ name: 'issues', query: { repo: String(codeOf(data)?.id), state: 'all' } }"
+                        class="chip"
+                      ><PlatformIcon
+                        platform="github"
+                        :size="12"
+                      /><span class="chip-name">{{ codeOf(data)?.name }}</span></RouterLink>
+                      <button
+                        type="button"
+                        class="chip add"
+                        :aria-label="t('platforms.linkedCode')"
+                        @click.stop="openLinks(data)"
+                      ><i :class="codeOf(data) ? 'pi pi-pencil' : 'pi pi-link'" />{{ codeOf(data) ? '' : t('platforms.linkShort') }}</button>
+                      <button
+                        v-for="s in suggestionsOf(data)"
+                        :key="'s' + s.id"
+                        v-tooltip.top="t('platforms.suggestHint')"
+                        type="button"
+                        class="chip suggest"
+                        @click.stop="acceptSuggestion(data, s)"
+                      ><PlatformIcon
+                        platform="github"
+                        :size="12"
+                      /><span class="chip-name">{{ t('platforms.suggestLink', { name: s.name }) }}</span></button>
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </template>
-          </Column>
-          <Column class="actions-col">
-            <template #body="{ data }: { data: Repo }">
-              <Button
-                v-tooltip.top="t('projects.syncTip')"
-                icon="pi pi-sync"
-                size="small"
-                severity="secondary"
-                text
-                rounded
-                :aria-label="t('projects.sync')"
-                :loading="!!rowSyncing[data.id]"
-                @click.stop="syncProject(data)"
-              />
-              <span
-                v-if="!isModPlatform(data.platform)"
-                v-tooltip.top="data.fixable ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
-              >
+              </template>
+            </Column>
+            <Column class="actions-col">
+              <template #body="{ data }: { data: Repo }">
                 <Button
-                  :label="t('jobs.triage.run')"
-                  icon="pi pi-sort-amount-down"
-                  size="small"
-                  severity="secondary"
-                  text
-                  class="nowrap"
-                  :loading="triage.busy.value"
-                  :disabled="!data.open || !data.fixable"
-                  @click.stop="triage.run(data.id, data.name)"
-                />
-              </span>
-            </template>
-          </Column>
-          <Column
-            field="open"
-            :header="t('projects.colOpen')"
-            sortable
-            class="num"
-          >
-            <template #body="{ data }: { data: Repo }">
-              <span class="mono strong">{{ data.open }}</span>
-            </template>
-          </Column>
-          <Column
-            field="closed"
-            :header="t('projects.colClosed')"
-            sortable
-            class="num"
-          >
-            <template #body="{ data }: { data: Repo }">
-              <span class="mono muted">{{ data.closed }}</span>
-            </template>
-          </Column>
-          <Column
-            :header="t('projects.colProgress')"
-            class="progress-col"
-          >
-            <template #body="{ data }: { data: Repo }">
-              <div
-                v-tooltip.top="t('projects.closedPct', { n: closedShare(data) })"
-                class="bar"
-              >
-                <span :style="{ width: closedShare(data) + '%' }" />
-              </div>
-            </template>
-          </Column>
-          <Column
-            field="unread"
-            :header="t('projects.colUnread')"
-            sortable
-            class="num"
-          >
-            <template #body="{ data }: { data: Repo }">
-              <RouterLink
-                v-if="data.unread"
-                :to="{ name: unreadIssues(data) ? 'issues' : 'comments', query: { repo: String(data.id), unread: '1', state: 'all' } }"
-                class="unread-chip mono"
-              >
-                {{ data.unread }}
-              </RouterLink>
-              <span
-                v-else
-                class="muted"
-              >—</span>
-            </template>
-          </Column>
-          <Column :header="t('projects.colFolder')">
-            <template #body="{ data }: { data: Repo }">
-              <div
-                v-if="isModPlatform(data.platform)"
-                class="folder-cell"
-              >
-                <span
-                  v-if="codeOf(data)?.localPath"
-                  v-tooltip.top="codeOf(data)?.localPath"
-                  class="mapped mono"
-                ><i class="pi pi-folder-open" /> {{ t('platforms.viaCode', { name: codeOf(data)?.name }) }}</span>
-                <span
-                  v-else
-                  class="not-mapped"
-                ><i class="pi pi-folder" /> {{ codeOf(data) ? t('projects.notMapped') : t('platforms.notLinked') }}</span>
-              </div>
-              <div
-                v-else
-                class="folder-cell"
-              >
-                <span
-                  v-if="data.localPath"
-                  v-tooltip.top="data.localPath"
-                  class="mapped mono"
-                ><i class="pi pi-folder-open" /> {{ data.localPath }}</span>
-                <span
-                  v-else
-                  class="not-mapped"
-                ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
-                <Button
-                  :label="data.localPath ? t('projects.change') : t('projects.choose')"
-                  size="small"
-                  severity="secondary"
-                  text
-                  @click.stop="mapFolder(data)"
-                />
-                <Button
-                  v-if="data.localPath"
-                  v-tooltip.top="t('folder.unmap')"
-                  icon="pi pi-times"
+                  v-tooltip.top="t('projects.syncTip')"
+                  icon="pi pi-sync"
                   size="small"
                   severity="secondary"
                   text
                   rounded
-                  :aria-label="t('folder.unmap')"
-                  @click.stop="unmapFolder(data)"
+                  :aria-label="t('projects.sync')"
+                  :loading="!!rowSyncing[data.id]"
+                  @click.stop="syncProject(data)"
                 />
-              </div>
-            </template>
-          </Column>
-          <Column
-            field="lastSync"
-            :header="t('projects.colLastSync')"
-            sortable
-          >
-            <template #body="{ data }: { data: Repo }">
-              <span
-                v-tooltip.left="absTime(data.lastSync ?? data.syncedAt)"
-                class="muted nowrap"
-              >{{ relTime(data.lastSync ?? data.syncedAt) || t('common.never') }}</span>
-            </template>
-          </Column>
-
-          <template #expansion="{ data }: { data: Repo }">
-            <div class="expansion">
-              <div class="exp-stats">
-                <div>
-                  <div class="exp-label">
-                    {{ t('projects.colOpen') }}
-                  </div><div class="exp-val mono">
-                    {{ data.open }}
-                  </div>
+                <span
+                  v-if="!isModPlatform(data.platform)"
+                  v-tooltip.top="data.fixable ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
+                >
+                  <Button
+                    :label="t('jobs.triage.run')"
+                    icon="pi pi-sort-amount-down"
+                    size="small"
+                    severity="secondary"
+                    text
+                    class="nowrap"
+                    :loading="triage.busy.value"
+                    :disabled="!data.open || !data.fixable"
+                    @click.stop="triage.run(data.id, data.name)"
+                  />
+                </span>
+              </template>
+            </Column>
+            <Column
+              field="open"
+              :header="t('projects.colOpen')"
+              sortable
+              class="num"
+            >
+              <template #body="{ data }: { data: Repo }">
+                <span class="mono strong">{{ data.open }}</span>
+              </template>
+            </Column>
+            <Column
+              field="closed"
+              :header="t('projects.colClosed')"
+              sortable
+              class="num"
+            >
+              <template #body="{ data }: { data: Repo }">
+                <span class="mono muted">{{ data.closed }}</span>
+              </template>
+            </Column>
+            <Column
+              :header="t('projects.colProgress')"
+              class="progress-col"
+            >
+              <template #body="{ data }: { data: Repo }">
+                <div
+                  v-tooltip.top="t('projects.closedPct', { n: closedShare(data) })"
+                  class="bar"
+                >
+                  <span :style="{ width: closedShare(data) + '%' }" />
                 </div>
-                <div>
-                  <div class="exp-label">
-                    {{ t('projects.colClosed') }}
-                  </div><div class="exp-val mono">
-                    {{ data.closed }}
-                  </div>
-                </div>
-                <div>
-                  <div class="exp-label">
-                    {{ t('projects.closedShare') }}
-                  </div><div class="exp-val mono">
-                    {{ closedShare(data) }}%
-                  </div>
-                </div>
-                <Button
-                  as="a"
-                  :href="safeUrl(data.url)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  :label="t('projects.openRepo')"
-                  icon="pi pi-external-link"
-                  size="small"
-                  severity="secondary"
-                  outlined
-                />
-              </div>
-              <div class="exp-chart">
-                <Skeleton
-                  v-if="repoStats[data.id] === 'loading'"
-                  height="180px"
-                />
-                <EmptyState
-                  v-else-if="repoStats[data.id] === 'error' || !repoStats[data.id]"
-                  icon="pi pi-chart-line"
-                  :title="t('projects.noStats')"
-                  compact
-                />
-                <EChart
+              </template>
+            </Column>
+            <Column
+              field="unread"
+              :header="t('projects.colUnread')"
+              sortable
+              class="num"
+            >
+              <template #body="{ data }: { data: Repo }">
+                <RouterLink
+                  v-if="data.unread"
+                  :to="{ name: unreadIssues(data) ? 'issues' : 'comments', query: { repo: String(data.id), unread: '1', state: 'all' } }"
+                  class="unread-chip mono"
+                >
+                  {{ data.unread }}
+                </RouterLink>
+                <span
                   v-else
-                  :option="chart(data, repoStats[data.id] as Stats)"
-                  height="180px"
-                  :label="t('projects.weeklyFor', { name: data.name })"
-                />
+                  class="muted"
+                >—</span>
+              </template>
+            </Column>
+            <Column :header="t('projects.colFolder')">
+              <template #body="{ data }: { data: Repo }">
+                <div
+                  v-if="isModPlatform(data.platform)"
+                  class="folder-cell"
+                >
+                  <span
+                    v-if="codeOf(data)?.localPath"
+                    v-tooltip.top="codeOf(data)?.localPath"
+                    class="mapped mono"
+                  ><i class="pi pi-folder-open" /> {{ t('platforms.viaCode', { name: codeOf(data)?.name }) }}</span>
+                  <span
+                    v-else
+                    class="not-mapped"
+                  ><i class="pi pi-folder" /> {{ codeOf(data) ? t('projects.notMapped') : t('platforms.notLinked') }}</span>
+                </div>
+                <div
+                  v-else
+                  class="folder-cell"
+                >
+                  <span
+                    v-if="data.localPath"
+                    v-tooltip.top="data.localPath"
+                    class="mapped mono"
+                  ><i class="pi pi-folder-open" /> {{ data.localPath }}</span>
+                  <span
+                    v-else
+                    class="not-mapped"
+                  ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
+                  <Button
+                    :label="data.localPath ? t('projects.change') : t('projects.choose')"
+                    size="small"
+                    severity="secondary"
+                    text
+                    @click.stop="mapFolder(data)"
+                  />
+                  <Button
+                    v-if="data.localPath"
+                    v-tooltip.top="t('folder.unmap')"
+                    icon="pi pi-times"
+                    size="small"
+                    severity="secondary"
+                    text
+                    rounded
+                    :aria-label="t('folder.unmap')"
+                    @click.stop="unmapFolder(data)"
+                  />
+                </div>
+              </template>
+            </Column>
+            <Column
+              field="lastSync"
+              :header="t('projects.colLastSync')"
+              sortable
+            >
+              <template #body="{ data }: { data: Repo }">
+                <span
+                  v-tooltip.left="absTime(data.lastSync ?? data.syncedAt)"
+                  class="muted nowrap"
+                >{{ relTime(data.lastSync ?? data.syncedAt) || t('common.never') }}</span>
+              </template>
+            </Column>
+
+            <template #expansion="{ data }: { data: Repo }">
+              <div class="expansion">
+                <div class="exp-stats">
+                  <div>
+                    <div class="exp-label">
+                      {{ t('projects.colOpen') }}
+                    </div><div class="exp-val mono">
+                      {{ data.open }}
+                    </div>
+                  </div>
+                  <div>
+                    <div class="exp-label">
+                      {{ t('projects.colClosed') }}
+                    </div><div class="exp-val mono">
+                      {{ data.closed }}
+                    </div>
+                  </div>
+                  <div>
+                    <div class="exp-label">
+                      {{ t('projects.closedShare') }}
+                    </div><div class="exp-val mono">
+                      {{ closedShare(data) }}%
+                    </div>
+                  </div>
+                  <Button
+                    as="a"
+                    :href="safeUrl(data.url)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :label="t('projects.openRepo')"
+                    icon="pi pi-external-link"
+                    size="small"
+                    severity="secondary"
+                    outlined
+                  />
+                </div>
+                <div class="exp-chart">
+                  <Skeleton
+                    v-if="repoStats[data.id] === 'loading'"
+                    height="180px"
+                  />
+                  <EmptyState
+                    v-else-if="repoStats[data.id] === 'error' || !repoStats[data.id]"
+                    icon="pi pi-chart-line"
+                    :title="t('projects.noStats')"
+                    compact
+                  />
+                  <EChart
+                    v-else
+                    :option="chart(data, repoStats[data.id] as Stats)"
+                    height="180px"
+                    :label="t('projects.weeklyFor', { name: data.name })"
+                  />
+                </div>
               </div>
-            </div>
-          </template>
-        </DataTable>
-        <div
-          v-if="listLoading"
-          class="tail"
-        >
-          <Skeleton
-            v-for="i in 3"
-            :key="i"
-            height="40px"
+            </template>
+          </DataTable>
+          <div
+            v-if="listLoading && rows.length"
+            class="tail"
+          >
+            <Skeleton
+              v-for="i in 3"
+              :key="i"
+              height="40px"
+            />
+          </div>
+          <div
+            ref="sentinel"
+            aria-hidden="true"
           />
         </div>
-        <div
-          ref="sentinel"
-          aria-hidden="true"
-        />
-      </div>
+      </ListPage>
     </template>
   </div>
 </template>
@@ -666,17 +667,6 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 
 .summary b {
   color: var(--iw-text);
-}
-
-.toolbar {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.search {
-  flex: 0 1 360px;
 }
 
 .table-panel {

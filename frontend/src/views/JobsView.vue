@@ -7,6 +7,8 @@ import Button from 'primevue/button'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import EmptyState from '../components/EmptyState.vue'
+import ListPage from '../components/ListPage.vue'
+import PlatformIcon from '../components/PlatformIcon.vue'
 import JobRow from '../components/JobRow.vue'
 import { api } from '../api/client'
 import type { Job, JobRowData as Row } from '../api/types'
@@ -45,7 +47,9 @@ function setQuery(patch: Partial<Record<'state' | 'flow' | 'origin' | 'project',
   void router.replace({ query: q })
 }
 
-const list = useChunks<Job>((cursor) => api.jobs({ ...filters.value, origin: filters.value.origin || undefined, cursor, limit: CHUNK }))
+const list = useChunks<Job>((cursor) => api.jobs({ ...filters.value, origin: filters.value.origin || undefined, cursor, limit: CHUNK }), {
+  cacheKey: () => 'jobs:' + JSON.stringify(filters.value),
+})
 const items = list.items
 const skeletons: Row[] = Array.from({ length: SKELETON_ROWS }, (_, i) => ({ id: -1 - i, skeleton: true }) as Row)
 const rows = computed<Row[]>(() => (list.loading.value || (!items.value.length && !list.done.value && !list.error.value) ? [...items.value, ...skeletons] : items.value))
@@ -132,7 +136,8 @@ const originOptions = computed(() => [
   { label: t('jobs.origin.manual'), value: 'manual' },
   { label: t('jobs.origin.rule'), value: 'rule' },
 ])
-const projectOptions = computed(() => [{ label: t('issues.allProjects'), value: 0 }, ...app.repos.map((r) => ({ label: r.name, value: r.id }))])
+const projectOptions = computed(() => [{ label: t('issues.allProjects'), value: 0, platform: '' }, ...app.repos.map((r) => ({ label: r.name, value: r.id, platform: r.platform }))])
+const selectedProject = computed(() => projectOptions.value.find((o) => o.value === filters.value.project))
 const anyFilter = computed(() => !!(filters.value.state || filters.value.flow || filters.value.origin || filters.value.project))
 const state = computed(() => (list.error.value ? (list.status.value === 404 ? 'unavailable' : 'error') : 'ok'))
 
@@ -143,166 +148,172 @@ function open(it: Row) {
 
 <template>
   <div class="page">
-    <div class="filters panel">
-      <Select
-        :model-value="filters.state"
-        :options="stateOptions"
-        option-label="label"
-        option-value="value"
-        :aria-label="t('jobs.stateLabel')"
-        class="f-state"
-        @update:model-value="(v: string) => setQuery({ state: v })"
-      />
-      <SelectButton
-        :model-value="filters.flow"
-        :options="flowOptions"
-        option-label="label"
-        option-value="value"
-        :allow-empty="false"
-        :aria-label="t('jobs.flowLabel')"
-        @update:model-value="(v: string) => setQuery({ flow: v })"
-      />
-      <Select
-        :model-value="filters.origin"
-        :options="originOptions"
-        option-label="label"
-        option-value="value"
-        :aria-label="t('jobs.originLabel')"
-        class="f-origin"
-        @update:model-value="(v: string) => setQuery({ origin: v })"
-      />
-      <Select
-        :model-value="filters.project"
-        :options="projectOptions"
-        option-label="label"
-        option-value="value"
-        filter
-        :aria-label="t('issues.project')"
-        class="f-repo"
-        @update:model-value="(v: number) => setQuery({ project: v })"
-      />
-      <Button
-        v-if="anyFilter"
-        :label="t('issues.reset')"
-        icon="pi pi-filter-slash"
-        severity="secondary"
-        text
-        @click="router.replace({ query: {} })"
-      />
-      <span
-        v-if="list.total.value !== null"
-        class="f-total"
-      ><b class="mono">{{ list.total.value }}</b> {{ t('jobs.words', list.total.value) }}</span>
-    </div>
+    <ListPage
+      :resettable="anyFilter"
+      :total="list.total.value"
+      :total-label="list.total.value === null ? '' : t('jobs.words', list.total.value)"
+      @reset="router.replace({ query: {} })"
+    >
+      <template #filters>
+        <Select
+          :model-value="filters.state"
+          :options="stateOptions"
+          option-label="label"
+          option-value="value"
+          :aria-label="t('jobs.stateLabel')"
+          class="f-state"
+          @update:model-value="(v: string) => setQuery({ state: v })"
+        />
+        <SelectButton
+          :model-value="filters.flow"
+          :options="flowOptions"
+          option-label="label"
+          option-value="value"
+          :allow-empty="false"
+          :aria-label="t('jobs.flowLabel')"
+          @update:model-value="(v: string) => setQuery({ flow: v })"
+        />
+        <Select
+          :model-value="filters.origin"
+          :options="originOptions"
+          option-label="label"
+          option-value="value"
+          :aria-label="t('jobs.originLabel')"
+          class="f-origin"
+          @update:model-value="(v: string) => setQuery({ origin: v })"
+        />
+        <Select
+          :model-value="filters.project"
+          :options="projectOptions"
+          option-label="label"
+          option-value="value"
+          filter
+          :aria-label="t('issues.project')"
+          class="f-repo"
+          @update:model-value="(v: number) => setQuery({ project: v })"
+        >
+          <template #value="{ placeholder }">
+            <span
+              v-if="selectedProject"
+              class="opt"
+            ><PlatformIcon
+              v-if="selectedProject.platform"
+              :platform="selectedProject.platform"
+              :size="14"
+            />{{ selectedProject.label }}</span>
+            <span v-else>{{ placeholder }}</span>
+          </template>
+          <template #option="{ option }">
+            <span class="opt"><PlatformIcon
+              v-if="option.platform"
+              :platform="option.platform"
+              :size="14"
+            />{{ option.label }}</span>
+          </template>
+        </Select>
+      </template>
 
-    <div class="panel table-panel">
-      <div
-        class="vt"
-        role="grid"
-        :style="{ '--row': ROW + 'px' }"
-      >
+      <div class="panel table-panel">
         <div
-          class="vt-head"
-          role="row"
-        >
-          <span role="columnheader">{{ t('jobs.colState') }}</span>
-          <span role="columnheader">{{ t('jobs.colIssue') }}</span>
-          <span
-            class="c-flow"
-            role="columnheader"
-          >{{ t('jobs.colFlow') }}</span>
-          <span
-            class="c-profile"
-            role="columnheader"
-          >{{ t('jobs.colProfile') }}</span>
-          <span
-            class="c-attempt"
-            role="columnheader"
-          />
-          <span role="columnheader">{{ t('jobs.colTime') }}</span>
-          <span
-            class="c-cost"
-            role="columnheader"
-          >{{ t('jobs.colCost') }}</span>
-        </div>
-        <div
-          v-if="!rows.length"
-          class="vt-empty"
-        >
-          <EmptyState
-            v-if="state === 'unavailable'"
-            icon="pi pi-server"
-            :title="t('jobs.unavailable')"
-            :text="t('jobs.unavailableText')"
-          />
-          <EmptyState
-            v-else-if="state === 'error'"
-            icon="pi pi-exclamation-triangle"
-            :title="t('jobs.loadError')"
-            :text="list.error.value"
-          >
-            <Button
-              :label="t('common.retry')"
-              icon="pi pi-refresh"
-              size="small"
-              @click="reload()"
-            />
-          </EmptyState>
-          <EmptyState
-            v-else-if="anyFilter"
-            icon="pi pi-filter"
-            :title="t('jobs.noMatch')"
-            :text="t('issues.noMatchText')"
-          />
-          <EmptyState
-            v-else
-            icon="pi pi-microchip-ai"
-            :title="t('jobs.empty')"
-            :text="t('jobs.emptyText')"
-          >
-            <Button
-              as="router-link"
-              to="/issues"
-              :label="t('nav.issues')"
-              icon="pi pi-inbox"
-              size="small"
-              severity="secondary"
-            />
-          </EmptyState>
-        </div>
-        <div
-          v-else
-          ref="scrollEl"
-          class="vt-body"
+          class="vt"
+          role="grid"
+          :style="{ '--row': ROW + 'px' }"
         >
           <div
-            class="vt-space"
-            :style="{ height: totalSize + 'px' }"
+            class="vt-head"
+            role="row"
           >
-            <JobRow
-              v-for="v in virtualRows"
-              :key="v.key as number"
-              :item="rows[v.index]"
-              :top="v.start"
-              :profile="rows[v.index].skeleton ? '' : jobs.profileName(rows[v.index].profileId)"
-              @open="open(rows[v.index])"
+            <span role="columnheader">{{ t('jobs.colState') }}</span>
+            <span role="columnheader">{{ t('jobs.colIssue') }}</span>
+            <span
+              class="c-flow"
+              role="columnheader"
+            >{{ t('jobs.colFlow') }}</span>
+            <span
+              class="c-profile"
+              role="columnheader"
+            >{{ t('jobs.colProfile') }}</span>
+            <span
+              class="c-attempt"
+              role="columnheader"
             />
+            <span role="columnheader">{{ t('jobs.colTime') }}</span>
+            <span
+              class="c-cost"
+              role="columnheader"
+            >{{ t('jobs.colCost') }}</span>
+          </div>
+          <div
+            v-if="!rows.length"
+            class="vt-empty"
+          >
+            <EmptyState
+              v-if="state === 'unavailable'"
+              icon="pi pi-server"
+              :title="t('jobs.unavailable')"
+              :text="t('jobs.unavailableText')"
+            />
+            <EmptyState
+              v-else-if="state === 'error'"
+              icon="pi pi-exclamation-triangle"
+              :title="t('jobs.loadError')"
+              :text="list.error.value"
+            >
+              <Button
+                :label="t('common.retry')"
+                icon="pi pi-refresh"
+                size="small"
+                @click="reload()"
+              />
+            </EmptyState>
+            <EmptyState
+              v-else-if="anyFilter"
+              icon="pi pi-filter"
+              :title="t('jobs.noMatch')"
+              :text="t('issues.noMatchText')"
+            />
+            <EmptyState
+              v-else
+              icon="pi pi-microchip-ai"
+              :title="t('jobs.empty')"
+              :text="t('jobs.emptyText')"
+            >
+              <Button
+                as="router-link"
+                to="/issues"
+                :label="t('nav.issues')"
+                icon="pi pi-inbox"
+                size="small"
+                severity="secondary"
+              />
+            </EmptyState>
+          </div>
+          <div
+            v-else
+            ref="scrollEl"
+            class="vt-body"
+          >
+            <div
+              class="vt-space"
+              :style="{ height: totalSize + 'px' }"
+            >
+              <JobRow
+                v-for="v in virtualRows"
+                :key="v.key as number"
+                :item="rows[v.index]"
+                :top="v.start"
+                :profile="rows[v.index].skeleton ? '' : jobs.profileName(rows[v.index].profileId)"
+                @open="open(rows[v.index])"
+              />
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </ListPage>
   </div>
 </template>
 
 <style scoped>
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-}
-
 .f-state {
   width: 190px;
 }
@@ -315,15 +326,10 @@ function open(it: Row) {
   width: 170px;
 }
 
-.f-total {
-  margin-left: auto;
-  color: var(--iw-muted);
-  font-size: calc(13px * var(--iw-fs, 1));
-  white-space: nowrap;
-}
-
-.f-total b {
-  color: var(--iw-text);
+.opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .table-panel {

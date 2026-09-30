@@ -1,7 +1,7 @@
 import { customRef, type Ref } from 'vue'
 import type { Comment, IssueDetail, Job } from '../api/types'
 
-// Stale-while-revalidate for non-list pages: what a page loaded last stays in
+// Stale-while-revalidate: what a page (or a list, per filter) loaded last stays in
 // memory (this tab only), so a revisit renders it at once and refetches
 // quietly; a skeleton shows only when nothing was loaded yet.
 
@@ -42,3 +42,5 @@ export const itemCache = detailCache<IssueDetail>()
 export const commentsCache = detailCache<Comment[]>()
 export const itemJobsCache = detailCache<Job[]>()
 export const jobCache = detailCache<Job>()
+/** List pages (lib/chunks useChunks cacheKey): the rows a filter showed last. */
+export const listCache = detailCache<unknown>(30)
