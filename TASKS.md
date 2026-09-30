@@ -167,3 +167,4 @@ Owner requirements 2026-09-30: resume deltas after a restart, never block the UI
 - [x] 11. No-op writes skipped (`BenchmarkApplyItemsNoop` ~95 → ~18 ms) — e6be8b9
 - [x] 12. Reconcile stamps the change-check baseline (`PollState.FullAt`) — b206d93
 - [x] 13. Docs: ARCHITECTURE.md → Storage & sync model; stale GitHub sync / SPA lines fixed
+- [x] 14. Perf guard: `tools/perf/restart.ps1` (restart upstream calls vs the fake, warm-start PASS/FAIL), `tools/perf/bench.ps1` (endpoint p50/p95, targets), `BenchmarkReadPaths` (5k items × 100 projects: items 5 ms, projects 10 ms, group 16 ms, stats 20 ms, folders 4 ms per request); README line

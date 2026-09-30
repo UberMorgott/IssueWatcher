@@ -113,6 +113,11 @@ go test -race ./...           # Go tests
 cd frontend; npm run build    # frontend type check + bundle
 ```
 
+Perf guard (every read from SQLite, < 50 ms; see `docs/ARCHITECTURE.md` → Storage & sync model):
+`go test ./internal/api -run '^$' -bench BenchmarkReadPaths -benchtime 200x` (seeded store, 5k items × 100 projects);
+`tools/perf/restart.ps1` (upstream calls of a restart against `tools/fakegithub`: `-Setup` once, then a restart; prints PASS/FAIL for the warm-start target) and
+`tools/perf/bench.ps1 -DataDir <dir>` (endpoint p50/p95 of a running instance, e.g. a copy of a data dir without `secrets`). Usage in each script's header.
+
 ## Release
 
 Releases are built and published locally (no CI) by the owner:
