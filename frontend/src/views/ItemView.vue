@@ -41,11 +41,15 @@ const reply = ref('')
 const sending = ref(false)
 const replyError = ref('')
 
+// Generation guard: only the newest load may write the page (a late answer for
+// the previous item, or an older quiet refresh, is dropped).
+let loadGen = 0
 async function load(quiet = false) {
   if (!quiet) state.value = 'loading'
   const id = props.id
+  const g = ++loadGen
   const r = await api.issue(id)
-  if (id !== props.id) return // moved on to another item meanwhile
+  if (g !== loadGen || id !== props.id) return
   if (!r.ok) {
     state.value = r.status === 404 ? (r.error === 'not found' ? 'missing' : 'unavailable') : r.status === 400 ? 'missing' : 'error'
     errorText.value = r.error
@@ -58,7 +62,7 @@ async function load(quiet = false) {
   if (r.data.unread) {
     const m = await api.markRead(r.data.id)
     if (m.ok) {
-      item.value = { ...r.data, unread: false }
+      if (g === loadGen && id === props.id) item.value = { ...r.data, unread: false }
       void app.loadRepos()
     }
   }
@@ -91,6 +95,9 @@ watch(
   () => props.id,
   () => {
     comments.reset()
+    // The reply draft belongs to the item it was typed for.
+    reply.value = ''
+    replyError.value = ''
     // A page seen before renders from the cache at once and refreshes quietly.
     const cached = itemCache.get(props.id)
     if (cached) {
@@ -156,14 +163,21 @@ async function send() {
   replyError.value = ''
   const r = await api.reply(it.id, body)
   sending.value = false
+  const here = String(it.id) === props.id // still on the item the reply went to
   if (!r.ok) {
+    if (!here) {
+      toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+      return
+    }
     const b = r.body as { code?: string; platform?: string } | undefined
     replyError.value = r.status === 409 && b?.code ? t('replyErrors.' + b.code, { platform: platformName(b.platform || platform.value) }) : r.error
     return
   }
-  item.value = { ...it, comments: it.comments + 1 }
-  if (comments.done.value) void comments.loadTail()
-  reply.value = ''
+  if (here) {
+    item.value = { ...it, comments: it.comments + 1 }
+    if (comments.done.value) void comments.loadTail()
+    reply.value = ''
+  }
   toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: itemRef(it), life: 3000 })
 }
 
