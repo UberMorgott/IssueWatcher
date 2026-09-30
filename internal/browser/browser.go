@@ -77,6 +77,9 @@ type Browser struct {
 	idle   *time.Timer
 	gen    int
 	closed bool
+	// down is closed once the latest shutdown and every earlier one have
+	// finished: the old process has let go of the profile (nil = none yet).
+	down chan struct{}
 }
 
 type tab struct {
@@ -148,8 +151,18 @@ func (b *Browser) stop(ctx context.Context) {
 		b.idle.Stop()
 		b.idle = nil
 	}
+	// One profile: Chromium hands a launch on a profile still held by another
+	// instance over to it and exits ("pipe: EOF … exited before DevTools came
+	// up"). Stop runs outside b.op, so each stop (ensure's included, before a
+	// launch) returns only once every earlier shutdown has finished too.
+	prev, done := b.down, make(chan struct{})
+	b.down = done
 	b.mu.Unlock()
 	b.shutdown(ctx, p, c)
+	if prev != nil {
+		<-prev
+	}
+	close(done)
 }
 
 // shutdown ends a browser run: Browser.close (bounded) lets it flush the
@@ -176,6 +189,10 @@ func (b *Browser) shutdown(ctx context.Context, p *process, c *Conn) {
 		case <-time.After(b.stopWait):
 		}
 		p.kill()
+		select { // the job kill is asynchronous: let the process let go of the profile
+		case <-p.exited:
+		case <-time.After(b.stopWait):
+		}
 	}
 }
 
@@ -199,7 +216,7 @@ func (b *Browser) ensure(ctx context.Context, headed bool) (*Conn, error) {
 	if c != nil && cur == headed {
 		return c, nil
 	}
-	b.stop(ctx)
+	b.stop(ctx) // also waits for a Stop from outside b.op still shutting down
 	exe, err := b.opts.Find()
 	if err != nil {
 		return nil, err
@@ -327,7 +344,7 @@ func (b *Browser) allowed(u string) (string, error) {
 func (b *Browser) openTab(ctx context.Context, c *Conn, origin, page string) (*tab, error) {
 	b.mu.Lock()
 	t := b.tabs[origin]
-	ua := b.ua
+	ua, headed := b.ua, b.headed
 	b.mu.Unlock()
 	if t != nil {
 		return t, nil
@@ -335,7 +352,11 @@ func (b *Browser) openTab(ctx context.Context, c *Conn, origin, page string) (*t
 	var created struct {
 		TargetID string `json:"targetId"`
 	}
-	if err := c.Call(ctx, "", "Target.createTarget", map[string]any{"url": "about:blank"}, &created); err != nil {
+	params := map[string]any{"url": "about:blank"}
+	if headed { // a read during a sign-in: keep the user's sign-in tab in front
+		params["background"] = true
+	}
+	if err := c.Call(ctx, "", "Target.createTarget", params, &created); err != nil {
 		return nil, err
 	}
 	var att struct {
@@ -698,6 +719,10 @@ func (b *Browser) OpenWindow(ctx context.Context, u string) error {
 func (b *Browser) WindowOpen(ctx context.Context) bool {
 	b.mu.Lock()
 	c, headed := b.conn, b.headed
+	ours := map[string]bool{} // read tabs a sync opened meanwhile are not the sign-in window
+	for _, t := range b.tabs {
+		ours[t.target] = true
+	}
 	b.mu.Unlock()
 	if c == nil || !headed {
 		return false
@@ -709,14 +734,15 @@ func (b *Browser) WindowOpen(ctx context.Context) bool {
 	}
 	var targets struct {
 		Infos []struct {
-			Type string `json:"type"`
+			TargetID string `json:"targetId"`
+			Type     string `json:"type"`
 		} `json:"targetInfos"`
 	}
 	if err := c.Call(ctx, "", "Target.getTargets", nil, &targets); err != nil {
 		return false
 	}
 	for _, t := range targets.Infos {
-		if t.Type == "page" {
+		if t.Type == "page" && !ours[t.TargetID] {
 			return true
 		}
 	}

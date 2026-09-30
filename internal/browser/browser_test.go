@@ -25,6 +25,7 @@ type fakeChrome struct {
 	// failAttach makes Target.attachToTarget fail; closed counts Target.closeTarget.
 	failAttach atomic.Bool
 	closed     atomic.Int32
+	pages      []string // Target.getTargets: page target ids
 }
 
 func (f *fakeChrome) start(_ string, args []string) (*process, error) {
@@ -107,6 +108,14 @@ func (f *fakeChrome) serve(r io.Reader, w *io.PipeWriter, exited chan struct{}) 
 			fetch := f.fetch
 			f.mu.Unlock()
 			result = map[string]any{"result": map[string]any{"value": fetch(a.URL)}}
+		case "Target.getTargets":
+			f.mu.Lock()
+			infos := []map[string]string{}
+			for _, id := range f.pages {
+				infos = append(infos, map[string]string{"targetId": id, "type": "page", "url": "https://www.example.com/"})
+			}
+			f.mu.Unlock()
+			result = map[string]any{"targetInfos": infos}
 		case "Storage.getCookies":
 			f.mu.Lock()
 			result = map[string]any{"cookies": f.cookies}
@@ -312,6 +321,81 @@ func TestDroppedTabsAreClosed(t *testing.T) {
 	}
 	if n := f.closed.Load(); n != 3 {
 		t.Fatalf("after a failed attach: closeTarget = %d, want 3 (the half-made target)", n)
+	}
+}
+
+// TestLaunchWaitsForOutsideStop: a sign-in's Stop (outside b.op) must finish
+// before a sync's launch on the same profile, else Chromium hands the launch
+// to the exiting instance ("pipe: EOF; port: … exited before DevTools came up").
+func TestLaunchWaitsForOutsideStop(t *testing.T) {
+	f := &fakeChrome{title: "x", fetch: func(u string) Response { return Response{Status: 200, URL: u} }}
+	var alive, overlap atomic.Int32
+	b := New(Options{Dir: t.TempDir(), Origins: []string{"https://www.example.com"},
+		Find: func() (Exe, error) { return Exe{Path: "chrome.exe"}, nil },
+		Start: func(exe string, args []string) (*process, error) {
+			if alive.Load() > 0 {
+				overlap.Add(1)
+			}
+			p, err := f.start(exe, args)
+			if err != nil {
+				return nil, err
+			}
+			alive.Add(1)
+			exited, slow := p.exited, make(chan struct{})
+			go func() { // the real browser takes a while to exit after Browser.close
+				<-exited
+				time.Sleep(150 * time.Millisecond)
+				alive.Add(-1)
+				close(slow)
+			}()
+			p.exited = slow
+			return p, nil
+		}})
+	t.Cleanup(b.Close)
+	ctx := context.Background()
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/a"}); err != nil {
+		t.Fatal(err)
+	}
+	go b.Stop()
+	for b.Running() {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/b"}); err != nil {
+		t.Fatalf("fetch after a stop: %v", err)
+	}
+	if n := overlap.Load(); n != 0 {
+		t.Fatalf("%d launch(es) while the previous browser still ran on the profile", n)
+	}
+}
+
+// TestWindowOpenIgnoresReadTabs: a sync's read tab in the sign-in browser
+// does not keep the sign-in "open" once the user closed the sign-in tab.
+func TestWindowOpenIgnoresReadTabs(t *testing.T) {
+	f, b := newFake(t)
+	ctx := context.Background()
+	f.mu.Lock()
+	f.pages = []string{"LOGIN"}
+	f.mu.Unlock()
+	if err := b.OpenWindow(ctx, "https://www.example.com/login"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/a"}); err != nil { // reuses the headed browser (tab T1)
+		t.Fatal(err)
+	}
+	if f.starts.Load() != 1 {
+		t.Fatalf("starts = %d: the read did not reuse the sign-in browser", f.starts.Load())
+	}
+	f.mu.Lock()
+	f.pages = []string{"LOGIN", "T1"}
+	f.mu.Unlock()
+	if !b.WindowOpen(ctx) {
+		t.Fatal("sign-in tab open: WindowOpen = false")
+	}
+	f.mu.Lock()
+	f.pages = []string{"T1"}
+	f.mu.Unlock()
+	if b.WindowOpen(ctx) {
+		t.Fatal("only the read tab left: WindowOpen = true")
 	}
 }
 
