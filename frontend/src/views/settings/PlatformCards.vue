@@ -3,14 +3,13 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import ToggleSwitch from 'primevue/toggleswitch'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
 import { encode } from 'uqr'
 import PlatformIcon from '../../components/PlatformIcon.vue'
-import { api } from '../../api/client'
+import { api, type Result } from '../../api/client'
 import type { LoginStatus, ModPlatform, NativePlatform, PlatformStatus, SteamStatus } from '../../api/types'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
@@ -19,9 +18,12 @@ import { absTime, relTime } from '../../lib/format'
 // Settings › Платформы: one card per mod platform. «Подключить» is the whole
 // setup: Steam shows a QR code from Steam's own sign-in service (scan it in
 // the Steam app); Nexus / CurseForge / Factorio switch on and sign in in a
-// window of the installed browser. Accounts are detected (Steam: the SteamID
+// window of the installed browser. «Отключить» switches off and forgets the
+// session and the account (manual author too); «Выйти» drops only the session
+// where public reads go on without it. Accounts are detected (Steam: the SteamID
 // comes from the QR session); the manual overrides (author, Steam id/key/cookies)
 // sit under the collapsed «Дополнительно». A tray card «войдите снова» opens /connections?login=<id>.
+// Server errors arrive as codes (internal/api Code*) with their own text; the raw reason is a tooltip.
 type ModId = 'nexus' | 'curseforge' | 'factorio'
 type CardId = ModId | 'steam'
 const app = useAppStore()
@@ -30,7 +32,16 @@ const confirm = useConfirm()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+/** The text of a server error code; unknown / missing code → a generic failure (raw reason in the tooltip). */
+const codeText = (code?: string) => t(code && te('platforms.errors.' + code) ? 'platforms.errors.' + code : 'platforms.errors.failed')
+/** Text of a failed call: its {code}, «not running» as is, else generic. */
+function callError(r: Extract<Result<unknown>, { ok: false }>) {
+  const code = (r.body as { code?: unknown } | undefined)?.code
+  if (typeof code === 'string' && code) return codeText(code)
+  return r.status === 0 ? r.error : codeText()
+}
 
 const cards: { id: CardId; text: string }[] = [
   { id: 'nexus', text: 'platforms.nexusText' },
@@ -65,6 +76,9 @@ function statusText(id: string) {
 // read-only Steam shows the public profile name instead.
 function statusHint(id: string) {
   const s = status(id)
+  // Switched off with a manual author kept: «Подключить» goes on with it.
+  const author = id !== 'steam' ? cfg(id as ModId)?.author : ''
+  if (s?.state === 'disabled' && author) return t('platforms.savedAuthor', { author })
   if (!s || s.state !== 'connected') return ''
   if (readOnly(s)) return s.accountName ? t('platforms.profile', { name: s.accountName }) : ''
   if (!s.session) return ''
@@ -79,20 +93,47 @@ const timers: Record<string, number> = {}
 /** Set on unmount: late responses of connect / poll must not start timers again. */
 let disposed = false
 const active = (id: string) => ['qr', 'scanned', 'window'].includes(login[id]?.state ?? '')
-const connectLabel = (id: string) => t(status(id)?.state === 'relogin' ? 'platforms.reconnect' : 'platforms.connect')
+const connectLabel = (id: string) => {
+  const s = status(id)
+  if (s?.state === 'relogin') return t('platforms.reconnect')
+  return t(readOnly(s) ? 'platforms.signInToReply' : 'platforms.connect')
+}
 const showConnect = (id: CardId) => {
   const s = status(id)
   if (!s || active(id)) return false
   if (id === 'steam') return s.state !== 'connected' || !steam.value?.signedIn || steam.value.session === 'expired'
   return s.state !== 'connected' || s.session === 'none'
 }
-// «Выйти» while a session is stored; «Отключить» while an account is set up.
+// «Выйти» while a session is stored and public reads go on without it (a
+// known account: Steam's SteamID, a mod platform's author); «Отключить» while
+// anything is set up, a switched-off platform's kept author included.
 const canLogout = (id: CardId) =>
-  id === 'steam' ? !!steam.value?.hasCookies : !!cfg(id)?.enabled && (status(id)?.session ?? 'none') !== 'none'
-const canDisconnect = (id: CardId) => (id === 'steam' ? !!steam.value?.configured : !!cfg(id)?.enabled)
+  id === 'steam'
+    ? !!steam.value?.hasCookies && !!steam.value.steamId
+    : !!cfg(id)?.enabled && !!cfg(id)?.author && (status(id)?.session ?? 'none') !== 'none'
+const canDisconnect = (id: CardId) =>
+  id === 'steam' ? !!steam.value?.configured || !!steam.value?.hasCookies : !!cfg(id)?.enabled || !!cfg(id)?.author
+
+/**
+ * The platform's own error line (the raw reason is its tooltip). Hidden while
+ * a sign-in runs, while a local error of the card shows, and where a dedicated
+ * message says it already (Steam «сессия истекла»).
+ */
+function cardError(id: CardId) {
+  const s = status(id)
+  if (!s?.error || s.state === 'connected' || active(id) || errors[id]) return ''
+  if (id === 'steam' && steam.value?.session === 'expired') return ''
+  return codeText(s.errorCode)
+}
+/** Raw reason of errors[id] (tooltip). */
+const errorDetail = reactive<Record<string, string>>({})
+function setError(id: string, text: string, detail = '') {
+  errors[id] = text
+  errorDetail[id] = detail
+}
 
 async function connect(id: CardId) {
-  errors[id] = ''
+  setError(id, '')
   starting[id] = true
   const r = await api.login(id)
   starting[id] = false
@@ -101,10 +142,15 @@ async function connect(id: CardId) {
     return
   }
   if (!r.ok) {
-    errors[id] = `${t('platforms.loginFailed')}: ${r.error}`
+    setError(id, `${t('platforms.loginFailed')}: ${callError(r)}`, r.error)
     return
   }
   if (id !== 'steam') void Promise.all([settings.load(), app.loadPlatforms()]) // switched on server-side
+  if (r.data.state === 'failed') {
+    // The start itself failed (browser missing, Steam unreachable).
+    setError(id, `${t('platforms.loginFailed')}: ${codeText(r.data.errorCode)}`, r.data.error)
+    return
+  }
   onLogin(id, r.data)
 }
 
@@ -122,11 +168,14 @@ function onLogin(id: CardId, s: LoginStatus) {
       timers[id] = window.setTimeout(() => void poll(id), id === 'steam' ? 2000 : 3000)
       return
     case 'failed':
-      errors[id] = `${t('platforms.loginFailed')}${s.error ? ': ' + s.error : ''}`
+      setError(id, `${t('platforms.loginEnded')}: ${codeText(s.errorCode)}`, s.error)
       login[id] = null
       return
     case 'idle':
-      if (id !== 'steam') errors[id] = t('platforms.windowClosed')
+      // Ended without a session: say why (window closed, timed out, another window open); a cancel is silent.
+      if (id !== 'steam' && s.errorCode !== 'cancelled') {
+        setError(id, !s.errorCode || s.errorCode === 'window_closed' ? t('platforms.windowClosed') : codeText(s.errorCode), s.error)
+      }
       login[id] = null
   }
 }
@@ -141,7 +190,13 @@ async function poll(id: CardId) {
 
 async function connected(id: CardId, s: LoginStatus) {
   login[id] = null
-  toast.add({ severity: 'success', summary: t('platforms.connected', { platform: platformName(id), account: s.account ?? '' }), life: 3500 })
+  const platform = platformName(id)
+  const account = id === 'steam' ? '' : s.account // Steam's is a raw SteamID64: the card shows the profile name
+  toast.add({
+    severity: 'success',
+    summary: account ? t('platforms.connected', { platform, account }) : t('platforms.connectedNoAccount', { platform }),
+    life: 3500,
+  })
   await Promise.all([settings.load(), app.loadPlatforms(), id === 'steam' ? loadSteam() : Promise.resolve()])
   window.setTimeout(() => void app.loadPlatforms(), 4000) // the server-side check lands a moment later
 }
@@ -168,7 +223,7 @@ const qr = computed(() => {
   return { d, size }
 })
 
-// --- mod platforms: switch, author (drafts saved on demand)
+// --- mod platforms: author (drafts saved on demand)
 const drafts = reactive<Record<ModId, { author: string }>>({
   nexus: { author: '' },
   curseforge: { author: '' },
@@ -187,21 +242,6 @@ watch(() => settings.doc?.revision, syncDrafts, { immediate: true })
 const busy = reactive<Record<string, boolean>>({})
 const errors = reactive<Record<string, string>>({})
 
-async function toggle(id: ModId, on: boolean) {
-  busy[id] = true
-  errors[id] = ''
-  const err = await settings.patch({ providers: { [id]: { enabled: on } } })
-  busy[id] = false
-  if (err) {
-    errors[id] = err
-    return
-  }
-  toast.add({ severity: 'success', summary: t(on ? 'platforms.enabled' : 'platforms.disabled'), life: 2500 })
-  await app.loadPlatforms()
-  if (on) void check(id)
-  else cancelLogin(id)
-}
-
 const dirty = (id: ModId) => {
   const c = cfg(id)
   if (!c) return false
@@ -211,11 +251,11 @@ const dirty = (id: ModId) => {
 async function saveMod(id: ModId) {
   const d = drafts[id]
   busy[id] = true
-  errors[id] = ''
+  setError(id, '')
   const err = await settings.patch({ providers: { [id]: { author: d.author.trim() } } })
   busy[id] = false
   if (err) {
-    errors[id] = err
+    setError(id, err)
     return
   }
   toast.add({ severity: 'success', summary: t('platforms.saved'), life: 2000 })
@@ -226,11 +266,11 @@ async function saveMod(id: ModId) {
 const checks = reactive<Record<string, number>>({})
 async function check(id: string) {
   checks[id] = (checks[id] ?? 0) + 1
-  errors[id] = ''
+  setError(id, '')
   const r = await api.checkPlatform(id)
   checks[id]--
   if (r.ok) app.setPlatform(r.data)
-  else errors[id] = r.error
+  else setError(id, callError(r), r.error)
 }
 
 // --- Steam
@@ -266,7 +306,7 @@ const steamDirty = computed(
 )
 async function saveSteam(extra: Record<string, string> = {}) {
   busy.steam = true
-  errors.steam = ''
+  setError('steam', '')
   const u: Record<string, string> = { ...extra }
   if (steamIdChanged()) u.steamId = steamDraft.steamId.trim()
   if (steamDraft.apiKey) u.apiKey = steamDraft.apiKey.trim()
@@ -275,7 +315,7 @@ async function saveSteam(extra: Record<string, string> = {}) {
   const r = await api.saveSteam(u)
   busy.steam = false
   if (!r.ok) {
-    errors.steam = r.error
+    setError('steam', callError(r), r.error)
     return false
   }
   steam.value = r.data
@@ -286,12 +326,13 @@ async function saveSteam(extra: Record<string, string> = {}) {
   return true
 }
 // «Выйти» drops the session (public reads go on); «Отключить» (forget) also
-// the detected account, and the platform stops syncing («Не подключено»).
+// the detected and manual account, and the platform stops syncing («Не подключено»).
 function logout(id: CardId, forget: boolean) {
   const platform = platformName(id)
+  const text = !forget ? 'platforms.logoutText' : id === 'steam' ? 'platforms.disconnectTextSteam' : 'platforms.disconnectText'
   confirm.require({
     header: t(forget ? 'platforms.disconnectTitle' : 'platforms.logoutTitle', { platform }),
-    message: t(forget ? 'platforms.disconnectText' : 'platforms.logoutText'),
+    message: t(text),
     icon: 'pi pi-exclamation-triangle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', outlined: true },
     acceptProps: { label: t(forget ? 'platforms.disconnect' : 'platforms.logout'), severity: 'danger' },
@@ -301,11 +342,11 @@ function logout(id: CardId, forget: boolean) {
 async function doLogout(id: CardId, forget: boolean, platform: string) {
   if (active(id)) cancelLogin(id)
   busy[id] = true
-  errors[id] = ''
+  setError(id, '')
   const r = await api.logoutPlatform(id, forget)
   busy[id] = false
   if (!r.ok) {
-    errors[id] = r.error
+    setError(id, callError(r), r.error)
     return
   }
   app.setPlatform(r.data)
@@ -344,15 +385,6 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           {{ statusHint(c.id) }}
         </div>
       </div>
-      <ToggleSwitch
-        v-if="c.id !== 'steam'"
-        v-tooltip.top="t('platforms.enable')"
-        class="switch"
-        :model-value="!!cfg(c.id)?.enabled"
-        :disabled="!settings.doc || busy[c.id]"
-        :aria-label="t('platforms.enable')"
-        @update:model-value="(v: boolean) => toggle(c.id as ModId, v)"
-      />
     </header>
 
     <p class="card-text">
@@ -371,10 +403,11 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
     </div>
 
     <p
-      v-if="status(c.id)?.error && status(c.id)?.state !== 'connected' && !active(c.id)"
+      v-if="cardError(c.id)"
+      v-tooltip.top="status(c.id)?.error"
       class="err"
     >
-      <i class="pi pi-exclamation-triangle" /> {{ status(c.id)?.error }}
+      <i class="pi pi-exclamation-triangle" /> {{ cardError(c.id) }}
     </p>
 
     <!-- Sign-in in progress: Steam QR code / the platform's sign-in window -->
@@ -466,8 +499,9 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
 
     <!-- Steam: detected account (read-only); manual SteamID, API key, cookies (write-only) under «Дополнительно» -->
     <template v-if="c.id === 'steam'">
+      <!-- Connected: the status line names the account already (once, not three times). -->
       <small
-        v-if="steamAccount"
+        v-if="steamAccount && status('steam')?.state !== 'connected'"
         class="muted"
       ><i class="pi pi-user" /> {{ t('platforms.steamAccount', { name: steamAccount }) }}</small>
       <Message
@@ -541,6 +575,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
 
     <p
       v-if="errors[c.id]"
+      v-tooltip.top="errorDetail[c.id] || undefined"
       class="err"
     >
       <i class="pi pi-exclamation-triangle" /> {{ errors[c.id] }}
@@ -604,9 +639,9 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       <Button
         v-if="canDisconnect(c.id)"
         :label="t('platforms.disconnect')"
-        icon="pi pi-times"
+        icon="pi pi-power-off"
         severity="secondary"
-        text
+        outlined
         :disabled="busy[c.id]"
         @click="logout(c.id, true)"
       />
@@ -694,10 +729,6 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
 
 .status.error .dot {
   background: var(--iw-danger);
-}
-
-.switch {
-  align-self: flex-start;
 }
 
 .card-text {

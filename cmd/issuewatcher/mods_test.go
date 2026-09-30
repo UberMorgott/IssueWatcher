@@ -57,7 +57,7 @@ func TestModPlatformsApplyLive(t *testing.T) {
 		t.Fatalf("nexus on: %+v", p)
 	}
 	// No author, no session → signed out.
-	if p, err := m.Check(t.Context(), "nexus"); err != nil || p.State != api.PlatformSignedOut || p.Error == "" {
+	if p, err := m.Check(t.Context(), "nexus"); err != nil || p.State != api.PlatformSignedOut || p.Error == "" || p.ErrorCode != api.CodeNotSignedIn {
 		t.Fatalf("check without author: %+v %v", p, err)
 	}
 	withAuthor, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"author":"UberMorgott"}}}`), nil)
@@ -163,6 +163,32 @@ func TestLogoutCurseForge(t *testing.T) {
 	}
 }
 
+// A platform switched off by the retired «Следить за площадкой» toggle keeps
+// its manual author: the card reads «Не подключено», «Подключить» switches it
+// on with that author, and only «Отключить» forgets it.
+func TestDisconnectedKeepsAuthor(t *testing.T) {
+	m, cfgs, _, dir := newTestPlatforms(t)
+	withNative(t, m, dir)
+	off, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"curseforge":{"enabled":false,"author":"Someone"}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.apply(off)
+	if p := platformState(t, m, curseforge.Platform); p.State != api.PlatformDisabled || p.Enabled {
+		t.Fatalf("toggled off: %+v", p)
+	}
+	signIn(t, m, curseforge.Platform)
+	if c := cfgs.Get().Providers.CurseForge; !c.Enabled || c.Author != "Someone" {
+		t.Fatalf("«Подключить» lost the author: %+v", c)
+	}
+	if _, err := m.Logout(t.Context(), curseforge.Platform, true); err != nil {
+		t.Fatal(err)
+	}
+	if c := cfgs.Get().Providers.CurseForge; c.Enabled || c.Author != "" {
+		t.Fatalf("«Отключить» kept %+v", c)
+	}
+}
+
 // An expired session shows «войдите снова» once, and again only after the
 // platform was connected in between.
 func TestReloginCardOnce(t *testing.T) {
@@ -175,7 +201,7 @@ func TestReloginCardOnce(t *testing.T) {
 	t.Cleanup(func() { refuseSessions.Store(false) })
 	refuseSessions.Store(true)
 	for range 2 {
-		if p, err := m.Check(t.Context(), curseforge.Platform); err != nil || p.State != api.PlatformRelogin {
+		if p, err := m.Check(t.Context(), curseforge.Platform); err != nil || p.State != api.PlatformRelogin || p.ErrorCode != api.CodeRelogin {
 			t.Fatalf("check %+v %v", p, err)
 		}
 	}

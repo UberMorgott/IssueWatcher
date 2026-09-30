@@ -129,7 +129,16 @@ func New(spec Spec, jar *websession.Jar, br Browser) *Manager {
 // Jar is the stored session.
 func (m *Manager) Jar() *websession.Jar { return m.jar }
 
-const detailCancelled = "вход отменён"
+// Why a sign-in ended without a session (provider.Login.Detail); the
+// dashboard maps each to its own text (api.LoginDetailCode).
+const (
+	DetailCancelled    = "вход отменён"
+	DetailTimeout      = "время входа истекло"
+	DetailWindowClosed = "окно входа закрыто"
+	DetailBusy         = "окно входа уже открыто для другой площадки" // + ": <platform>"
+)
+
+const detailCancelled = DetailCancelled
 
 // Login implements the three-step «Подключить»; a window sign-in returns
 // at once with InProgress (Status reports its end).
@@ -194,7 +203,7 @@ func (m *Manager) login(ctx context.Context, epoch uint64) (provider.Login, erro
 	}
 	// (3) the visible sign-in window, unless another platform's is open.
 	if owner, ok := m.lease.take(m); !ok {
-		return provider.Login{Detail: fmt.Sprintf("Окно входа уже открыто для %s: завершите или отмените тот вход", owner.spec.Platform)}, nil
+		return provider.Login{Detail: DetailBusy + ": " + owner.spec.Platform}, nil
 	}
 	m.br.Stop() // one profile: headless ends before the window opens
 	if err := m.br.OpenWindow(ctx, m.spec.LoginURL); err != nil {
@@ -285,7 +294,7 @@ func (m *Manager) wait(ctx context.Context, cancel context.CancelFunc, done chan
 		select {
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				detail = "время входа истекло"
+				detail = DetailTimeout
 			} else {
 				detail = detailCancelled
 			}
@@ -293,7 +302,7 @@ func (m *Manager) wait(ctx context.Context, cancel context.CancelFunc, done chan
 		case <-t.C:
 		}
 		if !m.br.WindowOpen(ctx) {
-			detail = "окно входа закрыто"
+			detail = DetailWindowClosed
 			return
 		}
 		pctx, pcancel := context.WithTimeout(ctx, 30*time.Second)

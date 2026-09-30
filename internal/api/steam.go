@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
 )
@@ -33,6 +34,20 @@ func (s *Server) handleSteam(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// steamSettingsCode names the rejected field of a Steam settings save
+// (bad_steam_id | bad_api_key | bad_cookies | bad_settings) for the dashboard's text.
+func steamSettingsCode(msg string) string {
+	switch {
+	case strings.Contains(msg, "steamId"):
+		return "bad_steam_id"
+	case strings.Contains(msg, "apiKey"):
+		return "bad_api_key"
+	case strings.Contains(msg, "cookie"):
+		return "bad_cookies"
+	}
+	return "bad_settings"
+}
+
 func (s *Server) handleSteamSave(w http.ResponseWriter, r *http.Request) {
 	var u steam.Update
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&u); err != nil {
@@ -42,7 +57,7 @@ func (s *Server) handleSteamSave(w http.ResponseWriter, r *http.Request) {
 	st, err := s.opts.Steam.Save(u)
 	switch {
 	case errors.Is(err, steam.ErrBadSettings):
-		errJSON(w, http.StatusBadRequest, err.Error())
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": steamSettingsCode(err.Error())})
 		return
 	case err != nil:
 		s.internalError(w, "steam settings", err)

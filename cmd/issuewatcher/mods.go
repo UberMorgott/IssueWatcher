@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -265,12 +266,12 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 		case !ps.Enabled:
 			ps.State = api.PlatformDisabled
 		case steamExpired:
-			ps.State, ps.Error = api.PlatformRelogin, steam.ErrSessionExpired.Error()
+			ps.State, ps.Error, ps.ErrorCode = api.PlatformRelogin, steam.ErrSessionExpired.Error(), api.CodeRelogin
 		case synced && src.Relogin:
-			ps.State, ps.Error = api.PlatformRelogin, src.LastError
+			ps.State, ps.Error, ps.ErrorCode = api.PlatformRelogin, src.LastError, api.CodeRelogin
 		case m.checks[id].State != "":
 			c := m.checks[id]
-			ps.State, ps.Account, ps.Error, ps.CheckedAt = c.State, c.Account, c.Error, c.CheckedAt
+			ps.State, ps.Account, ps.Error, ps.ErrorCode, ps.CheckedAt = c.State, c.Account, c.Error, c.ErrorCode, c.CheckedAt
 			if id != steam.Platform {
 				ps.Session, ps.Browser = c.Session, c.Browser
 			}
@@ -280,7 +281,7 @@ func (m *modPlatforms) Platforms(ctx context.Context) []api.PlatformStatus {
 		case synced && src.Account != "" && src.LastError == "":
 			ps.State, ps.Account = api.PlatformConnected, src.Account
 		case synced && src.LastError != "":
-			ps.State, ps.Error = api.PlatformError, src.LastError
+			ps.State, ps.Error, ps.ErrorCode = api.PlatformError, src.LastError, cmpStr(api.ReasonCode(src.LastError), api.CodeSyncFailed)
 		default:
 			ps.State = api.PlatformUnknown
 		}
@@ -334,7 +335,7 @@ func (m *modPlatforms) Check(ctx context.Context, id string) (api.PlatformStatus
 		res.Account, err = p.Account(ctx)
 		res.Session, res.Browser = sessionOf(ctx, p)
 	}
-	res.State, res.Error = checkState(err)
+	res.State, res.Error, res.ErrorCode = checkState(err)
 	if err == nil && id == factorio.Platform && res.Account != "" {
 		// The portal user a one-click sign-in found is kept apart from the
 		// session: «Выйти» drops the session, public reads keep the user.
@@ -491,6 +492,9 @@ func (m *modPlatforms) CancelLogin(id string) error {
 
 func qrStatus(s steam.QRStatus) api.LoginStatus {
 	out := api.LoginStatus{Platform: steam.Platform, ChallengeURL: s.ChallengeURL, Error: s.Error}
+	if s.Error != "" {
+		out.ErrorCode = cmpStr(api.ReasonCode(s.Error), api.CodeFailed)
+	}
 	switch s.State {
 	case steam.QRPending:
 		out.State = api.LoginQR
@@ -517,7 +521,7 @@ func (m *modPlatforms) loginResult(ctx context.Context, id string, l provider.Lo
 	case l.InProgress || l.Window:
 		out.State, out.Via, out.Browser = api.LoginWindow, l.Via, l.ViaBrowser
 	default:
-		out.Error = l.Detail
+		out.Error, out.ErrorCode = l.Detail, api.LoginDetailCode(l.Detail)
 	}
 	source, browser := sourceName(l.Source), l.Browser
 	if out.State == api.LoginWindow {
@@ -721,7 +725,7 @@ func (m *modPlatforms) forget(id string) error {
 			return err
 		}
 	}
-	return errors.New("settings keep changing; try again")
+	return api.ErrBusy
 }
 
 func (m *modPlatforms) loginer(id string) (provider.Loginer, error) {
@@ -729,7 +733,7 @@ func (m *modPlatforms) loginer(id string) (provider.Loginer, error) {
 	defer m.mu.Unlock()
 	mp := m.live[id]
 	if mp == nil {
-		return nil, errors.New(id + " is switched off")
+		return nil, fmt.Errorf("%s: %w", id, api.ErrSwitchedOff)
 	}
 	l, ok := mp.prov.(provider.Loginer)
 	if !ok {
@@ -754,7 +758,7 @@ func (m *modPlatforms) enable(id string) error {
 			return err
 		}
 	}
-	return errors.New("settings keep changing; try again")
+	return api.ErrBusy
 }
 
 // connected runs after a sign-in: Nexus remembers the member as the account
@@ -828,16 +832,16 @@ func (m *modPlatforms) setAuthor(id, author string) {
 	}
 }
 
-// checkState maps an Account error to a platform state and its reason.
-func checkState(err error) (string, string) {
+// checkState maps an Account error to a platform state, its reason and the reason's code.
+func checkState(err error) (string, string, string) {
 	switch {
 	case err == nil:
-		return api.PlatformConnected, ""
+		return api.PlatformConnected, "", ""
 	case errors.Is(err, curseforge.ErrRelogin), errors.Is(err, steam.ErrSessionExpired), errors.Is(err, provider.ErrRelogin):
-		return api.PlatformRelogin, err.Error()
+		return api.PlatformRelogin, err.Error(), api.CodeRelogin
 	case errors.Is(err, provider.ErrNotSignedIn):
-		return api.PlatformSignedOut, err.Error()
+		return api.PlatformSignedOut, err.Error(), api.CodeNotSignedIn
 	default:
-		return api.PlatformError, err.Error()
+		return api.PlatformError, err.Error(), api.ErrorCode(err)
 	}
 }

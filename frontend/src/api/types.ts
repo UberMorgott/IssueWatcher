@@ -104,7 +104,12 @@ export interface Issue extends FixTarget {
   title: string
   url: string
   author: string
+  /** Written by the synced account (the owner): shown as «вы». */
+  mine: boolean
+  /** Comment threads: open = waiting for the owner's answer, closed = answered or resolved. */
   state: 'open' | 'closed' | string
+  /** Comment threads: the local «Решено» flag (never sent to the platform). */
+  resolved: boolean
   rawStatus: string
   labels: string[]
   comments: number
@@ -130,8 +135,16 @@ export interface IssueChunk {
   more: boolean
   /** Rows matching the filter (first chunk and `after` only). */
   total?: number
-  /** First chunk: open / closed / unread rows for every filter but state and unread (header counters). */
-  counts?: { open: number; closed: number; unread: number }
+  /** First chunk: open / closed / unread / resolved rows for every filter but state and unread (header counters). */
+  counts?: IssueCounts
+}
+
+export interface IssueCounts {
+  open: number
+  closed: number
+  unread: number
+  /** Comment threads marked «Решено» (part of closed). */
+  resolved: number
 }
 
 export interface CommentChunk {
@@ -149,7 +162,8 @@ export interface RepoChunk {
 
 /** data.changed live event. */
 export interface DataChange {
-  reason: 'sync' | 'read' | 'reply' | 'job' | 'folder' | 'labels'
+  reason: 'sync' | 'read' | 'unread' | 'resolve' | 'reply' | 'job' | 'folder' | 'labels'
+  /** 0 / absent: several or unknown items. */
   itemId?: number
   repo?: string
 }
@@ -157,6 +171,8 @@ export interface DataChange {
 export interface Comment {
   id: string
   author: string
+  /** Written by the synced account (the owner). */
+  mine: boolean
   body: string
   url: string
   createdAt: string
@@ -167,15 +183,22 @@ export interface IssueDetail extends Issue {
   body: string
 }
 
+/** Weekly bucket: issues and bug reports opened / closed; new comment threads apart. */
 export interface Week {
   start: string
   opened: number
   closed: number
+  comments: number
 }
 
+/** open / closed: issues and bug reports only; comment threads counted apart. */
 export interface Stats {
   open: number
   closed: number
+  /** Comment threads waiting for an answer. */
+  openComments: number
+  /** All comment threads (own-only threads excluded). */
+  comments: number
   weekly: Week[]
   projects?: Repo[]
 }
@@ -233,7 +256,8 @@ export interface IssueQuery {
   /** Several kinds (Issues page: issue + bug); ignored when kind is set. */
   kinds?: ItemKind[]
   repo?: number
-  state?: 'open' | 'closed' | 'all'
+  /** resolved: comment threads marked «Решено». */
+  state?: 'open' | 'closed' | 'resolved' | 'all'
   label?: string
   q?: string
   unread?: boolean
@@ -246,6 +270,8 @@ export interface IssueQuery {
 /** Payload of item.new / comment.new / item.closed live events. */
 export interface LiveItemEvent {
   id: number
+  /** Item kind (issue | comment | bug); absent on old servers. */
+  kind?: ItemKind
   repo: string
   number: number
   title: string
@@ -488,7 +514,7 @@ export interface VerifyResult {
   timedOut?: boolean
 }
 
-export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'git' | 'interrupted'
+export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'git' | 'interrupted' | 'mod_item'
 
 export interface LocalCommit {
   sha: string
@@ -560,7 +586,7 @@ export interface TriagePick {
   reason: string
   itemId?: number
   title?: string
-  /** queued (jobId = the new fix job) | exists (jobId = the unfinished one) | '' (below top N) | an error. */
+  /** queued (jobId = the new fix job) | exists (jobId = the unfinished one) | closed | no_folder | failed | '' (below top N); older jobs: a text. */
   queue?: string
   jobId?: number
 }
@@ -807,6 +833,8 @@ export interface PlatformStatus {
   /** session 'browser': which browser. */
   browser?: string
   error?: string
+  /** Server error code (internal/api Code*): the card shows its own text for it, error goes to a tooltip. */
+  errorCode?: string
   projects: number
   lastSync?: string
   checkedAt?: string
@@ -835,6 +863,8 @@ export interface LoginStatus {
   challengeUrl?: string // Steam: the QR code's content
   account?: string
   error?: string
+  /** internal/api Code* of error. */
+  errorCode?: string
   /** state window: the sign-in window of the installed browser. */
   via?: 'window'
   /** state window: which browser. */

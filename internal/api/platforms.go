@@ -3,9 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"strings"
 
+	"github.com/UberMorgott/issuewatcher/internal/browser"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/signin"
+	"github.com/UberMorgott/issuewatcher/internal/websession"
 )
 
 // Platform states (Settings › Платформы).
@@ -32,6 +37,118 @@ const (
 // ErrUnknownPlatform: Check of a platform that has no account check.
 var ErrUnknownPlatform = errors.New("api: unknown platform")
 
+// ErrBusy: a settings change kept conflicting with concurrent writes.
+var ErrBusy = errors.New("api: settings keep changing; try again")
+
+// ErrSwitchedOff: a sign-in step of a platform that is not connected.
+var ErrSwitchedOff = errors.New("api: platform is switched off")
+
+// Error codes of a platform card or sign-in (PlatformStatus.ErrorCode,
+// LoginStatus.ErrorCode, {code} of a failed logout). The dashboard shows its
+// own text per code; Error keeps the raw reason for the log and a tooltip.
+const (
+	CodeRelogin      = "relogin"       // session expired or refused: sign in again
+	CodeNotSignedIn  = "not_signed_in" // no session / account yet
+	CodeNoBrowser    = "no_browser"    // no Chromium-based browser installed
+	CodeBrowser      = "browser_failed"
+	CodeChallenge    = "challenge" // the site asks for a browser check (Cloudflare)
+	CodeNetwork      = "network"
+	CodeBusy         = "busy"        // settings kept changing meanwhile
+	CodeWindowBusy   = "window_busy" // another platform's sign-in window is open
+	CodeSwitchedOff  = "switched_off"
+	CodeCancelled    = "cancelled"
+	CodeTimeout      = "timeout"       // the sign-in window timed out
+	CodeWindowClosed = "window_closed" // the sign-in window closed before a sign-in
+	CodeSyncFailed   = "sync_failed"   // the last sync failed for another reason
+	CodeFailed       = "failed"
+)
+
+// ErrorCode classifies a platform error for the dashboard ("" for nil).
+func ErrorCode(err error) string {
+	var netErr net.Error
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, provider.ErrRelogin):
+		return CodeRelogin
+	case errors.Is(err, provider.ErrNotSignedIn):
+		return CodeNotSignedIn
+	case errors.Is(err, browser.ErrNoBrowser):
+		return CodeNoBrowser
+	case errors.Is(err, browser.ErrChallenge), errors.Is(err, websession.ErrChallenge):
+		return CodeChallenge
+	case errors.Is(err, browser.ErrClosed), errors.Is(err, browser.ErrFrameTooLarge), errors.Is(err, browser.ErrOrigin):
+		return CodeBrowser
+	case errors.Is(err, ErrBusy):
+		return CodeBusy
+	case errors.Is(err, ErrSwitchedOff):
+		return CodeSwitchedOff
+	case errors.Is(err, context.Canceled):
+		return CodeCancelled
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr):
+		return CodeNetwork
+	}
+	if c := ReasonCode(err.Error()); c != "" {
+		return c
+	}
+	return CodeFailed
+}
+
+// ReasonCode classifies a stored error text (a sync source keeps only the
+// message): "" when nothing known matches.
+func ReasonCode(msg string) string {
+	has := func(errs ...error) bool {
+		for _, e := range errs {
+			if strings.Contains(msg, e.Error()) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case msg == "":
+		return ""
+	case has(provider.ErrRelogin):
+		return CodeRelogin
+	case has(provider.ErrNotSignedIn):
+		return CodeNotSignedIn
+	case has(browser.ErrNoBrowser):
+		return CodeNoBrowser
+	case has(browser.ErrChallenge, websession.ErrChallenge):
+		return CodeChallenge
+	case has(browser.ErrClosed, browser.ErrFrameTooLarge):
+		return CodeBrowser
+	}
+	for _, s := range []string{"context deadline exceeded", "dial tcp", "no such host", "connection refused",
+		"connection reset", "i/o timeout", "TLS handshake", "Client.Timeout"} {
+		if strings.Contains(msg, s) {
+			return CodeNetwork
+		}
+	}
+	return ""
+}
+
+// LoginDetailCode classifies why a sign-in ended without a session
+// (provider.Login.Detail of the built-in sign-in).
+func LoginDetailCode(detail string) string {
+	switch {
+	case detail == "":
+		return ""
+	case detail == signin.DetailCancelled:
+		return CodeCancelled
+	case detail == signin.DetailTimeout:
+		return CodeTimeout
+	case detail == signin.DetailWindowClosed:
+		return CodeWindowClosed
+	case strings.HasPrefix(detail, signin.DetailBusy):
+		return CodeWindowBusy
+	}
+	if c := ReasonCode(detail); c != "" {
+		return c
+	}
+	return CodeFailed
+}
+
 // PlatformStatus is one platform's card in Settings › Платформы.
 type PlatformStatus struct {
 	ID           string                `json:"id"`
@@ -43,6 +160,7 @@ type PlatformStatus struct {
 	Session      string                `json:"session,omitempty"`     // Session* below; "" = not known yet
 	Browser      string                `json:"browser,omitempty"`     // SessionBrowser: which browser
 	Error        string                `json:"error,omitempty"`
+	ErrorCode    string                `json:"errorCode,omitempty"` // Code* above: the dashboard's text for Error
 	Projects     int                   `json:"projects"`
 	LastSync     string                `json:"lastSync,omitempty"`
 	CheckedAt    string                `json:"checkedAt,omitempty"`
@@ -67,6 +185,7 @@ type LoginStatus struct {
 	ChallengeURL string `json:"challengeUrl,omitempty"`
 	Account      string `json:"account,omitempty"`
 	Error        string `json:"error,omitempty"`
+	ErrorCode    string `json:"errorCode,omitempty"` // Code* above
 	// Via (state window): "default-browser" = the login page opened in the
 	// user's default browser (Browser names it), "window" = the server's own.
 	Via     string `json:"via,omitempty"`
@@ -110,7 +229,7 @@ func (s *Server) handlePlatformLogout(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrUnknownPlatform):
 		errJSON(w, http.StatusNotFound, "unknown platform")
 	case err != nil:
-		errJSON(w, http.StatusBadGateway, err.Error())
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "code": ErrorCode(err)})
 	default:
 		writeJSON(w, http.StatusOK, st)
 	}
@@ -137,7 +256,7 @@ func (s *Server) handlePlatformLogin(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusNotFound, "unknown platform")
 	case err != nil:
 		// A failed start (server missing, Steam unreachable) is a state, not a 500.
-		writeJSON(w, http.StatusOK, LoginStatus{Platform: id, State: LoginFailed, Error: err.Error()})
+		writeJSON(w, http.StatusOK, LoginStatus{Platform: id, State: LoginFailed, Error: err.Error(), ErrorCode: ErrorCode(err)})
 	default:
 		writeJSON(w, http.StatusOK, st)
 	}

@@ -9,7 +9,8 @@ import PlatformCards from './settings/PlatformCards.vue'
 import { api } from '../api/client'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
-import { absTime, duration, relTime } from '../lib/format'
+import { absTime, relTime } from '../lib/format'
+import { useSettingsStore } from '../stores/settings'
 
 /** embedded: shown inside Settings → Connections (no page frame). */
 defineProps<{ embedded?: boolean }>()
@@ -18,6 +19,9 @@ const confirm = useConfirm()
 const toast = useToast()
 const { t } = useI18n()
 const busy = ref(false)
+const settings = useSettingsStore()
+/** Where the keys are: the full path once the settings document is loaded. */
+const secretsDir = computed(() => (settings.doc?.info.dataDir ? settings.doc.info.dataDir + '\\secrets' : 'data\\secrets'))
 
 const gh = computed(() => app.github)
 const openTotal = computed(() => app.repos.reduce((n, r) => n + r.open, 0))
@@ -85,7 +89,7 @@ function disconnect() {
       scope="global"
     >
       <template #path>
-        <span class="mono">data\secrets</span>
+        <span class="mono">{{ secretsDir }}</span>
       </template>
     </i18n-t>
 
@@ -135,9 +139,6 @@ function disconnect() {
                 >
                   <template #time>
                     <span v-tooltip.top="absTime(app.sync.lastSync)">{{ relTime(app.sync.lastSync) }}</span>
-                  </template>
-                  <template #interval>
-                    {{ duration(app.sync.interval) }}
                   </template>
                 </i18n-t>
                 <template v-else>
@@ -211,7 +212,7 @@ function disconnect() {
           <template v-if="gh?.connected">
             <Button
               :label="t('connections.disconnect')"
-              icon="pi pi-sign-out"
+              icon="pi pi-power-off"
               severity="secondary"
               outlined
               :loading="busy"
