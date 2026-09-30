@@ -142,6 +142,7 @@ function reload() {
   list.reset()
   newAbove.value = 0
   cursor.value = -1
+  selected.value = [] // bulk actions never reach rows the new filter hides
   scroller()?.scrollTo({ top: 0 })
   if (!app.onboarding) void list.loadMore().then(checkNearEnd)
 }
@@ -343,7 +344,7 @@ const cursorId = computed(() => items.value[cursor.value]?.id)
 function toggle(it: Row) {
   selected.value = selectedIds.value.has(it.id) ? selected.value.filter((s) => s.id !== it.id) : [...selected.value, it]
 }
-const allSelected = computed(() => items.value.length > 0 && selected.value.length === items.value.length)
+const allSelected = computed(() => items.value.length > 0 && items.value.every((it) => selectedIds.value.has(it.id)))
 function toggleAll() {
   selected.value = allSelected.value ? [] : [...items.value]
 }
