@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
@@ -19,10 +18,9 @@ import { absTime, relTime } from '../../lib/format'
 
 // Settings › Платформы: one card per mod platform. «Подключить» is the whole
 // setup: Steam shows a QR code from Steam's own sign-in service (scan it in
-// the Steam app); Nexus / CurseForge / Factorio switch on and sign in — the
-// built-in engine opens a window of the installed browser (the MCP engine
-// imports a browser session or opens its own window). Accounts are detected;
-// the manual fields (author, MCP command, Steam id/key/cookies) sit under
+// the Steam app); Nexus / CurseForge / Factorio switch on and sign in in a
+// window of the installed browser. Accounts are detected; the manual fields
+// (author, Steam id/key/cookies) sit under
 // «Дополнительно». A tray card «войдите снова» opens /connections?login=<id>.
 type ModId = 'nexus' | 'curseforge' | 'factorio'
 type CardId = ModId | 'steam'
@@ -43,12 +41,6 @@ const cards: { id: CardId; text: string }[] = [
 
 const status = (id: string): PlatformStatus | undefined => app.platforms.find((p) => p.id === id)
 const cfg = (id: ModId): ModPlatform | NativePlatform | undefined => settings.doc?.settings.providers?.[id]
-// The built-in engine: no MCP server fields (Factorio has only this one).
-const isNative = (id: string) => {
-  const c = cfg(id as ModId)
-  return id === 'factorio' || (!!c && 'engine' in c && c.engine === 'native')
-}
-const mcpOf = (c?: ModPlatform | NativePlatform) => (c && 'mcp' in c ? c.mcp : { command: '', args: [] as string[] })
 // Connected without a web session = public reads only: never «Подключено как».
 const readOnly = (s?: PlatformStatus) => s?.state === 'connected' && s.session === 'none'
 const tone = (s?: PlatformStatus) =>
@@ -176,19 +168,18 @@ const qr = computed(() => {
   return { d, size }
 })
 
-// --- MCP platforms: switch, author, server command (drafts saved on demand)
-const drafts = reactive<Record<ModId, { author: string; command: string; args: string }>>({
-  nexus: { author: '', command: '', args: '' },
-  curseforge: { author: '', command: '', args: '' },
-  factorio: { author: '', command: '', args: '' },
+// --- mod platforms: switch, author (drafts saved on demand)
+const drafts = reactive<Record<ModId, { author: string }>>({
+  nexus: { author: '' },
+  curseforge: { author: '' },
+  factorio: { author: '' },
 })
 const advanced = reactive<Record<string, boolean>>({})
 function syncDrafts() {
   for (const id of ['nexus', 'curseforge', 'factorio'] as ModId[]) {
     const c = cfg(id)
     if (!c) continue
-    const m = mcpOf(c)
-    drafts[id] = { author: c.author ?? '', command: m.command, args: m.args.join('\n') }
+    drafts[id] = { author: c.author ?? '' }
   }
 }
 watch(() => settings.doc?.revision, syncDrafts, { immediate: true })
@@ -214,24 +205,14 @@ async function toggle(id: ModId, on: boolean) {
 const dirty = (id: ModId) => {
   const c = cfg(id)
   if (!c) return false
-  const d = drafts[id]
-  if (d.author.trim() !== (c.author ?? '')) return true
-  if (isNative(id)) return false
-  const m = mcpOf(c)
-  return d.command.trim() !== m.command || argsOf(d.args).join('\n') !== m.args.join('\n')
+  return drafts[id].author.trim() !== (c.author ?? '')
 }
-const argsOf = (s: string) => s.split('\n').map((a) => a.trim()).filter(Boolean)
 
 async function saveMod(id: ModId) {
   const d = drafts[id]
   busy[id] = true
   errors[id] = ''
-  // args is an array: rebuilt on retry so a 409 never re-sends a stale one.
-  const err = await settings.patch(() =>
-    isNative(id)
-      ? { providers: { [id]: { author: d.author.trim() } } }
-      : { providers: { [id]: { author: d.author.trim(), mcp: { command: d.command.trim(), args: argsOf(d.args) } } } },
-  )
+  const err = await settings.patch({ providers: { [id]: { author: d.author.trim() } } })
   busy[id] = false
   if (err) {
     errors[id] = err
@@ -380,7 +361,6 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
         v-if="status(c.id)?.lastSync"
         v-tooltip.top="absTime(status(c.id)?.lastSync ?? '')"
       >{{ t('platforms.lastSync', { time: relTime(status(c.id)?.lastSync ?? '') }) }}</span>
-      <span v-if="status(c.id)?.running"><i class="pi pi-server" /> {{ t('platforms.serverRunning') }}</span>
     </div>
 
     <p
@@ -434,7 +414,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       severity="info"
       size="small"
     >
-      <i class="pi pi-spin pi-spinner" /> {{ t(isNative(c.id) ? 'platforms.checkingSession' : 'platforms.extracting') }}
+      <i class="pi pi-spin pi-spinner" /> {{ t('platforms.checkingSession') }}
     </Message>
     <Message
       v-if="c.id !== 'steam' && login[c.id]?.state === 'window'"
@@ -443,11 +423,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
     >
       <i class="pi pi-spin pi-spinner" />
       {{
-        login[c.id]?.via === 'default-browser'
-          ? t('platforms.browserTabOpen', { platform: platformName(c.id), browser: login[c.id]?.browser || t('platforms.defaultBrowser') })
-          : isNative(c.id)
-            ? t('platforms.windowOpenNative', { platform: platformName(c.id), browser: login[c.id]?.browser || t('platforms.defaultBrowser') })
-            : t('platforms.windowOpen', { platform: platformName(c.id) })
+        t('platforms.windowOpenNative', { platform: platformName(c.id), browser: login[c.id]?.browser || t('platforms.defaultBrowser') })
       }}
     </Message>
 
@@ -456,7 +432,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       class="muted"
     ><i class="pi pi-info-circle" /> {{ t('platforms.factorioReplyOff') }}</small>
 
-    <!-- Nexus / CurseForge / Factorio: author (+ MCP server for the MCP engine), all optional -->
+    <!-- Nexus / CurseForge / Factorio: author, optional -->
     <template v-if="c.id !== 'steam' && cfg(c.id)">
       <button
         type="button"
@@ -478,34 +454,6 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           />
           <small class="muted">{{ t(`platforms.${c.id}AuthorHint`) }}</small>
         </label>
-        <label
-          v-if="!isNative(c.id)"
-          class="field"
-        >
-          <span class="label">{{ t('platforms.mcpServer') }} · {{ t('platforms.command') }}</span>
-          <InputText
-            v-model="drafts[c.id as ModId].command"
-            class="mono"
-            fluid
-          />
-        </label>
-        <label
-          v-if="!isNative(c.id)"
-          class="field"
-        >
-          <span class="label">{{ t('platforms.args') }}</span>
-          <Textarea
-            v-model="drafts[c.id as ModId].args"
-            class="mono"
-            rows="2"
-            auto-resize
-            fluid
-          />
-        </label>
-        <small
-          v-if="!isNative(c.id)"
-          class="muted"
-        >{{ t('platforms.applyLive') }}</small>
       </div>
     </template>
 

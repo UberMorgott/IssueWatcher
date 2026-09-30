@@ -63,7 +63,7 @@ const tiles = computed(() =>
       </div>
       <span
         class="t-state"
-        :class="{ ok: p.on && p.state === 'connected' && !p.readOnly, bad: p.on && ['relogin', 'error', 'unavailable', 'signed_out'].includes(p.state) }"
+        :class="{ ok: p.on && p.state === 'connected' && !p.readOnly, bad: p.on && ['relogin', 'error', 'signed_out'].includes(p.state) }"
       >{{ !p.on ? t('platforms.setUp') : p.readOnly ? t('platforms.readOnlyShort') : t('platforms.state.' + p.state) }}</span>
     </RouterLink>
   </div>

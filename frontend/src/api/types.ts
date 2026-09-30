@@ -284,7 +284,7 @@ export interface Providers {
   factorio: NativePlatform
 }
 
-/** A platform with only the built-in engine (Factorio). */
+/** Factorio: portal settings. */
 export interface NativePlatform {
   enabled: boolean
   /** Portal username whose mods are listed; empty = the signed-in one. */
@@ -293,10 +293,7 @@ export interface NativePlatform {
 
 export interface ModPlatform {
   enabled: boolean
-  mcp: { command: string; args: string[] }
-  /** 'mcp' = the owner's MCP server, 'native' = built-in (installed browser + plain HTTP). */
-  engine?: 'mcp' | 'native'
-  /** Nexus: the exact uploader account name or member id (required); CurseForge: CFWidget author override. */
+  /** Nexus: the exact uploader account name or member id (default: the signed-in member); CurseForge: CFWidget author override. */
   author?: string
 }
 
@@ -791,7 +788,7 @@ export interface Capabilities {
   replyThreaded: boolean
 }
 
-export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'unavailable' | 'error'
+export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'error'
 
 /** none = public reads only; qr = Steam QR sign-in; stored = origin unknown. */
 export type PlatformSession = 'none' | 'browser' | 'window' | 'manual' | 'qr' | 'stored' | 'profile'
@@ -810,8 +807,6 @@ export interface PlatformStatus {
   /** session 'browser': which browser. */
   browser?: string
   error?: string
-  /** The platform's MCP server child is running. */
-  running: boolean
   projects: number
   lastSync?: string
   checkedAt?: string
@@ -840,9 +835,9 @@ export interface LoginStatus {
   challengeUrl?: string // Steam: the QR code's content
   account?: string
   error?: string
-  /** state window: the login page opened in the default browser, or the server's own window. */
-  via?: 'default-browser' | 'window'
-  /** via default-browser: which browser. */
+  /** state window: the sign-in window of the installed browser. */
+  via?: 'window'
+  /** state window: which browser. */
   browser?: string
 }
 
