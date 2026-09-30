@@ -70,6 +70,25 @@ func Open(path string) (*Jar, error) {
 	return j, nil
 }
 
+// Memory is an unsaved jar (a candidate session under test).
+func Memory(cookies []Cookie, userAgent string) *Jar {
+	return &Jar{now: time.Now, f: jarFile{Cookies: cookies, UserAgent: userAgent}}
+}
+
+// Cookies are the stored cookies (a copy).
+func (j *Jar) Cookies() []Cookie {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return append([]Cookie(nil), j.f.Cookies...)
+}
+
+func (j *Jar) save() error {
+	if j.path == "" {
+		return nil
+	}
+	return secret.WriteProtectedJSON(j.path, j.f)
+}
+
 // Empty reports whether no live cookie is stored.
 func (j *Jar) Empty() bool {
 	j.mu.Lock()
@@ -110,7 +129,7 @@ func (j *Jar) Replace(cookies []Cookie, userAgent, account, source string) error
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.f = jarFile{Cookies: cookies, UserAgent: userAgent, Account: account, Source: source, SavedAt: j.now().UTC()}
-	return secret.WriteProtectedJSON(j.path, j.f)
+	return j.save()
 }
 
 // SetAccount records the identity of the stored session.
@@ -121,7 +140,7 @@ func (j *Jar) SetAccount(account string) error {
 		return nil
 	}
 	j.f.Account = account
-	return secret.WriteProtectedJSON(j.path, j.f)
+	return j.save()
 }
 
 // Clear drops the session and its file.
@@ -129,6 +148,9 @@ func (j *Jar) Clear() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.f = jarFile{}
+	if j.path == "" {
+		return nil
+	}
 	return secret.Remove(j.path)
 }
 
@@ -235,7 +257,7 @@ func (j *Jar) Ingest(u *url.URL, resp *http.Response) error {
 	if !changed {
 		return nil
 	}
-	return secret.WriteProtectedJSON(j.path, j.f)
+	return j.save()
 }
 
 func (j *Jar) index(c Cookie) int {
