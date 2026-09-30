@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { api } from '../api/client'
 import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
 import { fallbackCaps } from '../lib/platforms'
@@ -142,7 +142,10 @@ export const useAppStore = defineStore('app', () => {
     return ''
   }
   /** Applies one sync.status step; finished cycles refresh status and counts once (debounced over the sources). */
+  /** The latest sync.status step as it arrived (watch with flush 'sync' to see every one: per-project done). */
+  const lastProgress = shallowRef<SyncProgress | null>(null)
   function onSyncStatus(p: SyncProgress | null) {
+    lastProgress.value = p
     if (!p?.background) {
       syncRequested.value = false
       window.clearTimeout(requestTimer)
@@ -259,6 +262,7 @@ export const useAppStore = defineStore('app', () => {
     progress,
     background,
     onSyncStatus,
+    lastProgress,
     repos,
     reposLoaded,
     reposAvailable,

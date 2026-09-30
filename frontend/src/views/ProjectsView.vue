@@ -167,18 +167,41 @@ function channelTrouble(platform: string): string {
 }
 
 // Row sync: the project and every linked mod page, each through its source.
+// The row spins until each started channel reported sync.status done/error
+// (Progress.repo = that project's name); a lost event gives up after 2 min.
 const rowSyncing = reactive<Record<number, boolean>>({})
+const pendingSync = new Map<number, { names: Set<string>; timer: number }>()
+function endRowSync(id: number) {
+  window.clearTimeout(pendingSync.get(id)?.timer)
+  pendingSync.delete(id)
+  rowSyncing[id] = false
+}
+watch(
+  () => app.lastProgress,
+  (p) => {
+    if (!p?.repo || (p.state !== 'done' && p.state !== 'error')) return
+    for (const [id, s] of pendingSync) if (s.names.delete(p.repo) && !s.names.size) endRowSync(id)
+  },
+  { flush: 'sync' },
+)
+onBeforeUnmount(() => pendingSync.forEach((s) => window.clearTimeout(s.timer)))
 async function syncProject(r: Repo) {
+  endRowSync(r.id)
   rowSyncing[r.id] = true
   const res = await api.syncProject(r.id)
-  window.setTimeout(() => (rowSyncing[r.id] = false), 1500) // the result arrives as a live data change
   if (!res.ok) {
+    endRowSync(r.id)
     toast.add({ severity: 'error', summary: res.error, life: 4000 })
     return
   }
-  const names = (l: string[]) => [...new Set(l)].map(platformName).join(', ')
-  if (res.data.started.length) toast.add({ severity: 'info', summary: t('projects.syncStarted', { list: names(res.data.started) }), life: 2500 })
-  if (res.data.missing.length) toast.add({ severity: 'warn', summary: t('projects.syncMissing', { list: names(res.data.missing) }), life: 4000 })
+  const started = res.data?.started ?? []
+  const missing = res.data?.missing ?? []
+  const names = new Set(channels(r).filter((c) => started.includes(c.platform)).map((c) => c.name))
+  if (names.size) pendingSync.set(r.id, { names, timer: window.setTimeout(() => endRowSync(r.id), 120_000) })
+  else endRowSync(r.id)
+  const platforms = (l: string[]) => [...new Set(l)].map(platformName).join(', ')
+  if (started.length) toast.add({ severity: 'info', summary: t('projects.syncStarted', { list: platforms(started) }), life: 2500 })
+  if (missing.length) toast.add({ severity: 'warn', summary: t('projects.syncMissing', { list: platforms(missing) }), life: 4000 })
 }
 
 /** Patches a loaded row's folder (the dialog or the inline unmap; the API saves only a clone of the project). */

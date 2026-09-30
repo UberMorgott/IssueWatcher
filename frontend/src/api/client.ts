@@ -66,7 +66,16 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<Res
     }
     return { ok: false, status: res.status, error, body }
   }
-  if (res.status === 204 || res.status === 202) return { ok: true, data: undefined as T, status: res.status }
+  if (res.status === 204) return { ok: true, data: undefined as T, status: res.status }
+  if (res.status === 202) {
+    // Accepted: some endpoints say what they started (project sync {started, missing}), others send nothing.
+    const text = await res.text().catch(() => '')
+    try {
+      return { ok: true, data: (text ? JSON.parse(text) : undefined) as T, status: res.status }
+    } catch {
+      return { ok: true, data: undefined as T, status: res.status }
+    }
+  }
   try {
     return { ok: true, data: (await res.json()) as T, status: res.status }
   } catch {
