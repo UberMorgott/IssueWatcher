@@ -35,7 +35,7 @@ const tiles = computed(() =>
     <RouterLink
       v-for="p in tiles"
       :key="p.id"
-      :to="p.on ? { name: 'comments', query: { source: p.id } } : '/settings/connections'"
+      :to="p.on ? { name: 'comments', query: { source: p.id } } : '/connections'"
       class="p-tile panel"
       :class="{ off: !p.on }"
     >

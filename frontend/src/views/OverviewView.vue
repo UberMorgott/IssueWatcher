@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import Select from 'primevue/select'
 import Button from 'primevue/button'
 import Skeleton from 'primevue/skeleton'
@@ -38,6 +38,16 @@ async function loadStats() {
   } else statsState.value = r.status === 404 ? 'unavailable' : 'error'
 }
 
+const statsRetrying = ref(false)
+async function retryStats() {
+  statsRetrying.value = true
+  try {
+    await Promise.all([loadStats(), loadRepoStats()])
+  } finally {
+    statsRetrying.value = false
+  }
+}
+
 async function loadRepoStats() {
   if (!chartRepo.value) {
     repoStats.value = null
@@ -72,6 +82,8 @@ const showHero = computed(() => app.onboarding)
 /** Mod pages synced: unread comments get their own counter (and link) beside unread issues. */
 const hasComments = computed(() => app.repos.some((r) => isModPlatform(r.platform)))
 const shown = computed(() => repoStats.value ?? stats.value)
+/** Projects as the Projects page counts them: a group of linked pages is one project. */
+const projectCount = computed(() => app.repos.filter((r) => !r.linkedTo).length)
 // Issues and bug reports only: comment threads have their own tile and chart series.
 const closed26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.closed, 0) ?? null)
 const opened26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.opened, 0) ?? null)
@@ -223,7 +235,7 @@ function activityPath(event: string, kind?: string) {
           :value="stats?.open ?? null"
           icon="pi pi-inbox"
           :loading="statsState === 'loading'"
-          :hint="t('overview.openHint')"
+          :hint="projectCount ? `${t('overview.openHint')} ${t('overview.acrossProjects', projectCount)}` : t('overview.openHint')"
           :to="{ name: 'issues' }"
         />
         <StatCard
@@ -301,9 +313,18 @@ function activityPath(event: string, kind?: string) {
               v-if="statsState === 'unavailable' || statsState === 'error'"
               icon="pi pi-chart-bar"
               :title="statsState === 'unavailable' ? t('overview.statsUnavailable') : t('overview.statsError')"
-              :text="t('overview.statsHint')"
+              :text="statsState === 'unavailable' ? t('overview.statsHint') : t('overview.statsErrorText')"
               compact
-            />
+            >
+              <Button
+                :label="t('common.retry')"
+                icon="pi pi-refresh"
+                size="small"
+                severity="secondary"
+                :loading="statsRetrying"
+                @click="retryStats"
+              />
+            </EmptyState>
             <Skeleton
               v-else-if="statsState === 'loading'"
               height="300px"
