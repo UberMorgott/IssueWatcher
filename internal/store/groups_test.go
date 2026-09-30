@@ -192,8 +192,15 @@ func TestModPageGroups(t *testing.T) {
 		t.Fatalf("member fix target: %+v %v", fx, err)
 	}
 	in, err := s.JobInput(ctx, itemID(t, s, "x:77"))
-	if err != nil || !in.Mod || in.CodeProject != "" || in.CodeRepo() != "" {
+	if err != nil || !in.Mod || in.CodeProject != "" || in.CodeRepo() != "" || in.Mine {
 		t.Fatalf("member job input: %+v %v", in, err)
+	}
+	// Mine: the item's author is the source's account (a reply draft gets no @author then).
+	if _, err := s.db.ExecContext(ctx, `UPDATE items SET author = 'me' WHERE external_id = 'x:77'`); err != nil {
+		t.Fatal(err)
+	}
+	if in, err := s.JobInput(ctx, itemID(t, s, "x:77")); err != nil || !in.Mine {
+		t.Fatalf("own item job input: %+v %v", in, err)
 	}
 	// One level deep: a member heads nothing, a repository joins nothing.
 	if err := s.SetProjectLinks(ctx, st.ID, []int64{nx[1].ID}); !errors.Is(err, ErrBadLink) {

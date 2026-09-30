@@ -603,6 +603,8 @@ type JobInput struct {
 	// name (owner/repo, "" = not linked).
 	Mod         bool
 	CodeProject string
+	// Mine: the item was written by the synced account (the owner).
+	Mine bool
 }
 
 // CodeRepo is the repository (owner/repo) the item's code lives in: the
@@ -640,10 +642,11 @@ func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 	var labels string
 	err := s.rd.QueryRowContext(ctx, `SELECT i.external_id, s.platform, i.number, i.title, i.body, i.url, i.author, i.labels,
 		p.name, `+projectKeySQL+`, coalesce((SELECT platform FROM sources WHERE id = cp.source_id) || ':' || cp.external_id, `+projectKeySQL+`),
-		`+folderCols+`, s.platform <> '`+CodePlatform+`', coalesce(cp.name, '')
+		`+folderCols+`, s.platform <> '`+CodePlatform+`', coalesce(cp.name, ''),
+		i.author = nullif(s.account, '') IS 1
 		FROM items i JOIN projects p ON p.id = i.project_id JOIN sources s ON s.id = i.source_id`+linkJoin+`
 		WHERE i.id = ?`, itemID).Scan(&in.ItemExternalID, &in.Platform, &in.Number, &in.Title, &in.Body, &in.URL, &in.Author, &labels,
-		&in.ProjectName, &in.ProjectKey, &in.CodeKey, &in.LocalPath, &in.ProjectURL, &in.Mod, &in.CodeProject)
+		&in.ProjectName, &in.ProjectKey, &in.CodeKey, &in.LocalPath, &in.ProjectURL, &in.Mod, &in.CodeProject, &in.Mine)
 	if errors.Is(err, sql.ErrNoRows) {
 		return in, ErrNotFound
 	}

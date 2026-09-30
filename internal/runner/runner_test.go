@@ -64,6 +64,7 @@ type env struct {
 	reply []string
 	clock time.Time       // automation clock (Options.Now)
 	onJob func(store.Job) // test hook on every Options.OnJob
+	flat  bool            // Options.ReplyThreaded reports no reply threads (Steam)
 }
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -184,8 +185,9 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 				h(j)
 			}
 		},
-		OnSteps:    func(int64, int, []Step) { e.mu.Lock(); e.steps++; e.mu.Unlock() },
-		OnFinished: func(j store.Job) { e.mu.Lock(); e.cards = append(e.cards, j); e.mu.Unlock() },
+		ReplyThreaded: func(string) bool { e.mu.Lock(); defer e.mu.Unlock(); return !e.flat },
+		OnSteps:       func(int64, int, []Step) { e.mu.Lock(); e.steps++; e.mu.Unlock() },
+		OnFinished:    func(j store.Job) { e.mu.Lock(); e.cards = append(e.cards, j); e.mu.Unlock() },
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	e.stop = func() { cancel(); e.r.Wait() }
@@ -464,6 +466,29 @@ func TestReplyFlowWithCodex(t *testing.T) {
 	}
 	if j.State != store.JobDone || result(t, j).Comment == nil || len(e.reply) != 1 || e.reply[0] != "Edited reply" {
 		t.Fatalf("sent: %+v %v", j, e.reply)
+	}
+}
+
+// A platform without reply threads (Steam): the draft addresses the item's
+// author once, whatever the agent wrote.
+func TestReplyDraftMentionsAuthorWithoutThreads(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, nil)
+	e.mu.Lock()
+	e.flat = true
+	e.mu.Unlock()
+	j := e.wait(e.enqueue("reply", e.items[0])[0].ID, store.JobNeedsReview)
+	if d := result(t, j).Draft; !strings.HasPrefix(d, "@alice Thanks for the report") || strings.Count(d, "@alice") != 1 {
+		t.Fatalf("draft: %q", d)
+	}
+}
+
+func TestReplyDraftThreadedHasNoMention(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, nil)
+	j := e.wait(e.enqueue("reply", e.items[0])[0].ID, store.JobNeedsReview)
+	if d := result(t, j).Draft; strings.HasPrefix(d, "@") {
+		t.Fatalf("draft: %q", d)
 	}
 }
 

@@ -196,6 +196,10 @@ func TestReplyOffPlatformRefused(t *testing.T) {
 	if len(p.replies) != 0 {
 		t.Fatalf("posted %v", p.replies)
 	}
+	// The fake reports no reply threads; a platform without a syncer counts as threaded.
+	if g := NewGroup(s); g.ReplyThreaded("steam") || !g.ReplyThreaded("github") {
+		t.Fatal("ReplyThreaded")
+	}
 }
 
 // A project's row sync re-reads the project and its linked mod pages, each

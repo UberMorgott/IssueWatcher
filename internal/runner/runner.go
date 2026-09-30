@@ -59,6 +59,10 @@ type Options struct {
 	Publisher Publisher
 	// Reply posts an approved reply draft (syncer.Reply); nil disables «Отправить».
 	Reply func(ctx context.Context, itemID int64, body string) (store.Comment, error)
+	// ReplyThreaded reports whether a reply on platform lands inside the item's
+	// thread (provider Capabilities.ReplyThreaded); off, a reply draft starts
+	// with @author. nil = every platform is threaded.
+	ReplyThreaded func(platform string) bool
 	// Labels lists repository labels and adds labels to issues; nil disables the label flow.
 	Labels provider.Labeler
 	// OnJob runs after every change of a job row (SSE job.changed).
@@ -627,6 +631,11 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	}
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowReply, promptInput{in: in})
+	mention := r.needsMention(in)
+	if mention {
+		task += "\n\n" + in.Platform + " has no reply threads: the reply is posted as a new comment that starts with @" + in.Author +
+			" (IssueWatcher adds it; do not write it yourself)."
+	}
 	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {
@@ -642,7 +651,16 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 	if res.Draft == "" {
 		return "", coded(CodeAgent, errors.New("the agent returned no reply text"))
 	}
+	if mention {
+		res.Draft = provider.WithMention(res.Draft, in.Author)
+	}
 	return store.JobNeedsReview, nil
+}
+
+// needsMention: a reply to in goes to a platform without reply threads, so
+// the draft addresses the item's author with @author (not the owner's own item).
+func (r *Runner) needsMention(in store.JobInput) bool {
+	return r.opts.ReplyThreaded != nil && !r.opts.ReplyThreaded(in.Platform) && in.Author != "" && !in.Mine
 }
 
 // readOnlyDir returns the job files folder and where a read-only agent runs:

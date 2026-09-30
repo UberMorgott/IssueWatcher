@@ -199,6 +199,17 @@ func (g *Group) Reply(ctx context.Context, itemID int64, body string) (store.Com
 	return store.Comment{}, ErrNoSource
 }
 
+// ReplyThreaded reports the ReplyThreaded capability of platform's provider
+// (true when no syncer of platform exists: nothing to add then).
+func (g *Group) ReplyThreaded(platform string) bool {
+	for _, s := range g.Syncers() {
+		if s.opts.Provider.Platform() == platform {
+			return s.opts.Provider.Capabilities().ReplyThreaded
+		}
+	}
+	return true
+}
+
 // syncerFor is the syncer of source sourceID, else the only syncer of platform, else nil.
 func syncerFor(syncers []*Syncer, platform string, sourceID int64) *Syncer {
 	var same []*Syncer
