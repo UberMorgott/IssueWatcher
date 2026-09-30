@@ -73,12 +73,15 @@ type Job struct {
 	// linked code project's name ("" = not linked).
 	Mod         bool   `json:"mod"`
 	CodeProject string `json:"codeProject,omitempty"`
+	// CodeProjectID is that code project's id (0 = none): the Jobs project
+	// filter of a code project includes its linked mod pages' jobs.
+	CodeProjectID int64 `json:"codeProjectId,omitempty"`
 }
 
 const jobColumns = `j.id, coalesce(j.item_id, 0), j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
 	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''),
-	coalesce(cp.local_path, p.local_path), s.platform <> '` + CodePlatform + `', coalesce(cp.name, '')`
+	coalesce(cp.local_path, p.local_path), s.platform <> '` + CodePlatform + `', coalesce(cp.name, ''), coalesce(cp.id, 0)`
 
 // A project job (triage) has no item (item_id NULL): its item fields read as zero.
 const jobFrom = ` FROM jobs j LEFT JOIN items i ON i.id = j.item_id JOIN projects p ON p.id = j.project_id JOIN sources s ON s.id = p.source_id` + linkJoin
@@ -90,7 +93,7 @@ func scanJob(sc interface{ Scan(...any) error }) (Job, error) {
 	)
 	err := sc.Scan(&j.ID, &j.ItemID, &j.ProjectID, &j.Flow, &j.State, &j.Origin, &j.RuleID, &j.ProfileID, &j.Attempt, &j.Phase, &j.Branch,
 		&j.Worktree, &j.BaseSHA, &j.Error, &result, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.UpdatedAt,
-		&j.Repo, &j.ProjectKey, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath, &j.Mod, &j.CodeProject)
+		&j.Repo, &j.ProjectKey, &j.Number, &j.Title, &j.ItemURL, &j.LocalPath, &j.Mod, &j.CodeProject, &j.CodeProjectID)
 	if err != nil {
 		return j, err
 	}
@@ -342,7 +345,9 @@ func (s *Store) Jobs(ctx context.Context, f JobFilter) (JobChunk, error) {
 		where, args = append(where, "j.origin = ?"), append(args, f.Origin)
 	}
 	if f.ProjectID != 0 {
-		where, args = append(where, "j.project_id = ?"), append(args, f.ProjectID)
+		// A code project's group: its own jobs and its linked mod pages' (as the live filter).
+		where = append(where, "(j.project_id = ? OR j.project_id IN (SELECT mod_project_id FROM project_links WHERE code_project_id = ?))")
+		args = append(args, f.ProjectID, f.ProjectID)
 	}
 	if f.ItemID != 0 {
 		where, args = append(where, "j.item_id = ?"), append(args, f.ItemID)

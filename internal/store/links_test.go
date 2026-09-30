@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
@@ -131,5 +132,75 @@ func TestMigration009ProjectLinks(t *testing.T) {
 	}
 	if err := s.UnlinkProject(ctx, 9999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unlink no project: %v", err)
+	}
+}
+
+// The Jobs project filter of a code project includes its linked mod pages'
+// jobs (the same group the live job filter uses); a mod page's filter keeps
+// its own only.
+func TestJobsProjectFilterIncludesLinkedMods(t *testing.T) {
+	ctx := t.Context()
+	s := newStore(t)
+	gh, err := s.UpsertSource(ctx, "github", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := s.SyncProjects(ctx, gh, []provider.Project{{ExternalID: "o/app", Name: "o/app", URL: "https://github.com/o/app"}, {ExternalID: "o/lib", Name: "o/lib"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nx, err := s.UpsertSource(ctx, "nexus", "me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mods, err := s.SyncProjects(ctx, nx, []provider.Project{{ExternalID: "skyrim/1", Name: "Mod One"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyItems(ctx, gh, code[0].ID, []provider.Item{item("I_1", 1, true, t0)}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyItems(ctx, gh, code[1].ID, []provider.Item{item("I_2", 1, true, t0)}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	c := item("comment:9", 1, true, t0)
+	c.Kind = KindComment
+	if _, err := s.ApplyItems(ctx, nx, mods[0].ID, []provider.Item{c}, "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetProjectLinks(ctx, code[0].ID, []int64{mods[0].ID}); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]int64{}
+	for _, ext := range []string{"I_1", "I_2", "comment:9"} {
+		j, err := s.CreateJob(ctx, itemID(t, s, ext), "reply", "p", OriginManual, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[ext] = j.ID
+	}
+	got := func(project int64) []int64 {
+		t.Helper()
+		chunk, err := s.Jobs(ctx, JobFilter{ProjectID: project})
+		if err != nil || chunk.Total == nil || *chunk.Total != len(chunk.Items) {
+			t.Fatalf("jobs of %d: %+v %v", project, chunk, err)
+		}
+		var out []int64
+		for _, j := range chunk.Items {
+			out = append(out, j.ID)
+		}
+		return out
+	}
+	if g := got(code[0].ID); !slices.Equal(g, []int64{ids["comment:9"], ids["I_1"]}) {
+		t.Fatalf("code project group: %v (want mod + own %v)", g, ids)
+	}
+	if g := got(mods[0].ID); !slices.Equal(g, []int64{ids["comment:9"]}) {
+		t.Fatalf("mod page: %v", g)
+	}
+	if g := got(code[1].ID); !slices.Equal(g, []int64{ids["I_2"]}) {
+		t.Fatalf("unlinked project: %v", g)
+	}
+	if j, err := s.Job(ctx, ids["comment:9"]); err != nil || j.CodeProjectID != code[0].ID || j.CodeProject != "o/app" {
+		t.Fatalf("mod job code project: %+v %v", j, err)
 	}
 }
