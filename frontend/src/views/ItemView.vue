@@ -486,7 +486,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
                 target="_blank"
                 rel="noopener noreferrer"
                 class="post-link"
-                :aria-label="t('item.openComment')"
+                :aria-label="t('item.openComment', { platform: pname })"
               ><i class="pi pi-external-link" /></a>
             </header>
             <div class="post-body">

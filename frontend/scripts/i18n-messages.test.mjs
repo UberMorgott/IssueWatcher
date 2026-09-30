@@ -24,4 +24,12 @@ for (const [lang, messages] of [['en', en], ['ru', ru]]) {
     }
     assert.deepEqual(broken, [])
   })
+
+  // Shown for items of every platform (a Steam reply draft said «аккаунта GitHub»).
+  test(`${lang} platform-neutral messages name {platform}`, () => {
+    for (const msg of [messages.job.draftText, messages.item.openComment]) {
+      assert.match(msg, /\{platform\}/)
+      assert.doesNotMatch(msg, /GitHub|Steam|Nexus|CurseForge|Factorio/)
+    }
+  })
 }

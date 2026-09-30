@@ -630,7 +630,7 @@ function agentStats(a: AgentResult): string[] {
           :href="safeUrl(res.comment.url)"
           target="_blank"
           rel="noopener noreferrer"
-        >{{ t('item.openComment') }}</a>
+        >{{ t('item.openComment', { platform: platformName(platform) }) }}</a>
       </Message>
 
       <!-- direct fix: outcome, commits in the mapped folder, warnings -->
@@ -655,7 +655,7 @@ function agentStats(a: AgentResult): string[] {
       >
         <div class="card-head">
           <span class="panel-title"><i class="pi pi-comment" /> {{ t('job.draftTitle') }}</span>
-          <span class="muted small">{{ t('job.draftText') }}</span>
+          <span class="muted small">{{ t('job.draftText', { platform: platformName(platform) }) }}</span>
         </div>
         <Textarea
           v-model="draft"

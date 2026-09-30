@@ -302,7 +302,7 @@ const en = {
     commented: 'commented {time}',
     authorTag: 'author',
     youTag: 'you',
-    openComment: 'Open comment on GitHub',
+    openComment: 'Open comment on {platform}',
     noDescription: 'No description provided.',
     replyAs: 'as {login}',
     replyPlaceholder: 'Write a reply…  (Ctrl+Enter to send)',
@@ -592,7 +592,7 @@ const en = {
       mod_item: 'Push and PR of mod-page fixes are off: the commit stays in the folder. Turn them on in Settings › Agents.',
     },
     draftTitle: 'Reply draft',
-    draftText: 'Edit before posting; it is posted under your GitHub account.',
+    draftText: 'Edit before posting; it is posted under your {platform} account.',
     agentTitle: 'Agent result',
     status: {
       fixed: 'Fixed',

@@ -303,7 +303,7 @@ const ru: Messages = {
     commented: 'комментарий {time}',
     authorTag: 'автор',
     youTag: 'вы',
-    openComment: 'Открыть комментарий на GitHub',
+    openComment: 'Открыть комментарий на {platform}',
     noDescription: 'Описания нет.',
     replyAs: 'от имени {login}',
     replyPlaceholder: 'Напишите ответ…  (Ctrl+Enter — отправить)',
@@ -593,7 +593,7 @@ const ru: Messages = {
       mod_item: 'Push и PR исправлений страниц модов выключены: коммит остаётся в папке. Включить можно в Настройки › Агенты.',
     },
     draftTitle: 'Черновик ответа',
-    draftText: 'Поправьте перед отправкой; он публикуется от вашего аккаунта GitHub.',
+    draftText: 'Поправьте перед отправкой; он публикуется от вашего аккаунта {platform}.',
     agentTitle: 'Результат агента',
     status: {
       fixed: 'Исправлено',
