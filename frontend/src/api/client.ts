@@ -147,7 +147,8 @@ export const api = {
   issues(q: IssueQuery) {
     const p = new URLSearchParams()
     if (q.source) p.set('source', q.source)
-    if (q.kind) p.set('kind', q.kind)
+    const kinds = q.kind ? [q.kind] : (q.kinds ?? [])
+    if (kinds.length) p.set('kind', kinds.join(','))
     if (q.repo) p.set('project', String(q.repo))
     if (q.state && q.state !== 'all') p.set('state', q.state)
     if (q.label) p.set('label', q.label)

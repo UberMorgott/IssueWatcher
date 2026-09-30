@@ -13,17 +13,20 @@ import (
 
 // Repo is a project with issue counts (GET /api/projects).
 type Repo struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Platform  string `json:"platform"`
-	Key       string `json:"key"` // settings key platform:external_id (agents.projects, rules)
-	Open      int    `json:"open"`
-	Closed    int    `json:"closed"`
-	Unread    int    `json:"unread"`
-	LocalPath string `json:"localPath"` // mapped local folder, "" = none
-	LastSync  string `json:"lastSync"`
-	SyncedAt  string `json:"syncedAt"` // legacy alias of lastSync
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Platform string `json:"platform"`
+	Key      string `json:"key"` // settings key platform:external_id (agents.projects, rules)
+	Open     int    `json:"open"`
+	Closed   int    `json:"closed"`
+	Unread   int    `json:"unread"`
+	// UnreadComments / OpenComments: the unread / open items of kind comment (mod page threads); the rest are issues and bug reports.
+	UnreadComments int    `json:"unreadComments"`
+	OpenComments   int    `json:"openComments"`
+	LocalPath      string `json:"localPath"` // mapped local folder, "" = none
+	LastSync       string `json:"lastSync"`
+	SyncedAt       string `json:"syncedAt"` // legacy alias of lastSync
 	// LinkedTo is a mod page's code project id (0 = none); Links a code project's mod page ids.
 	LinkedTo int64   `json:"linkedTo,omitempty"`
 	Links    []int64 `json:"links,omitempty"`
@@ -75,10 +78,12 @@ func (s *Store) ProjectCounts(ctx context.Context) (map[string]int, error) {
 	return out, rows.Err()
 }
 
-const reposSelect = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, `+linkColsAs+`,
+const reposSelect = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id, p.local_path, p.synced_at, ` + linkColsAs + `,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
-		count(i.id) FILTER (WHERE i.unread = 1)
+		count(i.id) FILTER (WHERE i.unread = 1),
+		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment'),
+		count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment')
 		FROM projects p JOIN sources s ON s.id = p.source_id
 		LEFT JOIN items i ON i.project_id = p.id
 		WHERE `
@@ -96,7 +101,7 @@ func (s *Store) repos(ctx context.Context, where string, args ...any) ([]Repo, e
 			r     Repo
 			links string
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread, &r.UnreadComments, &r.OpenComments); err != nil {
 			return nil, fmt.Errorf("store: scan repo: %w", err)
 		}
 		r.Links = parseIDs(links)
@@ -158,7 +163,9 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 	with, inner := "", `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' || p.external_id AS key, p.local_path, p.synced_at, `+linkColsAs+`,
 		count(i.id) FILTER (WHERE i.status = 'open') AS open,
 		count(i.id) FILTER (WHERE i.status = 'closed') AS closed,
-		count(i.id) FILTER (WHERE i.unread = 1) AS unread
+		count(i.id) FILTER (WHERE i.unread = 1) AS unread,
+		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment') AS unread_comments,
+	count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment') AS open_comments
 		FROM projects p JOIN sources s ON s.id = p.source_id
 		LEFT JOIN items i ON i.project_id = p.id
 		WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\') GROUP BY p.id`
@@ -183,7 +190,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		where = " WHERE (" + key + " " + cmp + " ?2 OR (" + key + " = ?2 AND r.id " + cmp + " ?3))"
 		args = append(args, k.Value, k.ID)
 	}
-	rows, err := s.rd.QueryContext(ctx, with+"SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, "+key+ // sort key from the fixed RepoSorts map; values are bound args
+	rows, err := s.rd.QueryContext(ctx, with+"SELECT r.id, r.name, r.url, r.platform, r.key, r.local_path, r.synced_at, r.linked_to, r.links, r.open, r.closed, r.unread, r.unread_comments, r.open_comments, "+key+ // sort key from the fixed RepoSorts map; values are bound args
 		" FROM ("+inner+") r"+where+" ORDER BY "+key+" "+dir+", r.id "+dir+" LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		return chunk, fmt.Errorf("store: repos: %w", err)
@@ -195,7 +202,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 			r     Repo
 			links string
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread, &sortVal); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread, &r.UnreadComments, &r.OpenComments, &sortVal); err != nil {
 			return chunk, fmt.Errorf("store: scan repo: %w", err)
 		}
 		r.Links = parseIDs(links)
@@ -225,12 +232,12 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 // IssueFilter selects issues for the dashboard table (keyset pagination: newest
 // update first, id breaks ties).
 type IssueFilter struct {
-	Platform string // source platform (github, ...), "" = all
-	Kind     string // item kind (issue | comment | bug), "" = all
-	RepoID   int64  // 0 = all; a code project includes its linked mod pages' items
-	State    string // open | closed | "" (all)
-	Label    string // exact label name
-	Text     string // substring of title/body, or #number
+	Platform string   // source platform (github, ...), "" = all
+	Kinds    []string // item kinds (issue | comment | bug), empty = all
+	RepoID   int64    // 0 = all; a code project includes its linked mod pages' items
+	State    string   // open | closed | "" (all)
+	Label    string   // exact label name
+	Text     string   // substring of title/body, or #number
 	Unread   bool
 	IDs      []int64 // only these items, still matching the filter (live patching; max 500)
 	Cursor   string  // rows after this one (older): the next chunk
@@ -313,8 +320,11 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	if f.Platform != "" {
 		where, args = append(where, "i.source_id IN (SELECT id FROM sources WHERE platform = ?)"), append(args, f.Platform)
 	}
-	if f.Kind != "" {
-		where, args = append(where, "i.kind = ?"), append(args, f.Kind)
+	if len(f.Kinds) > 0 {
+		where = append(where, "i.kind IN (?"+strings.Repeat(", ?", len(f.Kinds)-1)+")")
+		for _, k := range f.Kinds {
+			args = append(args, k)
+		}
 	}
 	if f.Label != "" {
 		where, args = append(where, "EXISTS (SELECT 1 FROM json_each(i.labels) WHERE value = ?)"), append(args, f.Label)

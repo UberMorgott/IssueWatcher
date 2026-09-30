@@ -16,7 +16,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, shortDay, shortRepo } from '../lib/format'
 import { cachedRef } from '../lib/cache'
-import { repoPlatform } from '../lib/platforms'
+import { isModPlatform, repoPlatform } from '../lib/platforms'
 
 const app = useAppStore()
 const { t } = useI18n()
@@ -66,6 +66,8 @@ watch(() => [app.onboarding, app.dataVersion], loadAll)
 watch(chartRepo, loadRepoStats)
 
 const showHero = computed(() => app.onboarding)
+/** Mod pages synced: unread comments get their own counter (and link) beside unread issues. */
+const hasComments = computed(() => app.repos.some((r) => isModPlatform(r.platform)))
 const shown = computed(() => repoStats.value ?? stats.value)
 const closed26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.closed, 0) ?? null)
 const opened26 = computed(() => stats.value?.weekly.reduce((n, w) => n + w.opened, 0) ?? null)
@@ -148,7 +150,10 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
     </template>
 
     <template v-else>
-      <div class="stats-row">
+      <div
+        class="stats-row"
+        :class="{ five: hasComments }"
+      >
         <StatCard
           :label="t('overview.statOpen')"
           :value="stats?.open ?? null"
@@ -158,11 +163,20 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
         />
         <StatCard
           :label="t('overview.statUnread')"
-          :value="app.unreadTotal"
+          :value="app.unreadIssues"
           icon="pi pi-bell"
           tone="warn"
           :loading="!app.reposLoaded"
           :hint="t('overview.unreadHint')"
+        />
+        <StatCard
+          v-if="hasComments"
+          :label="t('overview.statComments')"
+          :value="app.unreadComments"
+          icon="pi pi-comments"
+          tone="warn"
+          :loading="!app.reposLoaded"
+          :hint="t('overview.commentsHint')"
         />
         <StatCard
           :label="t('overview.opened26')"
@@ -223,12 +237,19 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
           <section class="panel">
             <div class="panel-head">
               <span class="panel-title">{{ t('overview.needsAttention') }}</span>
-              <RouterLink
-                :to="{ name: 'issues', query: { unread: '1' } }"
-                class="more"
-              >
-                {{ t('overview.allUnread') }}
-              </RouterLink>
+              <span class="more-links">
+                <RouterLink
+                  :to="{ name: 'issues', query: { unread: '1' } }"
+                  class="more"
+                >
+                  {{ t('overview.allUnread') }}
+                </RouterLink>
+                <RouterLink
+                  v-if="hasComments"
+                  :to="{ name: 'comments', query: { unread: '1' } }"
+                  class="more"
+                ><i class="pi pi-comments" /> {{ t('overview.allComments') }}</RouterLink>
+              </span>
             </div>
             <div class="panel-body list">
               <template v-if="listsLoading">
@@ -380,6 +401,15 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
   gap: 20px;
 }
 
+.stats-row.five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.more-links {
+  display: inline-flex;
+  gap: 14px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
@@ -483,7 +513,8 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
 }
 
 @media (width <= 1279px) {
-  .stats-row {
+  .stats-row,
+  .stats-row.five {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -493,7 +524,8 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
 }
 
 @media (width <= 599px) {
-  .stats-row {
+  .stats-row,
+  .stats-row.five {
     grid-template-columns: minmax(0, 1fr);
   }
 }

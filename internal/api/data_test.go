@@ -147,6 +147,12 @@ func TestReplyPostsToGitHub(t *testing.T) {
 		page.Items[0].Kind != store.KindIssue || page.Items[0].Platform != "github" {
 		t.Fatalf("kind=issue: %d %+v", code, page.Items)
 	}
+	if code := e.call(t, http.MethodGet, "/api/items?kind=issue,bug", "", &page); code != http.StatusOK || len(page.Items) == 0 {
+		t.Fatalf("kind=issue,bug: %d %d items", code, len(page.Items))
+	}
+	if code := e.call(t, http.MethodGet, "/api/items?kind=issue,x", "", nil); code != http.StatusBadRequest {
+		t.Fatalf("bad kind in list: %d", code)
+	}
 	if code := e.call(t, http.MethodGet, "/api/items?kind=x", "", nil); code != http.StatusBadRequest {
 		t.Fatalf("bad kind: %d", code)
 	}

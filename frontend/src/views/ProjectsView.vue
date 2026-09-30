@@ -141,14 +141,17 @@ const repoById = computed(() => new Map(app.repos.map((r) => [r.id, r])))
 const channels = (r: Repo): Integration[] =>
   r.integrations?.length
     ? r.integrations
-    : [{ id: r.id, name: r.name, url: r.url, platform: r.platform || 'github', open: r.open, closed: r.closed, unread: r.unread, lastSync: r.lastSync ?? '' }]
-/** Issues of the whole project on one platform (the project filter spans its linked mod pages). */
-const issuesTo = (r: Repo, platform: string, unread = false) => ({
-  name: 'issues',
+    : [{ id: r.id, name: r.name, url: r.url, platform: r.platform || 'github', open: r.open, closed: r.closed, unread: r.unread, openComments: r.openComments, unreadComments: r.unreadComments, lastSync: r.lastSync ?? '' }]
+/** Open / unread issues and bug reports of a channel or row: everything but comments. */
+const openIssues = (c: { open: number; openComments?: number }) => c.open - (c.openComments ?? 0)
+const unreadIssues = (c: { unread: number; unreadComments?: number }) => c.unread - (c.unreadComments ?? 0)
+/** Issues (or comments) of the whole project on one platform (the project filter spans its linked mod pages). */
+const issuesTo = (r: Repo, platform: string, unread = false, page: 'issues' | 'comments' = 'issues') => ({
+  name: page,
   query: unread ? { repo: String(r.id), source: platform, unread: '1', state: 'all' } : { repo: String(r.id), source: platform },
 })
 /** A channel's name for tooltips: the platform, plus the mod page's name (the chip itself shows only icon + count). */
-const channelLabel = (c: Integration) => (isModPlatform(c.platform) ? ` «»` : platformName(c.platform))
+const channelLabel = (c: Integration) => (isModPlatform(c.platform) ? `${platformName(c.platform)} «${c.name}»` : platformName(c.platform))
 /** A channel chip's tooltip: what + any sync trouble (relogin note). */
 function channelTip(c: Integration, what = ''): string {
   const trouble = channelTrouble(c.platform)
@@ -353,16 +356,30 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                         :size="12"
                       />
                       <RouterLink
-                        v-tooltip.top="channelTip(c, t('projects.channelIssues', { platform: channelLabel(c) }) + ' · ' + c.open + ' ' + t('words.open', c.open))"
+                        v-tooltip.top="channelTip(c, t('projects.channelIssues', { platform: channelLabel(c) }) + ' · ' + openIssues(c) + ' ' + t('words.open', openIssues(c)))"
                         :to="issuesTo(data, c.platform)"
                         class="count mono"
-                      >{{ c.open }}</RouterLink>
+                      >{{ openIssues(c) }}</RouterLink>
                       <RouterLink
-                        v-if="c.unread"
-                        v-tooltip.top="channelTip(c, t('projects.channelUnread', { platform: channelLabel(c) }) + ' · ' + c.unread + ' ' + t('words.unread', c.unread))"
+                        v-if="unreadIssues(c)"
+                        v-tooltip.top="channelTip(c, t('projects.channelUnread', { platform: channelLabel(c) }) + ' · ' + unreadIssues(c) + ' ' + t('words.unread', unreadIssues(c)))"
                         :to="issuesTo(data, c.platform, true)"
                         class="count unread mono"
-                      >{{ c.unread }}</RouterLink>
+                      >{{ unreadIssues(c) }}</RouterLink>
+                      <!-- A mod page's comment thread: its own counters, deep-linked to the Comments page -->
+                      <template v-if="c.openComments || c.unreadComments">
+                        <RouterLink
+                          v-tooltip.top="channelTip(c, t('projects.channelComments', { platform: channelLabel(c) }) + ' · ' + (c.openComments ?? 0) + ' ' + t('words.open', c.openComments ?? 0))"
+                          :to="issuesTo(data, c.platform, false, 'comments')"
+                          class="count comments mono"
+                        ><i class="pi pi-comments" />{{ c.openComments ?? 0 }}</RouterLink>
+                        <RouterLink
+                          v-if="c.unreadComments"
+                          v-tooltip.top="channelTip(c, t('projects.channelUnreadComments', { platform: channelLabel(c) }) + ' · ' + c.unreadComments + ' ' + t('words.unread', c.unreadComments))"
+                          :to="issuesTo(data, c.platform, true, 'comments')"
+                          class="count unread mono"
+                        >{{ c.unreadComments }}</RouterLink>
+                      </template>
                       <i
                         v-if="channelTrouble(c.platform)"
                         v-tooltip.top="channelTrouble(c.platform)"
@@ -489,7 +506,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
             <template #body="{ data }: { data: Repo }">
               <RouterLink
                 v-if="data.unread"
-                :to="{ name: 'issues', query: { repo: String(data.id), unread: '1', state: 'all' } }"
+                :to="{ name: unreadIssues(data) ? 'issues' : 'comments', query: { repo: String(data.id), unread: '1', state: 'all' } }"
                 class="unread-chip mono"
               >
                 {{ data.unread }}
@@ -777,6 +794,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 
 .count:hover {
   color: var(--iw-primary);
+}
+
+.count.comments {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.count.comments i {
+  font-size: calc(10px * var(--iw-fs, 1));
+  color: var(--iw-muted);
 }
 
 .count.unread {

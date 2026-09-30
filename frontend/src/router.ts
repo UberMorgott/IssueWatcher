@@ -8,7 +8,9 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'overview', component: () => import('./views/OverviewView.vue'), meta: { title: 'overview' } },
-    { path: '/issues', name: 'issues', component: () => import('./views/IssuesView.vue'), meta: { title: 'issues' } },
+    // Issues (issue + bug) and Comments (mod page comment threads): one list, two presets.
+    { path: '/issues', name: 'issues', component: () => import('./views/IssuesView.vue'), props: { preset: 'issues' }, meta: { title: 'issues' } },
+    { path: '/comments', name: 'comments', component: () => import('./views/IssuesView.vue'), props: { preset: 'comments' }, meta: { title: 'comments' } },
     { path: '/item/:id', name: 'item', component: () => import('./views/ItemView.vue'), props: true, meta: { title: 'item' } },
     { path: '/projects', name: 'projects', component: () => import('./views/ProjectsView.vue'), meta: { title: 'projects' } },
     // Agent jobs; /jobs/:id is the deep link of the tray's «agent finished» card.

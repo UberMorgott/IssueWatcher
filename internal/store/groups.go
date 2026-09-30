@@ -51,7 +51,9 @@ const groupedRepos = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' 
 	(SELECT min(x.synced_at) FROM m g JOIN projects x ON x.id = g.pid WHERE g.gid = p.id) AS synced_at, ` + linkColsAs + `,
 	count(i.id) FILTER (WHERE i.status = 'open') AS open,
 	count(i.id) FILTER (WHERE i.status = 'closed') AS closed,
-	count(i.id) FILTER (WHERE i.unread = 1) AS unread
+	count(i.id) FILTER (WHERE i.unread = 1) AS unread,
+	count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment') AS unread_comments,
+	count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment') AS open_comments
 	FROM projects p JOIN sources s ON s.id = p.source_id
 	JOIN m ON m.gid = p.id
 	LEFT JOIN items i ON i.project_id = m.pid
@@ -62,14 +64,16 @@ const groupedCount = `SELECT count(*) FROM projects p WHERE ` + groupRows
 // Integration is one channel of a grouped project row: the code project itself
 // or a linked mod page, with its own counts (Issues filter: project=ID&source=Platform).
 type Integration struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Platform string `json:"platform"`
-	Open     int    `json:"open"`
-	Closed   int    `json:"closed"`
-	Unread   int    `json:"unread"`
-	LastSync string `json:"lastSync"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	Platform       string `json:"platform"`
+	Open           int    `json:"open"`
+	Closed         int    `json:"closed"`
+	Unread         int    `json:"unread"`
+	UnreadComments int    `json:"unreadComments"` // unread items of kind comment
+	OpenComments   int    `json:"openComments"`   // open items of kind comment
+	LastSync       string `json:"lastSync"`
 }
 
 // fillIntegrations sets rows' Integrations in one query: own project first,
@@ -91,7 +95,9 @@ func (s *Store) fillIntegrations(ctx context.Context, rows []Repo) error {
 	q, err := s.rd.QueryContext(ctx, groupMembersWith+`SELECT m.gid, x.id, x.name, x.url, s.platform, x.synced_at,
 		count(i.id) FILTER (WHERE i.status = 'open'),
 		count(i.id) FILTER (WHERE i.status = 'closed'),
-		count(i.id) FILTER (WHERE i.unread = 1)
+		count(i.id) FILTER (WHERE i.unread = 1),
+		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment'),
+		count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment')
 		FROM m JOIN projects x ON x.id = m.pid JOIN sources s ON s.id = x.source_id
 		LEFT JOIN items i ON i.project_id = x.id
 		WHERE m.gid IN (SELECT value FROM json_each(?))
@@ -105,7 +111,7 @@ func (s *Store) fillIntegrations(ctx context.Context, rows []Repo) error {
 			gid int64
 			in  Integration
 		)
-		if err := q.Scan(&gid, &in.ID, &in.Name, &in.URL, &in.Platform, &in.LastSync, &in.Open, &in.Closed, &in.Unread); err != nil {
+		if err := q.Scan(&gid, &in.ID, &in.Name, &in.URL, &in.Platform, &in.LastSync, &in.Open, &in.Closed, &in.Unread, &in.UnreadComments, &in.OpenComments); err != nil {
 			return fmt.Errorf("store: scan integration: %w", err)
 		}
 		if i, ok := at[gid]; ok {

@@ -13,7 +13,8 @@ const { t } = useI18n()
 
 const items: { to: string; icon: string; label: string; match: string[]; badge?: () => number }[] = [
   { to: '/', icon: 'pi pi-objects-column', label: 'nav.overview', match: ['overview'] },
-  { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: () => app.unreadTotal },
+  { to: '/issues', icon: 'pi pi-inbox', label: 'nav.issues', match: ['issues', 'item'], badge: () => app.unreadIssues },
+  { to: '/comments', icon: 'pi pi-comments', label: 'nav.comments', match: ['comments'], badge: () => app.unreadComments },
   { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
   { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'], badge: () => jobs.activeCount },
   { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },

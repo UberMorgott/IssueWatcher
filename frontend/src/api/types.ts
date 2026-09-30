@@ -56,6 +56,9 @@ export interface Repo extends FixTarget {
   open: number
   closed: number
   unread: number
+  /** Open / unread items of kind comment (the rest of open / unread are issues and bug reports). */
+  openComments?: number
+  unreadComments?: number
   /** Mapped local working folder; "" = not mapped. */
   localPath?: string
   lastSync?: string
@@ -78,6 +81,8 @@ export interface Integration {
   open: number
   closed: number
   unread: number
+  openComments?: number
+  unreadComments?: number
   lastSync: string
 }
 
@@ -225,6 +230,8 @@ export interface Health {
 export interface IssueQuery {
   source?: string
   kind?: ItemKind | ''
+  /** Several kinds (Issues page: issue + bug); ignored when kind is set. */
+  kinds?: ItemKind[]
   repo?: number
   state?: 'open' | 'closed' | 'all'
   label?: string

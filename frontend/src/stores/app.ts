@@ -182,6 +182,9 @@ export const useAppStore = defineStore('app', () => {
     reposLoaded.value = true
   }
   const unreadTotal = computed(() => repos.value.reduce((n, r) => n + r.unread, 0))
+  /** Unread comments (mod page threads); the rest of unreadTotal are issues and bug reports (sidebar badges, Overview). */
+  const unreadComments = computed(() => repos.value.reduce((n, r) => n + (r.unreadComments ?? 0), 0))
+  const unreadIssues = computed(() => unreadTotal.value - unreadComments.value)
   /** First run: nothing connected and nothing synced yet → pages show the Connect CTA. */
   const onboarding = computed(() => authLoaded.value && reposLoaded.value && !githubConnected.value && repos.value.length === 0)
   /** Signed out but earlier data is still in the local database. */
@@ -261,6 +264,8 @@ export const useAppStore = defineStore('app', () => {
     reposAvailable,
     loadRepos,
     unreadTotal,
+    unreadComments,
+    unreadIssues,
     onboarding,
     offlineData,
     dataVersion,

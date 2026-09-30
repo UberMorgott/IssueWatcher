@@ -155,12 +155,16 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusBadRequest, "bad state")
 		return
 	}
-	switch k := q.Get("kind"); k {
-	case "", store.KindIssue, store.KindComment, store.KindBug:
-		f.Kind = k
-	default:
-		errJSON(w, http.StatusBadRequest, "bad kind")
-		return
+	if v := q.Get("kind"); v != "" { // one kind or a comma list (issue,bug)
+		for k := range strings.SplitSeq(v, ",") {
+			switch k {
+			case store.KindIssue, store.KindComment, store.KindBug:
+				f.Kinds = append(f.Kinds, k)
+			default:
+				errJSON(w, http.StatusBadRequest, "bad kind")
+				return
+			}
+		}
 	}
 	if v := q.Get("ids"); v != "" {
 		for part := range strings.SplitSeq(v, ",") {

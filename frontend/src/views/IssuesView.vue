@@ -18,11 +18,18 @@ import { rowHeight } from '../lib/appearance'
 import { api } from '../api/client'
 import type { Issue, IssueQuery, IssueRowData as Row, ItemKind } from '../api/types'
 import PlatformIcon from '../components/PlatformIcon.vue'
-import { ITEM_KINDS, PLATFORMS, platformName } from '../lib/platforms'
+import { isModPlatform, PLATFORMS, platformName } from '../lib/platforms'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { typing } from '../lib/shortcuts'
 import { useChunks } from '../lib/chunks'
+
+// Two pages over one list: Issues (issues + mod bug reports) and Comments (mod
+// page comment threads); the preset fixes the kinds the list may show.
+const props = withDefaults(defineProps<{ preset?: 'issues' | 'comments' }>(), { preset: 'issues' })
+const PRESET_KINDS: Record<'issues' | 'comments', ItemKind[]> = { issues: ['issue', 'bug'], comments: ['comment'] }
+const isComments = computed(() => props.preset === 'comments')
+const presetKinds = computed(() => PRESET_KINDS[props.preset])
 
 const app = useAppStore()
 const { t } = useI18n()
@@ -41,8 +48,10 @@ const SKELETON_ROWS = 6
 // Filters live in the URL so a filtered view can be bookmarked and survives reloads.
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const filters = computed(() => ({
+  preset: props.preset,
   source: str(route.query.source),
-  kind: (ITEM_KINDS as string[]).includes(str(route.query.kind)) ? (str(route.query.kind) as ItemKind) : ('' as const),
+  // A kind outside the page's preset is ignored (the comments page shows only comments).
+  kind: presetKinds.value.length > 1 && (presetKinds.value as string[]).includes(str(route.query.kind)) ? (str(route.query.kind) as ItemKind) : ('' as const),
   repo: Number(str(route.query.repo)) || 0,
   state: (['open', 'closed', 'all'].includes(str(route.query.state)) ? str(route.query.state) : 'open') as 'open' | 'closed' | 'all',
   label: str(route.query.label),
@@ -51,7 +60,7 @@ const filters = computed(() => ({
 }))
 const query = (): IssueQuery => {
   const f = filters.value
-  return { source: f.source, kind: f.kind, repo: f.repo, state: f.state, label: f.label, q: f.q, unread: f.unread }
+  return { source: f.source, kind: f.kind, kinds: presetKinds.value, repo: f.repo, state: f.state, label: f.label, q: f.q, unread: f.unread }
 }
 
 function setQuery(patch: Partial<Record<'source' | 'kind' | 'repo' | 'state' | 'label' | 'q' | 'unread', string | number | boolean | null>>) {
@@ -222,7 +231,7 @@ watch(
 // Platforms with synced projects (or switched on) are offered; the rest stay listed, disabled.
 const sourceOptions = computed(() => [
   { label: t('platforms.allPlatforms'), value: '', disabled: false },
-  ...PLATFORMS.map((p) => ({
+  ...PLATFORMS.filter((p) => !isComments.value || isModPlatform(p)).map((p) => ({
     label: platformName(p),
     value: p as string,
     disabled: !app.repos.some((r) => r.platform === p) && !app.platforms.find((x) => x.id === p)?.enabled,
@@ -230,7 +239,7 @@ const sourceOptions = computed(() => [
 ])
 const kindOptions = computed(() => [
   { label: t('platforms.allKinds'), value: '' },
-  ...ITEM_KINDS.map((k) => ({ label: t('platforms.kind.' + k), value: k })),
+  ...presetKinds.value.map((k) => ({ label: t('platforms.kind.' + k), value: k })),
 ])
 // One option per project as on the Projects page: a code project stands for its
 // linked mod pages too (its items include theirs); a platform filter keeps the
@@ -373,8 +382,8 @@ onBeforeUnmount(() => {
           <InputText
             ref="searchBox"
             v-model="search"
-            :placeholder="t('issues.searchPlaceholder')"
-            :aria-label="t('issues.searchAria')"
+            :placeholder="isComments ? t('comments.searchPlaceholder') : t('issues.searchPlaceholder')"
+            :aria-label="isComments ? t('comments.searchAria') : t('issues.searchAria')"
             fluid
           />
         </IconField>
@@ -404,6 +413,7 @@ onBeforeUnmount(() => {
           </template>
         </Select>
         <Select
+          v-if="!isComments"
           :model-value="filters.kind"
           :options="kindOptions"
           option-label="label"
@@ -481,7 +491,7 @@ onBeforeUnmount(() => {
         <span
           v-if="total !== null && total !== stateCount"
           class="f-total"
-        ><b class="mono">{{ total }}</b> {{ t('words.issues', total) }}</span>
+        ><b class="mono">{{ total }}</b> {{ isComments ? t('words.commentItems', total) : t('words.issues', total) }}</span>
       </div>
 
       <div class="panel table-panel">
@@ -511,7 +521,7 @@ onBeforeUnmount(() => {
               :aria-label="t('issues.selectAll')"
               @change="toggleAll"
             ></span>
-            <span role="columnheader">{{ t('issues.colIssue') }}</span>
+            <span role="columnheader">{{ isComments ? t('comments.colItem') : t('issues.colIssue') }}</span>
             <span
               class="c-project"
               role="columnheader"
@@ -533,13 +543,13 @@ onBeforeUnmount(() => {
             <EmptyState
               v-if="state === 'unavailable'"
               icon="pi pi-server"
-              :title="t('issues.unavailable')"
+              :title="isComments ? t('comments.unavailable') : t('issues.unavailable')"
               :text="t('issues.unavailableText')"
             />
             <EmptyState
               v-else-if="state === 'error'"
               icon="pi pi-exclamation-triangle"
-              :title="t('issues.loadError')"
+              :title="isComments ? t('comments.loadError') : t('issues.loadError')"
               :text="listError"
             >
               <Button
@@ -565,9 +575,9 @@ onBeforeUnmount(() => {
             </EmptyState>
             <EmptyState
               v-else
-              icon="pi pi-inbox"
-              :title="t('issues.noOpen')"
-              :text="app.sync?.lastSync ? t('issues.nothingOpen') : t('issues.nothingSynced')"
+              :icon="isComments ? 'pi pi-comments' : 'pi pi-inbox'"
+              :title="isComments ? t('comments.noOpen') : t('issues.noOpen')"
+              :text="app.sync?.lastSync ? (isComments ? t('comments.nothingOpen') : t('issues.nothingOpen')) : t('issues.nothingSynced')"
             >
               <Button
                 v-if="!app.sync?.lastSync"

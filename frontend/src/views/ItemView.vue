@@ -143,7 +143,7 @@ const ITEM_FLOWS = computed(() => JOB_FLOWS.filter((f) => f !== 'triage' && (f !
 useCrumbs(() => {
   const it = item.value
   return [
-    { label: t('nav.issues'), to: '/issues' },
+    it?.kind === 'comment' ? { label: t('nav.comments'), to: '/comments' } : { label: t('nav.issues'), to: '/issues' },
     it ? { label: itemRef(it) } : { label: props.id },
   ]
 })

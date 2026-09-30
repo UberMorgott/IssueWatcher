@@ -200,7 +200,7 @@ useShortcuts({
     if (app.anyConnected && !app.syncing) void app.syncNow()
   },
   search: () => {
-    if (route.name !== 'issues') void router.push({ name: 'issues', query: { focus: '1' } })
+    if (route.name !== 'issues' && route.name !== 'comments') void router.push({ name: 'issues', query: { focus: '1' } })
     else window.dispatchEvent(new CustomEvent('iw:focus-search'))
   },
   help: () => (helpOpen.value = !helpOpen.value),
