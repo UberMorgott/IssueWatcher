@@ -120,8 +120,11 @@ type sessionResult struct {
 }
 
 // Account implements provider.Provider: the session's display name (what
-// comments show as author). No cookies → signed out; stored cookies refused →
-// ErrRelogin; server missing → signed out (unavailable).
+// comments show as author). No cookies → signed out, except natively with a
+// configured author: its reads are keyless (CFWidget by name, plain comments),
+// so that name is the account (replies still need the session: post checks
+// it); stored cookies refused → ErrRelogin; server missing → signed out
+// (unavailable).
 func (p *Provider) Account(ctx context.Context) (string, error) {
 	s, err := p.b.status(ctx)
 	switch {
@@ -130,6 +133,9 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	case err != nil:
 		return "", err
 	case !s.LoggedIn && !s.CookiesStored:
+		if a := strings.TrimSpace(p.opts.Author()); a != "" && p.opts.Native != nil {
+			return a, nil // not cached as the signed-in account; a reply's post still needs the session
+		}
 		return "", fmt.Errorf("%w: curseforge: no session (%s)", provider.ErrNotSignedIn, s.Detail)
 	case !s.LoggedIn:
 		return "", fmt.Errorf("%w (%s)", ErrRelogin, s.Detail)

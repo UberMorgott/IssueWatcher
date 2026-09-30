@@ -163,8 +163,18 @@ func TestNativeSyncSignedOut(t *testing.T) {
 	if _, err := p.DetectChanges(context.Background(), projects[0], &st); err != nil || st.ETags["v2:curseforge:page1"] == "" {
 		t.Fatalf("fingerprint: %v %v", st.ETags, err)
 	}
+	// Signed out, the configured author is the account (keyless reads), but a
+	// reply still needs the session.
+	if acc, err := p.Account(context.Background()); err != nil || acc != "Morgott" {
+		t.Fatalf("account without a session = %q, %v", acc, err)
+	}
+	s.postReply = func(http.ResponseWriter, map[string]any) { t.Fatal("posted without a session") }
+	if _, err := p.Reply(context.Background(), "comment:1437738/"+firstRoot(t, s), "x"); !errors.Is(err, provider.ErrNotSignedIn) {
+		t.Fatalf("reply without a session: %v", err)
+	}
+	p.opts.Author = func() string { return "" }
 	if _, err := p.Account(context.Background()); !errors.Is(err, provider.ErrNotSignedIn) {
-		t.Fatalf("account without a session: %v", err)
+		t.Fatalf("account without a session or author: %v", err)
 	}
 	if p.Scheduling().PollMinInterval != 5*time.Minute {
 		t.Fatal("native change check every 5 min")
