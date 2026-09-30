@@ -301,7 +301,8 @@ function open(it: Row) {
 
 // --- bulk actions
 async function markSelectedRead() {
-  const ids = selected.value.filter((i) => i.unread).map((i) => i.id)
+  // Every selected row, not only the unread ones: the flag on a row can lag the server, and marking a read item is a no-op.
+  const ids = selected.value.map((i) => i.id)
   const results = await Promise.all(ids.map((id) => api.markRead(id)))
   const failed = results.filter((r) => !r.ok).length
   toast.add({
@@ -620,7 +621,6 @@ onBeforeUnmount(() => {
             :label="t('issues.markRead')"
             icon="pi pi-eye"
             severity="secondary"
-            :disabled="!selected.some((i) => i.unread)"
             @click="markSelectedRead"
           />
           <Button
