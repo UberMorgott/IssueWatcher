@@ -7,9 +7,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,6 +173,71 @@ func TestUpdaterCheckAndGuards(t *testing.T) {
 	}
 }
 
+// Concurrent Checks: exactly one reaches GitHub, the rest get ErrBusy (the
+// idle check and the switch to checking are one step). The race window is
+// short, so many rounds.
+func TestUpdaterConcurrentChecks(t *testing.T) {
+	var (
+		hits    atomic.Int32
+		release chan struct{}
+		mu      sync.Mutex
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		mu.Lock()
+		rel := release
+		mu.Unlock()
+		<-rel
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(srv.Close)
+	const n = 8
+	for round := range 200 {
+		hits.Store(0)
+		mu.Lock()
+		release = make(chan struct{})
+		mu.Unlock()
+		u := selfupdate.New(selfupdate.Options{
+			Current: "v0.1.0", Exe: filepath.Join(t.TempDir(), "x.exe"), DataDir: t.TempDir(), Source: selfupdate.Source{APIBase: srv.URL},
+			Prefs: func() selfupdate.Prefs { return selfupdate.Prefs{Channel: "stable"} },
+			Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+		start := make(chan struct{})
+		errs := make(chan error, n)
+		var wg sync.WaitGroup
+		for range n {
+			wg.Go(func() {
+				<-start
+				_, err := u.Check(t.Context())
+				errs <- err
+			})
+		}
+		close(start)
+		busy := 0
+		for busy < n-1 && hits.Load() <= 1 { // the one Check that started waits in the handler
+			select {
+			case err := <-errs:
+				if !errors.Is(err, selfupdate.ErrBusy) {
+					close(release)
+					t.Fatalf("round %d: a second Check ran: %v", round, err)
+				}
+				busy++
+			case <-time.After(time.Millisecond):
+			}
+		}
+		close(release)
+		wg.Wait()
+		if h := hits.Load(); busy != n-1 || h != 1 {
+			t.Fatalf("round %d: %d of %d Checks got ErrBusy; GitHub hits %d", round, busy, n-1, h)
+		}
+		if err := <-errs; errors.Is(err, selfupdate.ErrBusy) {
+			t.Fatalf("round %d: the running Check: %v", round, err)
+		}
+		if st := u.Status(); st.State != selfupdate.StateIdle {
+			t.Fatalf("round %d: state after: %s", round, st.State)
+		}
+	}
+}
 func assertFile(t *testing.T, path string, want []byte) {
 	t.Helper()
 	got, err := os.ReadFile(path) //nolint:gosec // G304: test temp file

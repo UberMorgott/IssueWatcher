@@ -97,6 +97,7 @@ type Updater struct {
 	rel       *Release
 	checkedAt time.Time
 	lastPub   time.Time
+	op        uint64 // bumped when Check or Install takes the state; a late result of an older op is dropped
 }
 
 // New returns an idle Updater.
@@ -148,18 +149,24 @@ func (u *Updater) set(f func()) {
 // Check asks GitHub for the newest release of the configured channel.
 func (u *Updater) Check(ctx context.Context) (Status, error) {
 	u.mu.Lock()
-	if u.state != StateIdle {
+	if u.state != StateIdle { // check-and-set under one lock: two Checks cannot both start
 		st := u.statusLocked()
 		u.mu.Unlock()
 		return st, ErrBusy
 	}
+	u.op++
+	op := u.op
+	u.state, u.err = StateChecking, ""
 	u.mu.Unlock()
-	u.set(func() { u.state, u.err = StateChecking, "" })
+	u.set(func() {})
 	channel := u.opts.Prefs().Channel
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	rel, err := u.opts.Source.Latest(ctx, channel)
 	u.set(func() {
+		if u.op != op { // another operation owns the state now
+			return
+		}
 		u.state = StateIdle
 		if err != nil {
 			u.err = err.Error()
@@ -196,6 +203,7 @@ func (u *Updater) Install() error {
 		return ErrNoUpdate
 	}
 	rel := u.rel
+	u.op++
 	u.state, u.err, u.done, u.total = StateDownloading, "", 0, 0
 	st := u.statusLocked()
 	go func() {
