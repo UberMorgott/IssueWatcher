@@ -192,15 +192,8 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 			p.opts.Log.Info("steam: QR sign-in cancelled before the session was stored")
 			return
 		}
-		p.setQR(l, func(s *QRStatus) {
-			s.ChallengeURL = ""
-			if err != nil {
-				s.State, s.Error = QRFailed, err.Error()
-				return
-			}
-			s.State, s.SteamID = QRDone, id
-		})
 		if err != nil {
+			p.setQR(l, func(s *QRStatus) { s.State, s.Error, s.ChallengeURL = QRFailed, err.Error(), "" })
 			p.opts.Log.Error("steam: QR sign-in failed", "err", err)
 			return
 		}
@@ -211,9 +204,12 @@ func (p *Provider) pollQR(ctx context.Context, l *qrLogin, clientID, requestID s
 			f = nil
 		}
 		p.qmu.Unlock()
+		// The hook runs before QRDone is published (outside qmu, so it may
+		// read the status): a caller that sees "done" can rely on it having run.
 		if f != nil {
 			f()
 		}
+		p.setQR(l, func(s *QRStatus) { s.State, s.SteamID, s.ChallengeURL = QRDone, id, "" })
 		return
 	}
 }
