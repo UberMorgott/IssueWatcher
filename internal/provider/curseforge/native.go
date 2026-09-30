@@ -50,14 +50,21 @@ const (
 )
 
 // SignInSpec is the CurseForge «Подключить» for signin.New (probe = the
-// site's users/profile over the candidate cookies).
+// site's users/profile over the candidate cookies, plain HTTP only).
 func SignInSpec(hc *http.Client, log *slog.Logger) signin.Spec {
-	n := &native{opts: NativeOptions{HTTP: hc}, now: time.Now}
+	return SignInSpecBrowser(hc, log, nil)
+}
+
+// SignInSpecBrowser is SignInSpec whose probe, on a Cloudflare-challenged
+// plain answer, reads users/profile inside br (read-only GET, as check does);
+// the candidate cookies come from that same browser profile.
+func SignInSpecBrowser(hc *http.Client, log *slog.Logger, br Fetcher) signin.Spec {
+	n := &native{opts: NativeOptions{HTTP: hc, Browser: br}, now: time.Now}
 	n.fill()
 	return signin.Spec{
 		Platform: Platform, LoginURL: signInURL, Domains: []string{"curseforge.com"}, Origins: Origins, Log: log,
 		Probe: func(ctx context.Context, jar *websession.Jar) (string, error) {
-			s, err := n.profile(ctx, jar)
+			s, _, err := n.check(ctx, jar)
 			if err != nil {
 				return "", err
 			}

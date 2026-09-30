@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -326,6 +327,32 @@ func (f *fakeBrowser) Fetch(_ context.Context, req browser.Request) (browser.Res
 		return browser.Response{Status: 200, URL: req.URL, Body: `{"userId":136845864,"displayName":"Morgott"}`}, nil
 	}
 	return browser.Response{Status: 200, URL: req.URL, Body: `{"data":{"id":9990004}}`}, nil
+}
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// A challenged plain users/profile falls back to a read-only browser probe, so
+// a signed-in user is recognized instead of waiting out the sign-in timeout.
+func TestSignInProbeBrowserOnChallenge(t *testing.T) {
+	hc := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{"Cf-Mitigated": {"challenge"}}, Request: r,
+			Body: io.NopCloser(strings.NewReader("<title>Just a moment...</title>"))}, nil
+	})}
+	jar := websession.Memory([]websession.Cookie{{Name: "sid", Value: "x", Domain: "curseforge.com", Path: "/", Secure: true}}, "")
+	fb := &fakeBrowser{}
+	acc, err := SignInSpecBrowser(hc, nil, fb).Probe(t.Context(), jar)
+	if err != nil || acc != "Morgott" {
+		t.Fatalf("probe = %q, %v", acc, err)
+	}
+	if len(fb.reqs) != 1 || fb.reqs[0].Method != "" || !strings.HasSuffix(fb.reqs[0].URL, "/api/v1/users/profile") {
+		t.Fatalf("browser probe requests: %+v", fb.reqs)
+	}
+	// Without a browser the challenge stays "not signed in".
+	if _, err := SignInSpec(hc, nil).Probe(t.Context(), jar); !errors.Is(err, provider.ErrNotSignedIn) {
+		t.Fatalf("no browser: err = %v", err)
+	}
 }
 
 func TestNativeReplyBrowserWhenPreflightChallenged(t *testing.T) {
