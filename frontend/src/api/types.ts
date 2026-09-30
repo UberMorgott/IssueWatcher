@@ -56,8 +56,10 @@ export interface Repo extends FixTarget {
   open: number
   closed: number
   unread: number
-  /** Open / unread items of kind comment (the rest of open / unread are issues and bug reports). */
+  /** Open / unread items of kind comment (the rest of open / unread are issues and bug reports); open = waiting for an answer. */
   openComments?: number
+  /** Comment threads answered or resolved (flat project list only). */
+  closedComments?: number
   unreadComments?: number
   /** Mapped local working folder; "" = not mapped. */
   localPath?: string

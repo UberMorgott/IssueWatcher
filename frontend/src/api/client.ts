@@ -2,6 +2,7 @@ import type {
   Comment,
   CommentChunk,
   Health,
+  ItemKind,
   IssueDetail,
   IssueChunk,
   IssueQuery,
@@ -174,6 +175,13 @@ export const api = {
     call<CommentChunk>('GET', `/api/items/${id}/comments?limit=${limit}` + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')),
   issue: (id: number | string) => call<IssueDetail>('GET', `/api/items/${encodeURIComponent(String(id))}`),
   markRead: (id: number) => call<void>('POST', `/api/items/${id}/read`),
+  /** Distinct labels of the items of these kinds (the list's label filter). */
+  itemLabels: (kinds: ItemKind[]) => call<string[]>('GET', '/api/items/labels' + (kinds.length ? '?kind=' + kinds.join(',') : '')),
+  markUnread: (id: number) => call<void>('POST', `/api/items/${id}/unread`),
+  /** Bulk read (unread=true: mark unread) → the items whose flag really changed. */
+  setRead: (ids: number[], unread = false) => call<{ changed: number }>('POST', '/api/items/read', { ids, unread }),
+  /** Local «Решено» flag of comment threads (never sent to the platform). */
+  setResolved: (ids: number[], resolved: boolean) => call<{ changed: number }>('POST', '/api/items/resolve', { ids, resolved }),
   reply: (id: number, body: string) => call<Comment>('POST', `/api/items/${id}/comments`, { body }),
 
   stats(repo?: number, weeks = 26) {

@@ -26,6 +26,7 @@ import { useCrumbs } from '../lib/crumbs'
 import { useChunks } from '../lib/chunks'
 import { commentsCache, itemCache, itemJobsCache } from '../lib/cache'
 import { isModPlatform, itemRef, platformName } from '../lib/platforms'
+import { currentItemKind } from '../lib/currentItem'
 
 const props = defineProps<{ id: string }>()
 const app = useAppStore()
@@ -44,6 +45,8 @@ const replyError = ref('')
 // Generation guard: only the newest load may write the page (a late answer for
 // the previous item, or an older quiet refresh, is dropped).
 let loadGen = 0
+/** «Непрочитано» clicked on this item: refreshes leave it unread until the reader leaves. */
+let keptUnread = false
 async function load(quiet = false) {
   if (!quiet) state.value = 'loading'
   const id = props.id
@@ -57,9 +60,10 @@ async function load(quiet = false) {
   }
   item.value = r.data
   state.value = 'ok'
-  // Steam has no threads: a reply is a new comment addressed to the author.
-  if (!reply.value && !app.caps(r.data.platform || 'github').replyThreaded && r.data.author) reply.value = '@' + r.data.author + ' '
-  if (r.data.unread) {
+  // Steam has no threads: a reply is a new comment addressed to the author (never to oneself).
+  if (!reply.value && !app.caps(r.data.platform || 'github').replyThreaded && r.data.author && !r.data.mine) reply.value = '@' + r.data.author + ' '
+  // Opening marks the item read, unless the reader just marked it unread here.
+  if (r.data.unread && !keptUnread) {
     const m = await api.markRead(r.data.id)
     if (m.ok) {
       if (g === loadGen && id === props.id) item.value = { ...r.data, unread: false }
@@ -95,6 +99,7 @@ watch(
   () => props.id,
   () => {
     comments.reset()
+    keptUnread = false
     // The reply draft belongs to the item it was typed for.
     reply.value = ''
     replyError.value = ''
@@ -111,7 +116,49 @@ watch(
 )
 watch(item, (it) => {
   if (it) itemCache.set(it.id, it)
+  currentItemKind.value = it?.kind ?? ''
+  // Page title by kind: a mod page thread or bug report is no «Issue».
+  if (it) document.title = 'IssueWatcher · ' + t('title.itemKind.' + it.kind)
 })
+onBeforeUnmount(() => {
+  currentItemKind.value = ''
+})
+
+/** Comment thread state: waiting for the owner's answer, answered (owner wrote last) or resolved («Решено», local). */
+const threadState = computed(() => {
+  const it = item.value
+  if (!it || it.kind !== 'comment') return ''
+  return it.resolved ? 'resolved' : it.state === 'open' ? 'waiting' : 'answered'
+})
+const marking = ref(false)
+async function markUnread() {
+  const it = item.value
+  if (!it || marking.value) return
+  marking.value = true
+  const r = await api.markUnread(it.id)
+  marking.value = false
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+    return
+  }
+  keptUnread = true
+  if (String(it.id) === props.id) item.value = { ...it, unread: true }
+  void app.loadRepos()
+}
+async function setResolved(resolved: boolean) {
+  const it = item.value
+  if (!it || marking.value) return
+  marking.value = true
+  const r = await api.setResolved([it.id], resolved)
+  marking.value = false
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+    return
+  }
+  toast.add({ severity: 'success', summary: t(resolved ? 'comments.resolvedToast' : 'comments.reopenedToast', 1), detail: itemRef(it), life: 3000 })
+  void load(true)
+  void app.loadRepos()
+}
 watch(
   () => app.dataVersion,
   () => {
@@ -127,6 +174,17 @@ const caps = computed(() => app.caps(platform.value))
 const pname = computed(() => platformName(platform.value))
 /** The account replies go out as: the GitHub login, or the platform's checked account. */
 const account = computed(() => (mod.value ? (app.platforms.find((p) => p.id === platform.value)?.account ?? '') : (app.github?.login ?? '')))
+/** How the owner is shown: the display name when the account is an id (Steam persona), else the account. */
+const selfName = computed(() => {
+  if (!mod.value) return account.value
+  const p = app.platforms.find((x) => x.id === platform.value)
+  return p?.accountName || account.value
+})
+/** A post's author as shown: the owner by display name (never a raw SteamID), others as synced. */
+const authorName = (name: string, mine: boolean) => (mine ? selfName.value || t('item.youTag') : name || t('common.unknown'))
+const isComment = computed(() => item.value?.kind === 'comment')
+/** Lists this item belongs to: Comments for a mod page thread, else Issues. */
+const listRoute = computed(() => (isComment.value ? 'comments' : 'issues'))
 const canReply = computed(() => (mod.value ? caps.value.reply : app.githubConnected))
 /** A mod page's linked code project (shown in the meta list). */
 const codeRepo = computed(() => (mod.value && repo.value?.linkedTo ? app.repos.find((r) => r.id === repo.value?.linkedTo) : undefined))
@@ -264,8 +322,8 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
     >
       <Button
         as="router-link"
-        to="/issues"
-        :label="t('item.back')"
+        :to="currentItemKind === 'comment' ? '/comments' : '/issues'"
+        :label="currentItemKind === 'comment' ? t('item.backComments') : t('item.back')"
         icon="pi pi-arrow-left"
         severity="secondary"
         size="small"
@@ -280,15 +338,45 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
           </h2>
           <div class="head-meta">
             <span
+              v-if="threadState"
+              class="state-pill"
+              :class="threadState === 'waiting' ? 'open' : 'closed'"
+            >
+              <i :class="threadState === 'waiting' ? 'pi pi-clock' : 'pi pi-check-circle'" />
+              {{ t('comments.state.' + threadState) }}
+            </span>
+            <span
+              v-else
               class="state-pill"
               :class="item.state"
             >
               <i :class="item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'" />
               {{ item.state === 'closed' ? t('item.closed') : t('item.open') }}
             </span>
-            <span class="muted">{{ t('words.comments', item.comments) }}</span>
+            <span class="muted">{{ isComment ? t('words.replies', item.comments) : t('words.comments', item.comments) }}</span>
           </div>
         </div>
+        <Button
+          v-if="threadState"
+          :label="threadState === 'resolved' ? t('comments.reopen') : t('comments.resolve')"
+          :icon="threadState === 'resolved' ? 'pi pi-undo' : 'pi pi-check'"
+          :loading="marking"
+          severity="secondary"
+          outlined
+          size="small"
+          @click="setResolved(threadState !== 'resolved')"
+        />
+        <Button
+          v-if="item.state === 'open' && !item.unread"
+          v-tooltip.bottom="t('item.markUnreadTip')"
+          :label="t('item.markUnread')"
+          icon="pi pi-eye-slash"
+          :disabled="marking"
+          severity="secondary"
+          text
+          size="small"
+          @click="markUnread"
+        />
         <Button
           as="a"
           :href="safeUrl(item.url)"
@@ -316,10 +404,20 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               <span
                 v-else
                 class="av"
-              >{{ initials(item.author) }}</span>
-              <b>{{ item.author || t('common.unknown') }}</b>
-              <span class="muted">{{ t('item.opened', { time: relTime(item.createdAt) }) }}</span>
-              <span class="author-tag">{{ t('item.authorTag') }}</span>
+              >{{ initials(authorName(item.author, item.mine)) }}</span>
+              <b>{{ authorName(item.author, item.mine) }}</b>
+              <span
+                v-tooltip.top="absTime(item.createdAt)"
+                class="muted"
+              >{{ isComment ? t('item.wrote', { time: relTime(item.createdAt) }) : t('item.opened', { time: relTime(item.createdAt) }) }}</span>
+              <span
+                v-if="!isComment"
+                class="author-tag"
+              >{{ t('item.authorTag') }}</span>
+              <span
+                v-if="item.mine"
+                class="you-tag"
+              >{{ t('item.youTag') }}</span>
             </header>
             <div
               class="post-body"
@@ -345,18 +443,18 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               <span
                 v-else
                 class="av"
-              >{{ initials(c.author) }}</span>
-              <b>{{ c.author || t('common.unknown') }}</b>
+              >{{ initials(authorName(c.author, c.mine)) }}</span>
+              <b>{{ authorName(c.author, c.mine) }}</b>
               <span
                 v-tooltip.top="absTime(c.createdAt)"
                 class="muted"
-              >{{ t('item.commented', { time: relTime(c.createdAt) }) }}</span>
+              >{{ isComment ? t('item.replied', { time: relTime(c.createdAt) }) : t('item.commented', { time: relTime(c.createdAt) }) }}</span>
               <span
-                v-if="c.author && c.author === item.author"
+                v-if="c.author && c.author === item.author && !isComment"
                 class="author-tag"
               >{{ t('item.authorTag') }}</span>
               <span
-                v-if="c.author && c.author === account"
+                v-if="c.mine"
                 class="you-tag"
               >{{ t('item.youTag') }}</span>
               <a
@@ -391,7 +489,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               <span
                 v-if="account"
                 class="muted"
-              >{{ t('item.replyAs', { login: (mod ? '' : '@') + account }) }}</span>
+              >{{ t('item.replyAs', { login: (mod ? '' : '@') + selfName }) }}</span>
               <span class="muted markup">{{ t('platforms.markupHint', { markup: t('platforms.markup.' + platform) }) }}</span>
             </div>
             <Textarea
@@ -442,7 +540,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
           <dl>
             <dt>{{ t('item.metaProject') }}</dt>
             <dd>
-              <RouterLink :to="{ name: 'issues', query: { repo: String(item.repoId), state: 'all' } }">
+              <RouterLink :to="{ name: listRoute, query: { repo: String(item.repoId), state: 'all' } }">
                 {{ item.repo }}
               </RouterLink>
             </dd>
@@ -526,9 +624,12 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
                 @click="folderOpen = true"
               />
             </dd>
-            <dt>{{ t('item.metaTotals') }}</dt>
-            <dd v-if="repo">
-              <span class="mono">{{ repo.open }}</span> {{ t('words.open', repo.open) }} · <span class="mono">{{ repo.closed }}</span> {{ t('words.closed', repo.closed) }}
+            <dt>{{ isComment ? t('item.metaThreads') : t('item.metaTotals') }}</dt>
+            <dd v-if="repo && isComment">
+              <span class="mono">{{ repo.openComments ?? 0 }}</span> {{ t('words.waiting', repo.openComments ?? 0) }} · <span class="mono">{{ repo.closedComments ?? 0 }}</span> {{ t('words.answered', repo.closedComments ?? 0) }}
+            </dd>
+            <dd v-else-if="repo">
+              <span class="mono">{{ repo.open - (repo.openComments ?? 0) }}</span> {{ t('words.open', repo.open - (repo.openComments ?? 0)) }} · <span class="mono">{{ repo.closed - (repo.closedComments ?? 0) }}</span> {{ t('words.closed', repo.closed - (repo.closedComments ?? 0)) }}
             </dd>
             <dd
               v-else
@@ -660,7 +761,17 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
+}
+
+/* Title first, the actions (Решено, Непрочитано, open on the platform) packed at the end. */
+.head > .head-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.head > :not(.head-main) {
+  flex: none;
 }
 
 .title {

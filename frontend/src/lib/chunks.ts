@@ -26,6 +26,8 @@ export interface ChunkCounts {
   open: number
   closed: number
   unread: number
+  /** Comment threads marked «Решено» (issue list). */
+  resolved?: number
 }
 
 /**

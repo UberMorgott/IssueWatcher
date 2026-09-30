@@ -21,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { typing } from '../lib/shortcuts'
 import { useChunks } from '../lib/chunks'
+import { rememberPosition, takePosition, type ListPosition } from '../lib/listMemory'
 
 // Two pages over one list: Issues (issues + mod bug reports) and Comments (mod
 // page comment threads); the preset fixes the kinds the list may show.
@@ -45,13 +46,15 @@ const SKELETON_ROWS = 6
 
 // Filters live in the URL so a filtered view can be bookmarked and survives reloads.
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
+const stateValues = computed(() => (isComments.value ? ['open', 'resolved', 'all'] : ['open', 'closed', 'all']))
 const filters = computed(() => ({
   preset: props.preset,
   source: str(route.query.source),
   // A kind outside the page's preset is ignored (the comments page shows only comments).
   kind: presetKinds.value.length > 1 && (presetKinds.value as string[]).includes(str(route.query.kind)) ? (str(route.query.kind) as ItemKind) : ('' as const),
   repo: Number(str(route.query.repo)) || 0,
-  state: (['open', 'closed', 'all'].includes(str(route.query.state)) ? str(route.query.state) : 'open') as 'open' | 'closed' | 'all',
+  // Comments page: open = waiting for an answer, resolved = «Решено»; Issues page: open / closed.
+  state: (stateValues.value.includes(str(route.query.state)) ? str(route.query.state) : 'open') as 'open' | 'closed' | 'resolved' | 'all',
   label: str(route.query.label),
   q: str(route.query.q),
   unread: route.query.unread === '1',
@@ -78,7 +81,12 @@ const total = list.total
 const listError = list.error
 const selected = ref<Issue[]>([])
 const cursor = ref(-1)
+/** Every label of this page's items (server), plus the ones seen in loaded rows meanwhile. */
 const seenLabels = ref(new Set<string>())
+async function loadLabels() {
+  const r = await api.itemLabels(presetKinds.value)
+  if (r.ok) seenLabels.value = new Set([...seenLabels.value, ...r.data])
+}
 const skeletons: Row[] = Array.from({ length: SKELETON_ROWS }, (_, i) => ({ id: -1 - i, skeleton: true }) as Row)
 /** Loaded rows plus skeleton rows at the tail while the next chunk loads. */
 const rows = computed<Row[]>(() => (list.loading.value || (!items.value.length && !list.done.value && !list.error.value) ? [...items.value, ...skeletons] : items.value))
@@ -138,16 +146,33 @@ async function keepAnchor(deltaRows: number) {
   el.scrollTop = Math.max(0, top + deltaRows * ROW.value)
 }
 
-function reload() {
+function reload(restore?: ListPosition) {
   list.reset()
   newAbove.value = 0
   cursor.value = -1
+  lastToggled = -1
   selected.value = [] // bulk actions never reach rows the new filter hides
   scroller()?.scrollTo({ top: 0 })
-  if (!app.onboarding) void list.loadMore().then(checkNearEnd)
+  if (app.onboarding) return
+  void list.loadMore().then(async () => {
+    // Back from an item: the rows and the cursor where the reader left.
+    if (restore) {
+      const screens = Math.ceil((restore.top + (scroller()?.clientHeight ?? 0)) / ROW.value)
+      while (items.value.length < Math.max(screens, restore.cursor + 1) && !list.done.value && !list.error.value) await list.loadMore()
+      await nextTick()
+      const el = scroller()
+      if (el) el.scrollTop = restore.top
+      if (restore.cursor < items.value.length) cursor.value = restore.cursor
+    }
+    checkNearEnd()
+  })
 }
-watch(filters, reload, { deep: true })
-watch(() => app.onboarding, reload)
+const positionKey = () => 'items:' + JSON.stringify(query())
+watch(filters, () => reload(), { deep: true })
+watch(
+  () => app.onboarding,
+  () => reload(),
+)
 
 // --- live updates: new/moved rows at the head, changed rows patched in place,
 // rows that left the filter removed; the scroll position stays put.
@@ -262,11 +287,19 @@ function setSource(v: string) {
   const keep = !!r && (!v || r.platform === v || !!r.links?.some((id) => repoById.value.get(id)?.platform === v))
   setQuery({ source: v, repo: keep ? filters.value.repo : null })
 }
-const stateOptions = computed(() => [
-  { label: t('issues.open'), value: 'open' },
-  { label: t('issues.closed'), value: 'closed' },
-  { label: t('issues.all'), value: 'all' },
-])
+const stateOptions = computed(() =>
+  isComments.value
+    ? [
+        { label: t('comments.waitingFilter'), value: 'open' },
+        { label: t('comments.resolvedFilter'), value: 'resolved' },
+        { label: t('issues.all'), value: 'all' },
+      ]
+    : [
+        { label: t('issues.open'), value: 'open' },
+        { label: t('issues.closed'), value: 'closed' },
+        { label: t('issues.all'), value: 'all' },
+      ],
+)
 const labelOptions = computed(() => {
   const s = new Set(seenLabels.value)
   if (filters.value.label) s.add(filters.value.label)
@@ -282,7 +315,7 @@ function reset() {
 }
 
 /** Header counters from the server for the active filters (all but state / unread). */
-const counts = computed(() => list.counts.value ?? { open: 0, closed: 0, unread: 0 })
+const counts = computed(() => ({ resolved: 0, ...(list.counts.value ?? { open: 0, closed: 0, unread: 0 }) }))
 /** Re-reads the counters (a read or a sync changed them; the head refresh may not run). */
 async function refreshCounts() {
   const r = await api.issues({ ...query(), limit: 1 })
@@ -292,30 +325,48 @@ async function refreshCounts() {
 const stateCount = computed(() => {
   const c = counts.value
   if (filters.value.unread) return c.unread
-  return filters.value.state === 'open' ? c.open : filters.value.state === 'closed' ? c.closed : c.open + c.closed
+  switch (filters.value.state) {
+    case 'open':
+      return c.open
+    case 'closed':
+      return c.closed
+    case 'resolved':
+      return c.resolved
+    default:
+      return c.open + c.closed
+  }
 })
 
 function open(it: Row) {
-  if (!it.skeleton) void router.push(`/item/${it.id}`)
+  if (it.skeleton) return
+  cursor.value = items.value.findIndex((x) => x.id === it.id) // back from the item lands on this row
+  void router.push(`/item/${it.id}`)
 }
 
-// --- bulk actions
-async function markSelectedRead() {
-  // Every selected row, not only the unread ones: the flag on a row can lag the server, and marking a read item is a no-op.
+// --- bulk actions: one request each; the toast counts the rows that really changed.
+const busy = ref(false)
+async function bulk(action: 'read' | 'unread' | 'resolve' | 'reopen') {
+  // Every selected row, not only the matching ones: a row's flags can lag the server, and a no-op is harmless.
   const ids = selected.value.map((i) => i.id)
-  const results = await Promise.all(ids.map((id) => api.markRead(id)))
-  const failed = results.filter((r) => !r.ok).length
-  // Show the new state at once; the refetch below (via invalidate) confirms it or drops rows the filter hides.
-  const done = new Set(ids.filter((_, i) => results[i].ok))
-  items.value = items.value.map((it) => (done.has(it.id) && it.unread ? { ...it, unread: false } : it))
-  toast.add({
-    severity: failed ? 'warn' : 'success',
-    summary: failed ? t('issues.markFailed', { failed, total: ids.length }) : t('issues.marked', { n: ids.length }),
-    life: 3000,
-  })
+  if (!ids.length || busy.value) return
+  busy.value = true
+  const r = action === 'read' || action === 'unread' ? await api.setRead(ids, action === 'unread') : await api.setResolved(ids, action === 'resolve')
+  busy.value = false
+  if (!r.ok) {
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: r.error, life: 5000 })
+    return
+  }
+  // Show the new state at once; the refetch below (invalidate) confirms it or drops rows the filter hides.
+  const sel = new Set(ids)
+  if (action === 'read' || action === 'unread') {
+    const unread = action === 'unread'
+    items.value = items.value.map((it) => (sel.has(it.id) && it.unread !== unread && (!unread || it.state === 'open') ? { ...it, unread } : it))
+  }
+  toast.add({ severity: 'success', summary: t('issues.bulkDone.' + action, { n: r.data.changed }), life: 3000 })
   selected.value = []
-  for (const id of ids) app.invalidate({ reason: 'read', itemId: id }) // coalesces with the server's data.changed
+  app.invalidate() // several rows changed: re-check every loaded row
 }
+const allResolved = computed(() => selected.value.length > 0 && selected.value.every((s) => s.resolved))
 
 const dispatchOpen = ref(false)
 
@@ -327,38 +378,64 @@ function focusSearch() {
 function ensureVisible(i: number) {
   virtualizer.value.scrollToIndex(i, { align: 'auto' })
 }
+// Physical keys (e.code): the shortcuts work on any keyboard layout (ЙЦУКЕН too).
 function onKey(e: KeyboardEvent) {
   if (e.ctrlKey || e.metaKey || e.altKey || typing(e) || !items.value.length) return
-  const k = e.key.toLowerCase()
-  if (k === 'j' || k === 'k') {
-    e.preventDefault()
-    cursor.value = Math.min(items.value.length - 1, Math.max(0, cursor.value + (k === 'j' ? 1 : -1)))
-    ensureVisible(cursor.value)
-  } else if (k === 'enter' && cursor.value >= 0) {
-    open(items.value[cursor.value])
-  } else if (k === 'x' && cursor.value >= 0) {
-    const it = items.value[cursor.value]
-    selected.value = selected.value.some((s) => s.id === it.id) ? selected.value.filter((s) => s.id !== it.id) : [...selected.value, it]
-  } else if (k === 'escape' && selected.value.length) {
-    selected.value = []
+  switch (e.code) {
+    case 'KeyJ':
+    case 'KeyK':
+      e.preventDefault()
+      cursor.value = Math.min(items.value.length - 1, Math.max(0, cursor.value + (e.code === 'KeyJ' ? 1 : -1)))
+      ensureVisible(cursor.value)
+      break
+    case 'Enter':
+    case 'NumpadEnter':
+      if (cursor.value >= 0) open(items.value[cursor.value])
+      break
+    case 'KeyX':
+      if (cursor.value >= 0) toggleAt(cursor.value, e.shiftKey)
+      break
+    case 'Escape':
+      if (selected.value.length) selected.value = []
+      break
   }
 }
 const selectedIds = computed(() => new Set(selected.value.map((s) => s.id)))
 const cursorId = computed(() => items.value[cursor.value]?.id)
-function toggle(it: Row) {
-  selected.value = selectedIds.value.has(it.id) ? selected.value.filter((s) => s.id !== it.id) : [...selected.value, it]
+/** Row of the last checkbox toggle: Shift extends the selection from it. */
+let lastToggled = -1
+/** Toggles row i (the cursor follows); with range, every row from the last toggled one takes row i's new state. */
+function toggleAt(i: number, range = false) {
+  const it = items.value[i]
+  if (!it) return
+  const on = !selectedIds.value.has(it.id)
+  const from = range && lastToggled >= 0 ? Math.min(lastToggled, i) : i
+  const to = range && lastToggled >= 0 ? Math.max(lastToggled, i) : i
+  const rows = items.value.slice(from, to + 1)
+  const ids = new Set(rows.map((r) => r.id))
+  selected.value = on ? [...selected.value.filter((s) => !ids.has(s.id)), ...rows] : selected.value.filter((s) => !ids.has(s.id))
+  lastToggled = i
+  cursor.value = i
+}
+function toggle(it: Row, range = false) {
+  toggleAt(
+    items.value.findIndex((x) => x.id === it.id),
+    range,
+  )
 }
 const allSelected = computed(() => items.value.length > 0 && items.value.every((it) => selectedIds.value.has(it.id)))
 function toggleAll() {
   selected.value = allSelected.value ? [] : [...items.value]
 }
 onMounted(() => {
-  reload()
+  reload(takePosition(positionKey()))
+  void loadLabels()
   window.addEventListener('keydown', onKey)
   window.addEventListener('iw:focus-search', focusSearch)
   if (route.query.focus) focusSearch()
 })
 onBeforeUnmount(() => {
+  rememberPosition(positionKey(), { top: scroller()?.scrollTop ?? 0, cursor: cursor.value })
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('iw:focus-search', focusSearch)
 })
@@ -371,8 +448,15 @@ onBeforeUnmount(() => {
       class="page-head"
     >
       <div class="counters">
-        <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> {{ t('words.open', counts.open) }}</span>
-        <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed }}</b> {{ t('words.closed', counts.closed) }}</span>
+        <template v-if="isComments">
+          <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> {{ t('words.waiting', counts.open) }}</span>
+          <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed - counts.resolved }}</b> {{ t('words.answered', counts.closed - counts.resolved) }}</span>
+          <span class="counter"><i class="pi pi-check" /> <b class="mono">{{ counts.resolved }}</b> {{ t('words.resolved', counts.resolved) }}</span>
+        </template>
+        <template v-else>
+          <span class="counter"><span class="c-dot open" /> <b class="mono">{{ counts.open }}</b> {{ t('words.open', counts.open) }}</span>
+          <span class="counter"><span class="c-dot closed" /> <b class="mono">{{ counts.closed }}</b> {{ t('words.closed', counts.closed) }}</span>
+        </template>
         <span class="counter"><span class="unread-dot" /> <b class="mono">{{ counts.unread }}</b> {{ t('words.unread', counts.unread) }}</span>
       </div>
     </div>
@@ -457,6 +541,7 @@ onBeforeUnmount(() => {
             </template>
           </Select>
           <Select
+            v-if="!isComments"
             :model-value="filters.label"
             :options="labelOptions"
             option-label="label"
@@ -497,6 +582,7 @@ onBeforeUnmount(() => {
           </button>
           <div
             class="vt"
+            :class="{ 'no-labels': isComments }"
             role="grid"
             :aria-rowcount="total ?? undefined"
             :style="{ '--row': ROW + 'px' }"
@@ -519,14 +605,15 @@ onBeforeUnmount(() => {
                 role="columnheader"
               >{{ t('issues.colProject') }}</span>
               <span
+                v-if="!isComments"
                 class="c-labels"
                 role="columnheader"
               >{{ t('issues.colLabels') }}</span>
               <span
                 class="c-num"
                 role="columnheader"
-              >{{ t('issues.colComments') }}</span>
-              <span role="columnheader">{{ t('issues.colUpdated') }}</span>
+              >{{ isComments ? t('comments.colReplies') : t('issues.colComments') }}</span>
+              <span role="columnheader">{{ isComments ? t('comments.colLastReply') : t('issues.colUpdated') }}</span>
             </div>
             <div
               v-if="!rows.length"
@@ -598,7 +685,8 @@ onBeforeUnmount(() => {
                   :top="v.start"
                   :selected="selectedIds.has(rows[v.index].id)"
                   :active="cursorId === rows[v.index].id"
-                  @toggle="toggle(rows[v.index])"
+                  :hide-labels="isComments"
+                  @toggle="(range: boolean) => toggle(rows[v.index], range)"
                   @open="open(rows[v.index])"
                 />
               </div>
@@ -621,10 +709,26 @@ onBeforeUnmount(() => {
             @click="dispatchOpen = true"
           />
           <Button
+            v-if="isComments"
+            :label="allResolved ? t('comments.reopen') : t('comments.resolve')"
+            :icon="allResolved ? 'pi pi-undo' : 'pi pi-check'"
+            severity="secondary"
+            :disabled="busy"
+            @click="bulk(allResolved ? 'reopen' : 'resolve')"
+          />
+          <Button
             :label="t('issues.markRead')"
             icon="pi pi-eye"
             severity="secondary"
-            @click="markSelectedRead"
+            :disabled="busy"
+            @click="bulk('read')"
+          />
+          <Button
+            :label="t('issues.markUnread')"
+            icon="pi pi-eye-slash"
+            severity="secondary"
+            :disabled="busy"
+            @click="bulk('unread')"
           />
           <Button
             v-tooltip.top="t('issues.clearTip')"
@@ -811,8 +915,14 @@ onBeforeUnmount(() => {
   transform: translate(-50%, 12px);
 }
 
+/* Comments page: no labels column (mod pages have no labels). */
+.vt.no-labels {
+  --cols: 2.25rem minmax(0, 1fr) 220px 110px 140px;
+}
+
 @media (width <= 1023px) {
-  .vt {
+  .vt,
+  .vt.no-labels {
     --cols: 2.25rem minmax(0, 1fr) 200px 100px 110px;
   }
 

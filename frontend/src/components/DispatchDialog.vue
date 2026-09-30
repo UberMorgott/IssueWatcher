@@ -5,14 +5,15 @@ import Button from 'primevue/button'
 import Select from 'primevue/select'
 import SelectButton from 'primevue/selectbutton'
 import { useI18n } from 'vue-i18n'
-import type { FixTarget, JobFlow } from '../api/types'
+import type { FixTarget, ItemKind, JobFlow } from '../api/types'
 import { useJobsStore } from '../stores/jobs'
 import { FLOW_ICON, useDispatchToast } from '../lib/jobs'
 import { useAppStore } from '../stores/app'
 import FolderDialog from './FolderDialog.vue'
+import { itemRef } from '../lib/platforms'
 
 // «Отправить агенту»: flow + profile for the selected issues, then POST /api/jobs.
-const props = defineProps<{ items: ({ id: number; repo: string; number: number; title: string } & FixTarget)[] }>()
+const props = defineProps<{ items: ({ id: number; repo: string; number: number; title: string; platform?: string; kind?: ItemKind } & FixTarget)[] }>()
 const visible = defineModel<boolean>('visible', { required: true })
 const emit = defineEmits<{ done: [] }>()
 const { t } = useI18n()
@@ -23,15 +24,17 @@ const flow = ref<JobFlow>('fix')
 const profile = ref('')
 const sending = ref(false)
 
+const app = useAppStore()
+/** Labels only where every selected item's platform has labels (GitHub). */
+const canLabel = computed(() => props.items.every((i) => app.caps(i.platform || 'github').setLabels))
 const flowOptions = computed(() => [
-  { label: t('jobs.flow.fix'), value: 'fix', icon: FLOW_ICON.fix },
-  { label: t('jobs.flow.reply'), value: 'reply', icon: FLOW_ICON.reply },
-  { label: t('jobs.flow.label'), value: 'label', icon: FLOW_ICON.label },
+  { label: t('jobs.flow.fix'), value: 'fix', icon: FLOW_ICON.fix, disabled: false },
+  { label: t('jobs.flow.reply'), value: 'reply', icon: FLOW_ICON.reply, disabled: false },
+  { label: t('jobs.flow.label'), value: 'label', icon: FLOW_ICON.label, disabled: !canLabel.value },
 ])
 // A fix runs in the folder the server reports per item (fixable: the project's
 // own, or a linked mod page's code project's): items without one are skipped
 // (the API refuses them); with none left the fix is disabled.
-const app = useAppStore()
 /** Projects mapped in this dialog (FolderDialog) since the list was loaded. */
 const mappedNow = ref(new Set<number>())
 const unmapped = computed(() => props.items.filter((i) => !i.fixable && !mappedNow.value.has(i.fixProjectId)))
@@ -50,6 +53,12 @@ const folderOpen = ref(false)
 
 const profileOptions = computed(() => jobs.profiles.map((p) => ({ label: `${p.name} · ${p.cli}${p.model ? ' · ' + p.model : ''}`, value: p.id })))
 
+// Opening: comment threads default to a reply draft, the rest to a fix; label only where labels exist.
+watch(visible, (v) => {
+  if (!v) return
+  if (props.items.length && props.items.every((i) => i.kind === 'comment')) flow.value = 'reply'
+  else if (flow.value === 'label' && !canLabel.value) flow.value = 'fix'
+})
 // Default profile = the role of the flow (coder / responder).
 watch([visible, flow], () => {
   if (visible.value) profile.value = jobs.roleProfile(flow.value)
@@ -85,6 +94,7 @@ async function submit() {
           :options="flowOptions"
           option-label="label"
           option-value="value"
+          option-disabled="disabled"
           :allow-empty="false"
           :aria-label="t('jobs.flowLabel')"
         >
@@ -136,7 +146,7 @@ async function submit() {
             v-for="it in items"
             :key="it.id"
           >
-            <span class="mono ref">{{ it.repo }}#{{ it.number }}</span>
+            <span class="mono ref">{{ itemRef(it) }}</span>
             <span class="ttl">{{ it.title }}</span>
           </li>
         </ul>

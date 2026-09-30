@@ -14,8 +14,9 @@ import { useJobsStore } from '../stores/jobs'
 
 // One virtualised row of the issues list. Props are primitives or the row object
 // itself, so a row that stays in view never re-renders while the list scrolls.
-const props = defineProps<{ item: Row; top: number; selected: boolean; active: boolean }>()
-const emit = defineEmits<{ toggle: []; open: [] }>()
+const props = defineProps<{ item: Row; top: number; selected: boolean; active: boolean; hideLabels?: boolean }>()
+/** toggle: range = Shift held (select every row from the last toggled one). */
+const emit = defineEmits<{ toggle: [range: boolean]; open: [] }>()
 const { t } = useI18n()
 
 // The row's job as the live job events know it (fresher than the list row).
@@ -23,8 +24,17 @@ const jobs = useJobsStore()
 const live = computed(() => (props.item.job ? jobs.byId.get(props.item.job.id) : undefined))
 const jobState = computed(() => live.value?.state ?? props.item.job?.state)
 const mod = computed(() => isModPlatform(props.item.platform))
-/** GitHub rows show #N; mod rows their kind (the number is a local ordinal). */
-const ref_ = computed(() => (mod.value ? t('platforms.kindOne.' + (props.item.kind || 'comment')) : '#' + props.item.number))
+const thread = computed(() => props.item.kind === 'comment')
+/** GitHub rows show #N; bug reports their kind; comment threads nothing (the Comments page says it). */
+const ref_ = computed(() => (thread.value ? '' : mod.value ? t('platforms.kindOne.' + (props.item.kind || 'comment')) : '#' + props.item.number))
+/** Comment thread state: waiting for the owner's answer, answered, or resolved («Решено», local). */
+const threadState = computed(() => (!thread.value ? '' : props.item.resolved ? 'resolved' : props.item.state === 'open' ? 'waiting' : 'answered'))
+const stateIcon = computed(() => {
+  if (threadState.value === 'waiting') return 'pi pi-clock'
+  if (threadState.value === 'answered') return 'pi pi-reply'
+  return props.item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'
+})
+const author = computed(() => (props.item.mine ? t('item.youTag') : props.item.author || t('common.unknown')))
 const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.item.job?.outcome ?? '')))
 </script>
 
@@ -46,8 +56,8 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
         v-if="!item.skeleton"
         type="checkbox"
         :checked="selected"
-        :aria-label="'#' + item.number"
-        @change="emit('toggle')"
+        :aria-label="t('issues.selectRow', { title: item.title })"
+        @click="emit('toggle', $event.shiftKey)"
       >
     </span>
     <template v-if="item.skeleton">
@@ -71,7 +81,8 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
         <span
           class="state-icon"
           :class="item.state"
-        ><i :class="item.state === 'closed' ? 'pi pi-check-circle' : 'pi pi-circle'" /></span>
+          :title="threadState ? t('comments.state.' + threadState) : undefined"
+        ><i :class="stateIcon" /></span>
         <span class="t-main">
           <span class="t-line">
             <span
@@ -95,7 +106,10 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           <span
             v-if="item.job && jobState === 'running'"
             class="t-meta t-run"
-          ><span :class="{ mono: !mod, kind: mod }">{{ ref_ }}</span><JobProgress
+          ><span
+            v-if="ref_"
+            :class="{ mono: !mod, kind: mod }"
+          >{{ ref_ }}</span><JobProgress
             :id="item.job.id"
             :attempt="live?.attempt ?? 1"
             :started-at="live?.startedAt"
@@ -104,10 +118,10 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           <span
             v-else
             class="t-meta"
-          ><span :class="{ mono: !mod, kind: mod }">{{ ref_ }}</span><template v-if="outcome"> · <span
+          ><template v-if="ref_"><span :class="{ mono: !mod, kind: mod }">{{ ref_ }}</span> · </template><template v-if="outcome"><span
             class="outcome"
             :class="outcome"
-          >{{ t('jobs.outcome.' + outcome) }}</span> ·</template> {{ t('issues.byOpened', { author: item.author || t('common.unknown'), time: relTime(item.createdAt) }) }}</span>
+          >{{ t('jobs.outcome.' + outcome) }}</span> · </template>{{ thread ? t('issues.byWrote', { author, time: relTime(item.createdAt) }) : t('issues.byOpened', { author, time: relTime(item.createdAt) }) }}</span>
         </span>
       </span>
       <span
@@ -128,6 +142,7 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
         ><span class="p-owner">{{ repoOwner(item.repo) }}/</span>{{ shortRepo(item.repo) }}</span>
       </span>
       <span
+        v-if="!hideLabels"
         class="c-labels"
         role="gridcell"
       >
@@ -141,17 +156,12 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
           class="l-more"
           :title="item.labels.slice(2).join(', ')"
         >+{{ item.labels.length - 2 }}</span>
-        <span
-          v-if="mod && !item.labels.length"
-          class="l-none"
-          :title="t('issues.noLabels')"
-        >—</span>
       </span>
       <span
         class="c-num"
         role="gridcell"
         :class="{ zero: !item.comments }"
-      ><i class="pi pi-comment" /> <span class="mono">{{ item.comments }}</span></span>
+      ><i :class="thread ? 'pi pi-reply' : 'pi pi-comment'" /> <span class="mono">{{ item.comments }}</span></span>
       <span
         class="c-upd"
         role="gridcell"
