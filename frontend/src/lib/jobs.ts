@@ -142,11 +142,14 @@ export function usePush() {
   return { push, busy }
 }
 
-/** Does a live job row belong to a list filtered by state / flow / project? */
-export function matches(j: Job, f: { state: string; flow: string; project: number; origin?: string }): boolean {
+/**
+ * Does a live job row belong to a list filtered by state / flow / project?
+ * projects: the project's scope (itself + its linked mod pages); without it only the exact id.
+ */
+export function matches(j: Job, f: { state: string; flow: string; project: number; origin?: string; projects?: Set<number> }): boolean {
   if (f.flow && j.flow !== f.flow) return false
   if (f.origin && j.origin !== f.origin) return false
-  if (f.project && j.projectId !== f.project) return false
+  if (f.project && !(f.projects ? f.projects.has(j.projectId) : j.projectId === f.project)) return false
   if (f.state === 'active') return isActive(j.state)
   return !f.state || j.state === f.state
 }

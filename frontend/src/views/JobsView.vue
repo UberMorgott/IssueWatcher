@@ -97,12 +97,18 @@ watch(
 )
 
 // Live rows: job.changed patches a loaded row in place (or drops it when it no
-// longer matches the filter); a new job that matches is prepended, keeping the
-// rows under the viewport in place.
+// longer matches the filter); a job that now matches — new, or an older one that
+// moved into the filter (e.g. into needs_review) — goes to its id-sorted place when
+// that place is within the loaded range, keeping the rows under the viewport in place.
+/** The project filter's scope: the project and its linked mod pages (their jobs belong to it). */
+const projectScope = computed(() => {
+  const id = filters.value.project
+  return new Set([id, ...(app.repos.find((r) => r.id === id)?.links ?? [])])
+})
 useJobEvents({
   job: (j) => {
     const i = items.value.findIndex((it) => it.id === j.id)
-    const ok = matches(j, filters.value)
+    const ok = matches(j, { ...filters.value, projects: projectScope.value })
     if (i >= 0) {
       const next = items.value.slice()
       if (ok) next[i] = j
@@ -111,11 +117,19 @@ useJobEvents({
       if (!ok && list.total.value) list.total.value--
       return
     }
-    if (!ok || (items.value.length && j.id < items.value[0].id)) return
-    items.value = [j, ...items.value]
+    if (!ok) return
+    // Rows are newest first (j.id DESC); past the loaded tail the next chunk brings it.
+    let at = items.value.findIndex((it) => it.id < j.id)
+    if (at < 0) {
+      if (!list.done.value) return
+      at = items.value.length
+    }
+    const next = items.value.slice()
+    next.splice(at, 0, j)
+    items.value = next
     if (list.total.value !== null) list.total.value++
     const el = scrollEl.value
-    if (el && el.scrollTop >= ROW.value / 2) {
+    if (el && el.scrollTop >= ROW.value / 2 && at <= Math.floor(el.scrollTop / ROW.value)) {
       const top = el.scrollTop
       void nextTick(() => (el.scrollTop = top + ROW.value))
     }
