@@ -306,6 +306,7 @@ const en = {
     noDescription: 'No description provided.',
     replyAs: 'as {login}',
     replyPlaceholder: 'Write a reply…  (Ctrl+Enter to send)',
+    replyTooLong: '{platform} does not accept a reply longer than {limit} characters — shorten it, or sending fails.',
     replyAria: 'Reply',
     sendReply: 'Send reply',
     notSignedIn: 'Not signed in to GitHub — reconnect on the Connections page.',
@@ -590,6 +591,7 @@ const en = {
       git: 'A git step failed.',
       interrupted: 'The job was interrupted (IssueWatcher restarted).',
       mod_item: 'Push and PR of mod-page fixes are off: the commit stays in the folder. Turn them on in Settings › Agents.',
+      reply_too_long: 'The reply is longer than the platform accepts — shorten it.',
     },
     draftTitle: 'Reply draft',
     draftText: 'Edit before posting; it is posted under your {platform} account.',
@@ -823,6 +825,7 @@ const en = {
     relogin: '{platform}: the session expired — sign in again, then check it in Settings › Platforms.',
     no_source: 'No connected {platform} account serves this item.',
     reply_off: 'Replying is not available for {platform} yet.',
+    too_long: '{platform} does not accept a reply longer than {limit} characters — shorten it.',
   },
   settings: {
     sub: 'Everything is stored next to the exe in {path} — portable; the registry is touched only for autostart, when enabled.',

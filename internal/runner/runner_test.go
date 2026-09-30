@@ -483,6 +483,21 @@ func TestReplyDraftMentionsAuthorWithoutThreads(t *testing.T) {
 	}
 }
 
+// The reply prompt names the platform's limit (Steam: 999), less the «@author »
+// IssueWatcher prepends; no limit of its own (GitHub) adds nothing.
+func TestReplyLimitNote(t *testing.T) {
+	in := store.JobInput{Platform: "steam", Author: "alice"}
+	if n := replyLimitNote(999, in, true); !strings.Contains(n, "at most 992 characters") || !strings.Contains(n, "steam") {
+		t.Fatalf("with mention: %q", n)
+	}
+	if n := replyLimitNote(999, in, false); !strings.Contains(n, "at most 999 characters") {
+		t.Fatalf("own item: %q", n)
+	}
+	if n := replyLimitNote(0, in, true); n != "" {
+		t.Fatalf("no limit: %q", n)
+	}
+}
+
 func TestReplyDraftThreadedHasNoMention(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 1, nil)

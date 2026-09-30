@@ -558,8 +558,12 @@ func (s *Syncer) Reply(ctx context.Context, itemID int64, body string) (store.Co
 var ErrReplyOff = errors.New("syncer: replies are off for this platform")
 
 func (s *Syncer) reply(ctx context.Context, ref store.ItemRef, body string) (store.Comment, error) {
-	if !s.opts.Provider.Capabilities().Reply {
+	caps := s.opts.Provider.Capabilities()
+	if !caps.Reply {
 		return store.Comment{}, ErrReplyOff
+	}
+	if n, limit := provider.ReplyLength(body), caps.ReplyLimit(); n > limit {
+		return store.Comment{}, fmt.Errorf("%w: %d characters, %s accepts at most %d", provider.ErrReplyTooLong, n, s.opts.Provider.Platform(), limit)
 	}
 	itemID := ref.ID
 	c, err := s.opts.Provider.Reply(ctx, ref.ExternalID, body)

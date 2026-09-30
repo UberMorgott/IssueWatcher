@@ -516,7 +516,7 @@ export interface VerifyResult {
   timedOut?: boolean
 }
 
-export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'agent_auth' | 'git' | 'interrupted' | 'mod_item'
+export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'agent_auth' | 'git' | 'interrupted' | 'mod_item' | 'reply_too_long'
 
 export interface LocalCommit {
   sha: string
@@ -814,6 +814,8 @@ export interface Capabilities {
   kinds: ItemKind[]
   /** false: a reply is a new top-level comment (Steam «@author …»). */
   replyThreaded: boolean
+  /** Longest reply the platform accepts, in characters (Steam 999); absent = DEFAULT_MAX_REPLY. */
+  maxReply?: number
 }
 
 export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'error'

@@ -210,6 +210,17 @@ func (g *Group) ReplyThreaded(platform string) bool {
 	return true
 }
 
+// MaxReply is the Capabilities.MaxReply of platform's provider: the longest
+// reply it accepts, 0 when the platform has no limit of its own.
+func (g *Group) MaxReply(platform string) int {
+	for _, s := range g.Syncers() {
+		if s.opts.Provider.Platform() == platform {
+			return s.opts.Provider.Capabilities().MaxReply
+		}
+	}
+	return 0
+}
+
 // syncerFor is the syncer of source sourceID, else the only syncer of platform, else nil.
 func syncerFor(syncers []*Syncer, platform string, sourceID int64) *Syncer {
 	var same []*Syncer

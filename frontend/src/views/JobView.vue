@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { safeUrl } from '../lib/safeUrl'
 import { jobCache } from '../lib/cache'
-import { jobPlatform, platformName } from '../lib/platforms'
+import { jobPlatform, platformName, replyLength, replyLimit, replyTooLong } from '../lib/platforms'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -52,7 +52,6 @@ const confirm = useConfirm()
 const app = useAppStore()
 const jobs = useJobsStore()
 
-const MAX_REPLY = 65536
 
 const job = ref<Job | null>(null)
 const state = ref<'loading' | 'ok' | 'missing' | 'error'>('loading')
@@ -225,6 +224,9 @@ const can = computed(() => {
 const modOff = computed(() => !!job.value && modPushOff(job.value))
 /** The job's platform and whether the app is signed in there (Reply / Labels publish there). */
 const platform = computed(() => (job.value ? jobPlatform(job.value, app.repos) : 'github'))
+/** The platform's reply limit (Steam 999 characters, GitHub 65536): a longer draft is not sent. */
+const maxReply = computed(() => replyLimit(app.caps(platform.value)))
+const draftTooLong = computed(() => replyTooLong(draft.value, maxReply.value))
 const signedIn = computed(() =>
   platform.value === 'github' ? app.githubConnected : app.platforms.some((p) => p.id === platform.value && p.state === 'connected'),
 )
@@ -306,7 +308,7 @@ async function applyLabels() {
 async function sendReply() {
   const j = job.value
   const body = draft.value.trim()
-  if (!j || !body || busy.value) return
+  if (!j || !body || busy.value || draftTooLong.value) return
   busy.value = 'reply'
   const r = await api.jobReply(j.id, body)
   busy.value = ''
@@ -661,19 +663,30 @@ function agentStats(a: AgentResult): string[] {
           v-model="draft"
           auto-resize
           rows="8"
-          :maxlength="MAX_REPLY"
+          :maxlength="maxReply"
           :aria-label="t('job.draftTitle')"
           fluid
           @input="draftDirty = true"
         />
+        <Message
+          v-if="draftTooLong"
+          severity="warn"
+          size="small"
+          variant="simple"
+        >
+          {{ t('item.replyTooLong', { platform: platformName(platform), limit: num(maxReply) }) }}
+        </Message>
         <div class="card-foot">
-          <span class="muted mono small">{{ num(draft.length) }} / {{ num(MAX_REPLY) }}</span>
+          <span
+            class="mono small"
+            :class="draftTooLong ? 'over' : 'muted'"
+          >{{ num(replyLength(draft)) }} / {{ num(maxReply) }}</span>
           <span v-tooltip.top="signInTip">
             <Button
               :label="t('job.actions.reply')"
               icon="pi pi-send"
               :loading="busy === 'reply'"
-              :disabled="!draft.trim() || !!busy || !signedIn"
+              :disabled="!draft.trim() || !!busy || !signedIn || draftTooLong"
               @click="ask('reply')"
             />
           </span>
@@ -1179,6 +1192,10 @@ function agentStats(a: AgentResult): string[] {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.over {
+  color: var(--iw-danger);
 }
 
 .card-foot {

@@ -25,7 +25,7 @@ import { absTime, num, relTime } from '../lib/format'
 import { useCrumbs } from '../lib/crumbs'
 import { useChunks } from '../lib/chunks'
 import { commentsCache, itemCache, itemJobsCache } from '../lib/cache'
-import { isModPlatform, itemRef, platformName } from '../lib/platforms'
+import { isModPlatform, itemRef, platformName, replyLength, replyLimit, replyTooLong } from '../lib/platforms'
 import { currentItemKind } from '../lib/currentItem'
 import { typing } from '../lib/shortcuts'
 
@@ -33,8 +33,6 @@ const props = defineProps<{ id: string }>()
 const app = useAppStore()
 const { t } = useI18n()
 const toast = useToast()
-
-const MAX_REPLY = 65536 // GitHub comment body limit (characters)
 
 const item = ref<IssueDetail | null>(null)
 const state = ref<'loading' | 'ok' | 'missing' | 'unavailable' | 'error'>('loading')
@@ -194,6 +192,9 @@ const repo = computed(() => app.repos.find((r) => r.id === item.value?.repoId))
 const platform = computed(() => item.value?.platform || 'github')
 const mod = computed(() => isModPlatform(platform.value))
 const caps = computed(() => app.caps(platform.value))
+/** The platform's reply limit (Steam 999 characters, GitHub 65536). */
+const maxReply = computed(() => replyLimit(caps.value))
+const tooLong = computed(() => replyTooLong(reply.value, maxReply.value))
 const pname = computed(() => platformName(platform.value))
 /** The account replies go out as: the GitHub login, or the platform's checked account. */
 const account = computed(() => (mod.value ? (app.platforms.find((p) => p.id === platform.value)?.account ?? '') : (app.github?.login ?? '')))
@@ -239,7 +240,7 @@ useCrumbs(() => {
 async function send() {
   const it = item.value
   const body = reply.value.trim()
-  if (!it || !body || sending.value) return
+  if (!it || !body || sending.value || tooLong.value) return
   sending.value = true
   replyError.value = ''
   const r = await api.reply(it.id, body)
@@ -251,7 +252,7 @@ async function send() {
       return
     }
     const b = r.body as { code?: string; platform?: string } | undefined
-    replyError.value = r.status === 409 && b?.code ? t('replyErrors.' + b.code, { platform: platformName(b.platform || platform.value) }) : r.error
+    replyError.value = r.status === 409 && b?.code ? t('replyErrors.' + b.code, { platform: platformName(b.platform || platform.value), limit: num(maxReply.value) }) : r.error
     return
   }
   if (here) {
@@ -519,7 +520,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               v-model="reply"
               auto-resize
               rows="5"
-              :maxlength="MAX_REPLY"
+              :maxlength="maxReply"
               :placeholder="t('item.replyPlaceholder')"
               :aria-label="t('item.replyAria')"
               :disabled="!canReply"
@@ -539,6 +540,14 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               {{ t('platforms.replyNoCap', { platform: pname }) }}
             </Message>
             <Message
+              v-if="tooLong && canReply"
+              severity="warn"
+              size="small"
+              variant="simple"
+            >
+              {{ t('item.replyTooLong', { platform: pname, limit: num(maxReply) }) }}
+            </Message>
+            <Message
               v-if="replyError"
               severity="error"
               size="small"
@@ -547,12 +556,15 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               {{ replyError }}
             </Message>
             <div class="composer-foot">
-              <span class="muted mono count">{{ num(reply.length) }} / {{ num(MAX_REPLY) }}</span>
+              <span
+                class="mono count"
+                :class="tooLong ? 'over' : 'muted'"
+              >{{ num(replyLength(reply)) }} / {{ num(maxReply) }}</span>
               <Button
                 :label="t('item.sendReply')"
                 icon="pi pi-send"
                 :loading="sending"
-                :disabled="!reply.trim() || !canReply"
+                :disabled="!reply.trim() || !canReply || tooLong"
                 @click="send"
               />
             </div>
@@ -914,6 +926,10 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
 
 .count {
   font-size: calc(12px * var(--iw-fs, 1));
+}
+
+.count.over {
+  color: var(--iw-danger);
 }
 
 .meta {

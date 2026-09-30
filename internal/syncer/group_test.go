@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,7 +18,8 @@ import (
 type fakeProvider struct {
 	platform, account, item string
 
-	noReply bool // Capabilities().Reply = false (Steam until a live post is verified)
+	noReply  bool // Capabilities().Reply = false (Steam until a live post is verified)
+	maxReply int  // Capabilities().MaxReply
 
 	mu      sync.Mutex
 	err     error
@@ -32,7 +34,7 @@ func (f *fakeProvider) fail() error {
 
 func (f *fakeProvider) Platform() string { return f.platform }
 func (f *fakeProvider) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Reply: !f.noReply}
+	return provider.Capabilities{Reply: !f.noReply, MaxReply: f.maxReply}
 }
 func (f *fakeProvider) Account(context.Context) (string, error) {
 	if err := f.fail(); err != nil {
@@ -199,6 +201,39 @@ func TestReplyOffPlatformRefused(t *testing.T) {
 	// The fake reports no reply threads; a platform without a syncer counts as threaded.
 	if g := NewGroup(s); g.ReplyThreaded("steam") || !g.ReplyThreaded("github") {
 		t.Fatal("ReplyThreaded")
+	}
+}
+
+// A reply longer than the platform accepts (Steam: under 1000 characters) is
+// refused with ErrReplyTooLong before the platform is called.
+func TestReplyTooLongRefused(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	p := &fakeProvider{platform: "steam", account: "s1", item: "c", maxReply: 999}
+	s := New(Options{Store: st, Provider: p, Log: slog.New(slog.DiscardHandler)})
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.Issues(t.Context(), store.IssueFilter{})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("items %+v %v", page, err)
+	}
+	id := page.Items[0].ID
+	if _, err := NewGroup(s).Reply(t.Context(), id, strings.Repeat("я", 1000)); !errors.Is(err, provider.ErrReplyTooLong) {
+		t.Fatalf("1000 characters: %v", err)
+	}
+	if len(p.replies) != 0 {
+		t.Fatalf("posted %v", p.replies)
+	}
+	if _, err := NewGroup(s).Reply(t.Context(), id, strings.Repeat("я", 999)); err != nil {
+		t.Fatalf("999 characters: %v", err)
+	}
+	if g := NewGroup(s); g.MaxReply("steam") != 999 || g.MaxReply("github") != 0 {
+		t.Fatal("MaxReply")
 	}
 }
 

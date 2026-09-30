@@ -33,8 +33,23 @@ export function fallbackCaps(platform: string): Capabilities {
     auth: '',
     kinds: gh ? ['issue'] : platform === 'nexus' || platform === 'factorio' ? ['comment', 'bug'] : ['comment'],
     replyThreaded: platform !== 'steam',
+    ...(platform === 'steam' ? { maxReply: STEAM_MAX_REPLY } : {}),
   }
 }
+
+/** Reply limit of a platform without its own (GitHub: 65536 characters; internal/provider DefaultMaxReply). */
+export const DEFAULT_MAX_REPLY = 65536
+/** Steam refuses a comment of 1000 characters or more (internal/provider/steam MaxReply). */
+export const STEAM_MAX_REPLY = 999
+
+/** The longest reply a platform accepts, in characters. */
+export const replyLimit = (caps: Pick<Capabilities, 'maxReply'>) => (caps.maxReply && caps.maxReply > 0 ? caps.maxReply : DEFAULT_MAX_REPLY)
+
+/** A reply's length as platforms count it: characters (code points), not UTF-16 units. */
+export const replyLength = (body: string) => [...body].length
+
+/** The reply (as sent: trimmed) is longer than limit. */
+export const replyTooLong = (body: string, limit: number) => replyLength(body.trim()) > limit
 
 /** Item reference for crumbs and toasts: owner/repo#12 on GitHub, the mod page name elsewhere. */
 export const itemRef = (it: { repo: string; number: number; platform?: string }) =>

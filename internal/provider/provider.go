@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // AuthKind is how a provider signs the user in.
@@ -37,6 +38,31 @@ type Capabilities struct {
 	// ReplyThreaded: a reply lands inside the item's thread (else a new
 	// top-level comment, e.g. Steam's «@author …»).
 	ReplyThreaded bool `json:"replyThreaded"`
+	// MaxReply is the longest reply the platform accepts, in characters
+	// (Steam: «Comments must be less than 1000 characters»); 0 = not known,
+	// DefaultMaxReply applies.
+	MaxReply int `json:"maxReply,omitempty"`
+}
+
+// DefaultMaxReply is the reply limit of a platform without its own
+// (GitHub caps comment bodies at 65536 characters).
+const DefaultMaxReply = 65536
+
+// ReplyLimit is the longest reply c's platform accepts, in characters.
+func (c Capabilities) ReplyLimit() int {
+	if c.MaxReply > 0 {
+		return c.MaxReply
+	}
+	return DefaultMaxReply
+}
+
+// ErrReplyTooLong: a reply is longer than the platform accepts (ReplyLimit);
+// refused before it is sent.
+var ErrReplyTooLong = errors.New("reply too long")
+
+// ReplyLength is the length of body as platforms count it: characters (runes).
+func ReplyLength(body string) int {
+	return utf8.RuneCountInString(body)
 }
 
 // ErrNotSignedIn means the provider has no usable credentials.

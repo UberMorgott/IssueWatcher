@@ -116,8 +116,13 @@ func (p *Provider) Capabilities() provider.Capabilities {
 		ListProjects: true, SyncItems: true, ListComments: true,
 		Reply: s.LoginSecure != "" && s.SessionID != "" && s.Verified && !s.SessionExpired,
 		Auth:  provider.AuthCookieSession, Kinds: []string{"comment"},
+		MaxReply: MaxReply,
 	}
 }
+
+// MaxReply: Steam refuses a comment of 1000 characters or more («Comments
+// must be less than 1000 characters in length.»).
+const MaxReply = 999
 
 // Scheduling implements provider.Poller: unofficial endpoints, stay modest.
 func (p *Provider) Scheduling() provider.Scheduling {

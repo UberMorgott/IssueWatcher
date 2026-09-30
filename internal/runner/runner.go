@@ -29,15 +29,16 @@ const branchPrefix = "iw/"
 
 // Error codes in Result.ErrorCode (the UI links the fix for some).
 const (
-	CodeNoFolder    = "no_folder"    // project has no working local folder → Settings › Projects and folders
-	CodeModItem     = "mod_item"     // push / PR of a mod-page fix while agents.modPush is off
-	CodeNoProfile   = "no_profile"   // profile missing → Settings › Agents
-	CodeNoCLI       = "no_cli"       // executable not found → Settings › Agents
-	CodeTimeout     = "timeout"      // profile time limit
-	CodeAgent       = "agent_failed" // CLI exited with an error
-	CodeAgentAuth   = "agent_auth"   // CLI could not sign in (expired session, bad key) → sign in to the CLI again
-	CodeGit         = "git"          // worktree / diff failed
-	CodeInterrupted = "interrupted"  // app stopped while running
+	CodeNoFolder     = "no_folder"      // project has no working local folder → Settings › Projects and folders
+	CodeModItem      = "mod_item"       // push / PR of a mod-page fix while agents.modPush is off
+	CodeNoProfile    = "no_profile"     // profile missing → Settings › Agents
+	CodeNoCLI        = "no_cli"         // executable not found → Settings › Agents
+	CodeTimeout      = "timeout"        // profile time limit
+	CodeAgent        = "agent_failed"   // CLI exited with an error
+	CodeAgentAuth    = "agent_auth"     // CLI could not sign in (expired session, bad key) → sign in to the CLI again
+	CodeGit          = "git"            // worktree / diff failed
+	CodeInterrupted  = "interrupted"    // app stopped while running
+	CodeReplyTooLong = "reply_too_long" // «Отправить»: the reply is longer than the platform accepts
 )
 
 // Publisher is the platform side of publishing a fix (GitHub: internal/provider/github).
@@ -63,6 +64,9 @@ type Options struct {
 	// thread (provider Capabilities.ReplyThreaded); off, a reply draft starts
 	// with @author. nil = every platform is threaded.
 	ReplyThreaded func(platform string) bool
+	// MaxReply is the longest reply platform accepts in characters (provider
+	// Capabilities.MaxReply); 0 or nil = no limit of its own, the prompt says none.
+	MaxReply func(platform string) int
 	// Labels lists repository labels and adds labels to issues; nil disables the label flow.
 	Labels provider.Labeler
 	// OnJob runs after every change of a job row (SSE job.changed).
@@ -636,6 +640,7 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 		task += "\n\n" + in.Platform + " has no reply threads: the reply is posted as a new comment that starts with @" + in.Author +
 			" (IssueWatcher adds it; do not write it yourself)."
 	}
+	task += replyLimitNote(r.maxReply(in.Platform), in, mention)
 	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
 	res.Agent = &agent
 	if err != nil {
@@ -661,6 +666,27 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 // the draft addresses the item's author with @author (not the owner's own item).
 func (r *Runner) needsMention(in store.JobInput) bool {
 	return r.opts.ReplyThreaded != nil && !r.opts.ReplyThreaded(in.Platform) && in.Author != "" && !in.Mine
+}
+
+// maxReply is Options.MaxReply of platform (0 = no limit of its own).
+func (r *Runner) maxReply(platform string) int {
+	if r.opts.MaxReply == nil {
+		return 0
+	}
+	return r.opts.MaxReply(platform)
+}
+
+// replyLimitNote tells the agent the platform's reply limit, less the
+// «@author » IssueWatcher prepends when mention is on; "" without a limit.
+func replyLimitNote(limit int, in store.JobInput, mention bool) string {
+	if limit <= 0 {
+		return ""
+	}
+	if mention {
+		limit -= provider.ReplyLength("@" + in.Author + " ")
+	}
+	return "\n\n" + in.Platform + " refuses longer comments: the reply text must be at most " + strconv.Itoa(limit) +
+		" characters (count them; be brief, cut rather than exceed)."
 }
 
 // readOnlyDir returns the job files folder and where a read-only agent runs:

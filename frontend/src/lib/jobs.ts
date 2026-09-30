@@ -36,7 +36,7 @@ export function jobRef(j: Pick<Job, 'repo' | 'number' | 'itemId'>): string {
 }
 
 /** Error codes the UI has its own text for (runner Code* constants). */
-export const JOB_ERROR_CODES: JobErrorCode[] = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'agent_auth', 'git', 'interrupted', 'mod_item']
+export const JOB_ERROR_CODES: JobErrorCode[] = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'agent_auth', 'git', 'interrupted', 'mod_item', 'reply_too_long']
 
 /** The settings page that fixes an error code ('' = none). */
 export function errorCodeLink(code: string): string {
