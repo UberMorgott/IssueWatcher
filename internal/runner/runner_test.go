@@ -62,6 +62,7 @@ type env struct {
 	cards []store.Job
 	reply []string
 	clock time.Time // automation clock (Options.Now)
+	onJob func(store.Job) // test hook on every Options.OnJob
 }
 
 func run(t *testing.T, dir string, args ...string) string {
@@ -174,6 +175,14 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 			e.reply = append(e.reply, body)
 			return store.Comment{ExternalID: "IC_1", Author: githubtest.Login, Body: body, URL: "https://x/c"}, nil
 		},
+		OnJob: func(j store.Job) {
+			e.mu.Lock()
+			h := e.onJob
+			e.mu.Unlock()
+			if h != nil {
+				h(j)
+			}
+		},
 		OnSteps:    func(int64, int, []Step) { e.mu.Lock(); e.steps++; e.mu.Unlock() },
 		OnFinished: func(j store.Job) { e.mu.Lock(); e.cards = append(e.cards, j); e.mu.Unlock() },
 	})
@@ -258,6 +267,64 @@ func result(t *testing.T, j store.Job) Result {
 func exists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+// claimProbe runs act once when job id is claimed into running/phase (from
+// the goroutine that claims it) and records act's error and whether the
+// worktree wt still existed then.
+type claimProbe struct {
+	fired, kept bool
+	err         error
+}
+
+func (e *env) onClaim(id int64, phase, wt string, act func() error) *claimProbe {
+	p := &claimProbe{}
+	e.mu.Lock()
+	e.onJob = func(x store.Job) {
+		if x.ID == id && x.State == store.JobRunning && x.Phase == phase && !p.fired {
+			p.err = act()
+			p.fired, p.kept = true, exists(wt)
+		}
+	}
+	e.mu.Unlock()
+	return p
+}
+
+// Dismiss, Retry and publishing claim the job before touching its worktree:
+// one arriving while another is in flight gets ErrNotAllowed and the
+// worktree stays for the one holding the claim.
+func TestJobClaimSerialisesActions(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, worktreeMode)
+	ctx := t.Context()
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	id := j.ID
+
+	// Retry holds the claim: a PR arriving meanwhile is refused.
+	p := e.onClaim(id, "retry", j.Worktree, func() error { _, err := e.r.CreatePR(ctx, id); return err })
+	if rj, err := e.r.Retry(ctx, id); err != nil || !p.fired || !errors.Is(p.err, ErrNotAllowed) || !p.kept {
+		t.Fatalf("retry claim: %+v; %+v %v", p, rj, err)
+	}
+	j = e.wait(id, store.JobNeedsReview)
+	if j.Attempt != 2 || !exists(j.Worktree) {
+		t.Fatalf("second attempt: %+v", j)
+	}
+
+	// A PR in flight holds the claim: Dismiss is refused, the worktree kept.
+	p = e.onClaim(id, "publish", j.Worktree, func() error { _, err := e.r.Dismiss(ctx, id); return err })
+	pj, err := e.r.CreatePR(ctx, id)
+	if err != nil || pj.State != store.JobDone || result(t, pj).PR == nil || !p.fired || !errors.Is(p.err, ErrNotAllowed) || !p.kept {
+		t.Fatalf("publish claim: %+v; %+v %v", p, pj, err)
+	}
+
+	// Dismiss holds the claim: a Retry arriving meanwhile is refused.
+	e.onClaim(0, "", "", nil)
+	j2 := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	p = e.onClaim(j2.ID, "dismiss", j2.Worktree, func() error { _, err := e.r.Retry(ctx, j2.ID); return err })
+	dj, err := e.r.Dismiss(ctx, j2.ID)
+	if err != nil || dj.State != store.JobCancelled || !p.fired || !errors.Is(p.err, ErrNotAllowed) || !p.kept || exists(j2.Worktree) {
+		t.Fatalf("dismiss claim: %+v; %+v %v", p, dj, err)
+	}
 }
 
 func TestFixFlowToDraftPR(t *testing.T) {

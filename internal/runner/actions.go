@@ -164,6 +164,10 @@ func (r *Runner) Dismiss(ctx context.Context, id int64) (store.Job, error) {
 	if !slices.Contains(from, j.State) {
 		return j, ErrNotAllowed
 	}
+	if j, err = r.claim(ctx, id, from, "dismiss"); err != nil {
+		return j, err
+	}
+	ctx = context.WithoutCancel(ctx) // claimed: a closed tab must not leave the job locked
 	res := parseResult(j)
 	c := store.JobChange{State: new(store.JobCancelled), Error: new("dismissed"), Phase: new("")}
 	if err := r.cleanup(ctx, j); err != nil {
@@ -172,7 +176,19 @@ func (r *Runner) Dismiss(ctx context.Context, id int64) (store.Job, error) {
 		c.Worktree, res.CleanupError = new(""), ""
 	}
 	c.Result = encode(res)
-	nj, err := r.opts.Store.UpdateJob(ctx, id, from, c)
+	nj, err := r.opts.Store.UpdateJob(ctx, id, []string{store.JobRunning}, c)
+	if err == nil {
+		r.opts.OnJob(nj)
+	}
+	return nj, err
+}
+
+// claim moves job id from one of the states from into running/phase, so a
+// concurrent Dismiss, Retry or publish (lockPublish) of the same job gets
+// ErrNotAllowed instead of racing its cleanup. The caller ends the claim
+// with an update from running.
+func (r *Runner) claim(ctx context.Context, id int64, from []string, phase string) (store.Job, error) {
+	nj, err := r.opts.Store.UpdateJob(ctx, id, from, store.JobChange{State: new(store.JobRunning), Phase: new(phase)})
 	if errors.Is(err, store.ErrJobState) {
 		return nj, ErrNotAllowed
 	}
@@ -198,19 +214,29 @@ func (r *Runner) Retry(ctx context.Context, id int64) (store.Job, error) {
 	if !slices.Contains(from, j.State) {
 		return j, ErrNotAllowed
 	}
-	if err := r.cleanup(ctx, j); err != nil {
-		return j, fmt.Errorf("remove the previous worktree: %w", err)
-	}
-	if err := writeAttempt(r.opts.DataDir, j); err != nil {
+	prev := j // the attempt as it ended: its snapshot and the state a failed Retry restores
+	state, phase := j.State, j.Phase
+	if j, err = r.claim(ctx, id, from, "retry"); err != nil {
 		return j, err
 	}
-	nj, err := r.opts.Store.UpdateJob(ctx, id, from, store.JobChange{
+	ctx = context.WithoutCancel(ctx) // claimed: a closed tab must not leave the job locked
+	release := func(err error) (store.Job, error) { // back to the state before the claim
+		if nj, uerr := r.opts.Store.UpdateJob(ctx, id, []string{store.JobRunning}, store.JobChange{State: &state, Phase: &phase}); uerr == nil {
+			r.opts.OnJob(nj)
+			j = nj
+		}
+		return j, err
+	}
+	if err := r.cleanup(ctx, j); err != nil {
+		return release(fmt.Errorf("remove the previous worktree: %w", err))
+	}
+	if err := writeAttempt(r.opts.DataDir, prev); err != nil {
+		return release(err)
+	}
+	nj, err := r.opts.Store.UpdateJob(ctx, id, []string{store.JobRunning}, store.JobChange{
 		State: new(store.JobQueued), NextAttempt: true, Phase: new(""), Error: new(""),
 		Branch: new(""), Worktree: new(""), BaseSHA: new(""), Result: encode(Result{}),
 	})
-	if errors.Is(err, store.ErrJobState) {
-		return nj, ErrNotAllowed
-	}
 	if err != nil {
 		return nj, err
 	}
