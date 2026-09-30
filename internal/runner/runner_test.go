@@ -467,6 +467,18 @@ func TestReplyFlowWithCodex(t *testing.T) {
 	}
 }
 
+// A CLI that cannot sign in fails the job with agent_auth (the UI says to sign
+// in again) and the CLI's own message, without a "success:" prefix.
+func TestAgentAuthFailure(t *testing.T) {
+	mode(t, "authfail")
+	e := setup(t, 1, worktreeMode)
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobFailed)
+	r := result(t, j)
+	if r.ErrorCode != CodeAgentAuth || !strings.Contains(j.Error, "exited with 1: Failed to authenticate: OAuth session expired") || strings.Contains(j.Error, "success") {
+		t.Fatalf("auth failure: code %q error %q", r.ErrorCode, j.Error)
+	}
+}
+
 func TestFailureRetryAndDismiss(t *testing.T) {
 	mode(t, "fail")
 	e := setup(t, 1, worktreeMode)

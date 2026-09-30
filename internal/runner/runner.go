@@ -35,6 +35,7 @@ const (
 	CodeNoCLI       = "no_cli"       // executable not found → Settings › Agents
 	CodeTimeout     = "timeout"      // profile time limit
 	CodeAgent       = "agent_failed" // CLI exited with an error
+	CodeAgentAuth   = "agent_auth"   // CLI could not sign in (expired session, bad key) → sign in to the CLI again
 	CodeGit         = "git"          // worktree / diff failed
 	CodeInterrupted = "interrupted"  // app stopped while running
 )
@@ -319,7 +320,14 @@ type codedError struct {
 func (e *codedError) Error() string { return e.err.Error() }
 func (e *codedError) Unwrap() error { return e.err }
 
-func coded(code string, err error) error { return &codedError{code: code, err: err} }
+// coded tags err with code; a code err already carries (runAgent's
+// CodeAgentAuth under a caller's CodeAgent) is the more precise one and stays.
+func coded(code string, err error) error {
+	if _, ok := errors.AsType[*codedError](err); ok {
+		return err
+	}
+	return &codedError{code: code, err: err}
+}
 
 // ErrorCode is the error code err carries for the UI ("" = none): the API
 // sends it along so the UI shows its own text and a link to the fix.

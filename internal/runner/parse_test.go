@@ -67,8 +67,19 @@ func TestParseClaude(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 	_, bad := collect(t, []string{`{"type":"result","subtype":"error_max_budget_usd","is_error":true,"errors":["budget"],"num_turns":9}`}, parseClaude)
-	if !strings.Contains(bad.Error, "error_max_budget_usd") {
+	if !strings.Contains(bad.Error, "error_max_budget_usd") || bad.authFailed {
 		t.Fatalf("error result %+v", bad)
+	}
+	// claude 2.x: an expired sign-in ends in an error result of subtype
+	// "success"; the reason is its text alone, and the run is an auth failure.
+	_, auth := collect(t, []string{`{"type":"result","subtype":"success","is_error":true,"num_turns":1,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}`}, parseClaude)
+	if auth.Error != "Failed to authenticate: OAuth session expired and could not be refreshed" || !auth.authFailed {
+		t.Fatalf("auth result %+v", auth)
+	}
+	// api_retry events on a 401 carry the error kind before any result.
+	_, retry := collect(t, []string{`{"type":"system","subtype":"api_retry","attempt":1,"error_status":401,"error":"authentication_failed"}`}, parseClaude)
+	if !retry.authFailed {
+		t.Fatalf("api_retry auth %+v", retry)
 	}
 }
 

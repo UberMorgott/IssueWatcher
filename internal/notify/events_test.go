@@ -17,6 +17,13 @@ func TestJobCard(t *testing.T) {
 	if c := JobCard(1, "o/app", 1, false, "", FailReason("weird", "boom"), now); c.Text != "boom" {
 		t.Fatalf("unknown code: %+v", c)
 	}
+	// agent_failed: the CLI's own error, not a generic «the agent failed».
+	if c := JobCard(1, "o/app", 1, false, "", FailReason("agent_failed", "claude exited with 1: rate limited"), now); c.Text != "claude exited with 1: rate limited" {
+		t.Fatalf("agent_failed: %+v", c)
+	}
+	if c := JobCard(1, "o/app", 1, false, "", FailReason("agent_auth", "claude exited with 1: Failed to authenticate"), now); !strings.Contains(c.Text, "/login") {
+		t.Fatalf("agent_auth: %+v", c)
+	}
 	done := JobCard(1, "o/app", 1, true, "исправлено локально", "", now)
 	if done.Title != "Агент закончил" || done.Ref != "o/app#1 — исправлено локально" || done.Kind != KindClosed {
 		t.Fatalf("done: %+v", done)

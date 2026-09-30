@@ -10,6 +10,8 @@
 //	      goes to FAKECLI_RECORD.pid) and leave it running
 //	noop  report "cannot_fix" (direct: "not_reproduced") without touching files, exit 0
 //	fail  emit a step, exit 1
+//	authfail  claude's expired sign-in: an "authentication_failed" assistant
+//	      message and an is_error result of subtype "success", exit 1
 //	hang  start a child that sleeps, write its pid to FAKECLI_RECORD.pid, sleep
 //	sleep sleep (the child of hang)
 //
@@ -99,6 +101,11 @@ func main() {
 		}
 	case "fail":
 		fmt.Fprintln(os.Stderr, "fake failure")
+		os.Exit(1)
+	case "authfail": // claude with an expired sign-in, as claude 2.x reports it
+		msg := "Failed to authenticate: OAuth session expired and could not be refreshed"
+		emit(map[string]any{"type": "assistant", "error": "authentication_failed", "message": map[string]any{"content": []any{map[string]any{"type": "text", "text": msg}}}})
+		emit(map[string]any{"type": "result", "subtype": "success", "is_error": true, "num_turns": 1, "result": msg})
 		os.Exit(1)
 	case "hang":
 		self, _ := os.Executable()

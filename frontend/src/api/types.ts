@@ -516,7 +516,7 @@ export interface VerifyResult {
   timedOut?: boolean
 }
 
-export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'git' | 'interrupted' | 'mod_item'
+export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'agent_auth' | 'git' | 'interrupted' | 'mod_item'
 
 export interface LocalCommit {
   sha: string

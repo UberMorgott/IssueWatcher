@@ -133,18 +133,20 @@ func ReloginCard(platform, name string, now time.Time) Card {
 }
 
 // failReasons are the Russian card texts of the runner's error codes.
+// agent_failed has none: «the agent failed» says nothing the title does not,
+// the CLI's own error is the reason.
 var failReasons = map[string]string{
-	"no_folder":    "Папка проекта не привязана",
-	"no_profile":   "Нет профиля агента для задачи",
-	"no_cli":       "CLI агента не найден",
-	"timeout":      "Агент не уложился в лимит времени",
-	"agent_failed": "Запуск агента завершился ошибкой",
-	"git":          "Ошибка на шаге git",
-	"interrupted":  "Задача прервана перезапуском",
+	"no_folder":   "Папка проекта не привязана",
+	"no_profile":  "Нет профиля агента для задачи",
+	"no_cli":      "CLI агента не найден",
+	"agent_auth":  "CLI агента не вошёл в аккаунт: сессия истекла — войдите заново (claude → /login)",
+	"timeout":     "Агент не уложился в лимит времени",
+	"git":         "Ошибка на шаге git",
+	"interrupted": "Задача прервана перезапуском",
 }
 
 // FailReason is the card text of a failed job: the Russian reason of a known
-// error code, else the raw error.
+// error code, else the raw error (agent_failed: what the CLI said).
 func FailReason(code, err string) string {
 	if r, ok := failReasons[code]; ok {
 		return r

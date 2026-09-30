@@ -108,6 +108,9 @@ type AgentResult struct {
 	ExitCode   int      `json:"exitCode"`
 	DurationMS int64    `json:"durationMs"`
 	Error      string   `json:"error,omitempty"`
+	// authFailed: the CLI could not sign in (expired session, bad key) →
+	// CodeAgentAuth; the user signs in to the CLI again.
+	authFailed bool
 }
 
 // agentEnv is the environment for child processes: the user's, minus
@@ -410,15 +413,29 @@ func (r *Runner) runAgent(ctx context.Context, s agentSpec, log *jobLog) (AgentR
 		}
 		return res, cause
 	}
+	var runErr error
 	switch {
 	case waitErr != nil && res.Error != "":
-		return res, fmt.Errorf("%s exited with %d: %s", s.profile.CLI, res.ExitCode, res.Error)
+		runErr = fmt.Errorf("%s exited with %d: %s", s.profile.CLI, res.ExitCode, res.Error)
 	case waitErr != nil:
-		return res, fmt.Errorf("%s exited with %d", s.profile.CLI, res.ExitCode)
+		runErr = fmt.Errorf("%s exited with %d", s.profile.CLI, res.ExitCode)
 	case res.Error != "":
-		return res, errors.New(res.Error)
+		runErr = errors.New(res.Error)
 	}
-	return res, nil
+	if runErr != nil && res.authFailed {
+		runErr = coded(CodeAgentAuth, runErr)
+	}
+	return res, runErr
+}
+
+// claudeAuthFailed: the CLI's error kind (assistant / api_retry events) for a
+// failed sign-in.
+const claudeAuthFailed = "authentication_failed"
+
+// isClaudeAuthText: the CLI's own message when its session cannot be used,
+// e.g. "Failed to authenticate: OAuth session expired and could not be refreshed".
+func isClaudeAuthText(s string) bool {
+	return strings.HasPrefix(strings.TrimSpace(s), "Failed to authenticate")
 }
 
 // readLines calls f for each line of r (any length).
@@ -507,6 +524,10 @@ func parseClaude(line []byte, log *jobLog, res *AgentResult) {
 		log.add(StepOutput, string(line))
 		return
 	}
+	var errKind string
+	if json.Unmarshal(ev.Error, &errKind) == nil && errKind == claudeAuthFailed {
+		res.authFailed = true
+	}
 	switch ev.Type {
 	case "system":
 		switch ev.Subtype {
@@ -549,11 +570,23 @@ func parseClaude(line []byte, log *jobLog, res *AgentResult) {
 			applyStructured(ev.Result, res)
 		}
 		if ev.IsError || ev.Subtype != "success" {
-			msg := ev.Subtype
+			// An error result of subtype "success" (sign-in failed, API error)
+			// says what went wrong in its text only: no "success:" prefix.
+			var parts []string
+			if ev.Subtype != "success" {
+				parts = append(parts, ev.Subtype)
+			}
 			if len(ev.Errors) > 0 {
-				msg += ": " + strings.Join(ev.Errors, "; ")
+				parts = append(parts, strings.Join(ev.Errors, "; "))
 			} else if ev.Result != "" {
-				msg += ": " + clipRunes(ev.Result, 500)
+				parts = append(parts, clipRunes(ev.Result, 500))
+			}
+			msg := strings.Join(parts, ": ")
+			if msg == "" {
+				msg = "the agent reported an error"
+			}
+			if isClaudeAuthText(ev.Result) {
+				res.authFailed = true
 			}
 			res.Error = msg
 			log.add(StepError, msg)
