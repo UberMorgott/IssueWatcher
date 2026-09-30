@@ -56,7 +56,7 @@ const groupedRepos = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' 
 	count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment') AS open_comments
 	FROM projects p JOIN sources s ON s.id = p.source_id
 	JOIN m ON m.gid = p.id
-	LEFT JOIN items i ON i.project_id = m.pid
+	LEFT JOIN items i ON i.project_id = m.pid AND i.hidden = 0
 	WHERE ` + groupRows + ` GROUP BY p.id`
 
 const groupedCount = `SELECT count(*) FROM projects p WHERE ` + groupRows
@@ -99,7 +99,7 @@ func (s *Store) fillIntegrations(ctx context.Context, rows []Repo) error {
 		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment'),
 		count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment')
 		FROM m JOIN projects x ON x.id = m.pid JOIN sources s ON s.id = x.source_id
-		LEFT JOIN items i ON i.project_id = x.id
+		LEFT JOIN items i ON i.project_id = x.id AND i.hidden = 0
 		WHERE m.gid IN (SELECT value FROM json_each(?))
 		GROUP BY m.gid, x.id ORDER BY m.gid, x.id <> m.gid, s.platform, x.name COLLATE NOCASE`, string(b))
 	if err != nil {

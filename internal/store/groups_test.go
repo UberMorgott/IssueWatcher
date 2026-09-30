@@ -175,6 +175,17 @@ func TestModPageGroups(t *testing.T) {
 	if l, err := s.Links(ctx, st.ID); err != nil || l.LinkedTo == nil || l.LinkedTo.ID != nx[0].ID {
 		t.Fatalf("member links: %+v %v", l, err)
 	}
+	// A hidden thread (only the owner wrote it) counts nowhere: not in the row, not in its channel.
+	if _, err := s.db.ExecContext(ctx, `UPDATE items SET hidden = 1, status = 'closed' WHERE external_id = 'x:77'`); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := s.ReposChunk(ctx, RepoQuery{Group: true, Text: "Mod (Steam)", Limit: 10}); err != nil || len(g.Items) != 1 ||
+		g.Items[0].Open != 1 || g.Items[0].Closed != 0 || g.Items[0].Integrations[1].Closed != 0 {
+		t.Fatalf("hidden thread counted: %+v %v", g, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE items SET hidden = 0, status = 'open' WHERE external_id = 'x:77'`); err != nil {
+		t.Fatal(err)
+	}
 	// No code project: the member still needs a repository for fixes.
 	fx, err := s.fixTargets(ctx, []int64{st.ID})
 	if err != nil || !fx[st.ID].NeedsLink || fx[st.ID].ProjectID != st.ID || fx[st.ID].Folder != "" {
