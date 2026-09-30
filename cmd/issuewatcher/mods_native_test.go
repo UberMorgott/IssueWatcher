@@ -81,7 +81,7 @@ func (f *fakeWindow) Fetch(_ context.Context, req browser.Request) (browser.Resp
 // the Factorio portal home) on one TLS server.
 func fakeSites(t *testing.T) (*httptest.Server, *http.Client) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		signed := strings.Contains(r.Header.Get("Cookie"), "session=ok")
+		signed := strings.Contains(r.Header.Get("Cookie"), "session=ok") && !refuseSessions.Load()
 		switch {
 		case r.URL.Path == "/v2/graphql":
 			_, _ = w.Write([]byte(`{"data":{"mods":{"totalCount":1,"nodes":[{"modId":147,"name":"ShareShip","description":"","uploader":{"name":"UberMorgott","memberId":6541781},"game":{"domainName":"windrose"}}]}}}`))
@@ -137,21 +137,16 @@ func withNative(t *testing.T, m *modPlatforms, dir string) map[string]*fakeWindo
 // the session is captured once the user signed in, the card says «Подключено
 // как X» with the session source.
 func TestLoginNativeThreePlatforms(t *testing.T) {
-	m, cfgs, _, dir := newTestPlatforms(t, nil)
+	m, cfgs, _, dir := newTestPlatforms(t)
 	windows := withNative(t, m, dir)
-	for _, id := range []string{nexus.Platform, curseforge.Platform} {
-		if _, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"`+id+`":{"engine":"native"}}}`), nil); err != nil {
-			t.Fatal(err)
-		}
-	}
 	want := map[string]string{nexus.Platform: "UberMorgott", curseforge.Platform: "Morgott", factorio.Platform: "Morgott"}
 	for _, id := range modIDs {
 		l, err := m.Login(t.Context(), id)
 		if err != nil || l.State != api.LoginWindow || l.Via != "window" || l.Browser != "Cent Browser" {
 			t.Fatalf("%s: login %+v %v", id, l, err)
 		}
-		if !modConfig(cfgs.Get().Providers, id).Enabled || !m.isNative(id) {
-			t.Fatalf("%s: not switched on natively", id)
+		if !modConfig(cfgs.Get().Providers, id).Enabled {
+			t.Fatalf("%s: not switched on", id)
 		}
 		deadline := time.Now().Add(5 * time.Second)
 		for {
@@ -192,45 +187,19 @@ func TestLoginNativeThreePlatforms(t *testing.T) {
 	}
 }
 
-// Switching providers.nexus.engine swaps the provider live (same platform id).
-func TestEngineSwitchLive(t *testing.T) {
-	m, cfgs, group, dir := newTestPlatforms(t, nil)
-	withNative(t, m, dir)
-	on, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"enabled":true,"mcp":{"command":"`+
-		filepath.ToSlash(filepath.Join(dir, "missing.exe"))+`","args":[]}}}}`), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.apply(on)
-	if m.isNative(nexus.Platform) {
-		t.Fatal("engine mcp set by newTestPlatforms")
-	}
-	nat, err := cfgs.Patch(on.Revision, []byte(`{"providers":{"nexus":{"engine":"native"}}}`), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.apply(nat)
-	if !m.isNative(nexus.Platform) || len(group.Syncers()) != 2 {
-		t.Fatalf("native %v, syncers %d", m.isNative(nexus.Platform), len(group.Syncers()))
-	}
-	if p := platformState(t, m, factorio.Platform); p.Enabled || p.State != api.PlatformDisabled || p.Name != "Factorio Mod Portal" || p.Capabilities.Reply {
-		t.Fatalf("factorio card %+v", p)
-	}
-}
-
-// Owner-data switch: a native platform switched on without an author adopts
-// the account of its stored source (synced by the MCP engine), so a signed-out
+// Owner-data switch: a platform switched on without an author adopts the
+// account of its stored source (synced by the retired MCP engine), so a signed-out
 // start keeps reading keylessly as that account; an author already set wins.
 func TestNativeAdoptsStoredSourceAccount(t *testing.T) {
-	m, cfgs, _, dir := newTestPlatforms(t, nil)
+	m, cfgs, _, dir := newTestPlatforms(t)
 	withNative(t, m, dir)
 	for platform, account := range map[string]string{nexus.Platform: "UberMorgott", curseforge.Platform: "Morgott", factorio.Platform: "Morgott"} {
 		if _, err := m.st.UpsertSource(t.Context(), platform, account); err != nil {
 			t.Fatal(err)
 		}
 	}
-	on, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"enabled":true,"engine":"native","author":""},`+
-		`"curseforge":{"enabled":true,"engine":"native","author":""},"factorio":{"enabled":true,"author":"Other"}}}`), nil)
+	on, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"enabled":true,"author":""},`+
+		`"curseforge":{"enabled":true,"author":""},"factorio":{"enabled":true,"author":"Other"}}}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +219,7 @@ func TestNativeAdoptsStoredSourceAccount(t *testing.T) {
 // (providers.factorio.author): «Выйти» drops only the session, so public reads
 // keep their account (also after a restart); «Отключить» clears it.
 func TestFactorioAuthorSurvivesLogout(t *testing.T) {
-	m, cfgs, _, dir := newTestPlatforms(t, nil)
+	m, cfgs, _, dir := newTestPlatforms(t)
 	withNative(t, m, dir)
 	if _, err := m.Login(t.Context(), factorio.Platform); err != nil {
 		t.Fatal(err)

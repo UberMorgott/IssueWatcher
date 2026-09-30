@@ -137,7 +137,7 @@ func TestProjectKeysMigration(t *testing.T) {
 	ag, _ := raw["agents"].(map[string]any)
 	projects, _ := ag["projects"].(map[string]any)
 	app, _ := projects["github:octo/app"].(map[string]any)
-	if raw["schemaVersion"] != float64(6) || raw["future"] != "keep" || app["future"] != float64(1) {
+	if raw["schemaVersion"] != float64(SchemaVersion) || raw["future"] != "keep" || app["future"] != float64(1) {
 		t.Fatalf("file: %v", raw)
 	}
 	if _, ok := projects["octo/app"]; ok {

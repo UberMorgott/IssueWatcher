@@ -10,8 +10,6 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge/mcptest"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
@@ -46,11 +44,11 @@ type site struct {
 	loggedIn bool
 	cookies  bool
 	pages    map[int][]map[string]any
-	readErr  string // get_comments error code
-	window   bool   // cf_auto_extract_cookies opened the sign-in window
+	readErr  error // get_comments error
+	window   bool  // cf_auto_extract_cookies opened the sign-in window
 }
 
-func (s *site) install(f *mcptest.Server) {
+func (s *site) install(f *curseforge.Tools) {
 	f.Handle("cf_auto_extract_cookies", func(map[string]any) (any, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -71,7 +69,7 @@ func (s *site) install(f *mcptest.Server) {
 	})
 	f.Handle("search_author", func(args map[string]any) (any, error) {
 		if args["username"] != "Morgott" {
-			return nil, &mcptest.CodeError{Code: mcpbridge.CodeNotFound, Message: "no author"}
+			return nil, errors.New("no author")
 		}
 		return map[string]any{"author": map[string]any{"id": 136845864, "username": "Morgott"},
 			"projects": []any{map[string]any{"id": 1443010, "name": "Crossbow Save Arrow"}}}, nil
@@ -82,8 +80,8 @@ func (s *site) install(f *mcptest.Server) {
 	f.Handle("get_comments", func(args map[string]any) (any, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.readErr != "" {
-			return nil, &mcptest.CodeError{Code: s.readErr, Message: "x"}
+		if s.readErr != nil {
+			return nil, s.readErr
 		}
 		page := int(args["page"].(float64)) //nolint:forcetypeassert // test fixture
 		total := 0
@@ -99,7 +97,7 @@ func (s *site) install(f *mcptest.Server) {
 
 type env struct {
 	site *site
-	fake *mcptest.Server
+	fake *curseforge.Tools
 	prov *curseforge.Provider
 	sy   *syncer.Syncer
 	st   *store.Store
@@ -108,17 +106,15 @@ type env struct {
 
 func setup(t *testing.T) *env {
 	t.Helper()
-	e := &env{fake: mcptest.New(), evs: make(chan []store.Event, 8), site: &site{loggedIn: true, cookies: true,
+	e := &env{fake: curseforge.NewTools(), evs: make(chan []store.Event, 8), site: &site{loggedIn: true, cookies: true,
 		pages: map[int][]map[string]any{
 			1: {root("20", "bob", "Not working", 20, rep("21", "20", "Morgott", "In reply to bob: which folder?", 21, 1),
 				rep("22", "21", "bob", "earlyplugins", 22, 2))},
 			2: {root("20", "bob", "Not working", 20), root("10", "alice", "Nice mod", 10)},
 		}}}
 	e.site.install(e.fake)
-	b := mcpbridge.New(mcpbridge.Options{Name: "curseforge", Dial: e.fake.Dial, CallTimeout: 5 * time.Second})
-	t.Cleanup(b.Close)
-	e.prov = curseforge.New(curseforge.Options{Bridge: b, ReadBackWaits: []time.Duration{time.Millisecond},
-		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }})
+	e.prov = curseforge.NewWithTools(curseforge.Options{ReadBackWaits: []time.Duration{time.Millisecond},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }}, e.fake)
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -184,11 +180,9 @@ func TestSessionStates(t *testing.T) {
 	}
 	// Reads refused mid-session (cookie expiry, Cloudflare) → re-login.
 	e.site.loggedIn = true
-	for _, code := range []string{mcpbridge.CodeNotLoggedIn, mcpbridge.CodeCloudflare} {
-		e.site.readErr = code
-		if _, err := e.prov.SyncItems(t.Context(), provider.Project{ExternalID: "1443010"}, time.Time{}); !errors.Is(err, curseforge.ErrRelogin) {
-			t.Fatalf("%s: %v", code, err)
-		}
+	e.site.readErr = curseforge.ErrRelogin
+	if _, err := e.prov.SyncItems(t.Context(), provider.Project{ExternalID: "1443010"}, time.Time{}); !errors.Is(err, curseforge.ErrRelogin) {
+		t.Fatalf("refused read: %v", err)
 	}
 }
 
@@ -230,7 +224,7 @@ func TestReply(t *testing.T) {
 		p1 := e.site.pages[1]
 		p1[0]["replies"] = append(p1[0]["replies"].([]map[string]any), rep("31", "20", "Morgott", "In reply to bob: <b>fixed</b> now", 60, 1)) //nolint:forcetypeassert // fixture
 		e.site.mu.Unlock()
-		return nil, mcptest.ErrCrash
+		return nil, curseforge.ErrUnsure
 	})
 	if cm, err = e.prov.Reply(t.Context(), "comment:1443010/20", "<b>fixed</b> now"); err != nil || cm.ExternalID != "31" {
 		t.Fatalf("read-back: %+v %v", cm, err)
@@ -243,7 +237,7 @@ func TestReply(t *testing.T) {
 		t.Fatalf("miss: %v", err)
 	}
 	e.fake.Handle("post_comment", func(map[string]any) (any, error) {
-		return nil, &mcptest.CodeError{Code: mcpbridge.CodeNotLoggedIn, Message: "401"}
+		return nil, provider.ErrNotSignedIn
 	})
 	if _, err = e.prov.Reply(t.Context(), "comment:1443010/20", "x"); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("not logged in: %v", err)
@@ -277,22 +271,18 @@ func TestReplyUnsureWriteReadBack(t *testing.T) {
 		p1 := e.site.pages[1]
 		p1[0]["replies"] = append(p1[0]["replies"].([]map[string]any), rep("32", "20", "Morgott", "In reply to bob: line 1\nline <2>", 59, 1)) //nolint:forcetypeassert // fixture
 		e.site.mu.Unlock()
-		return nil, &mcptest.CodeError{Code: mcpbridge.CodeOutcomeUnknown, Message: "HTTP 502"}
+		return nil, curseforge.ErrUnsure
 	})
 	if cm, err := e.prov.Reply(t.Context(), "comment:1443010/20", "line 1\nline <2>"); err != nil || cm.ExternalID != "32" {
 		t.Fatalf("saved despite 502: %+v %v", cm, err)
 	}
-	for _, code := range []string{mcpbridge.CodeOutcomeUnknown, mcpbridge.CodeError} {
-		e.fake.Handle("post_comment", func(map[string]any) (any, error) {
-			return nil, &mcptest.CodeError{Code: code, Message: "HTTP 500"}
-		})
-		// "which folder?" already exists (id 21, before the post): not this reply.
-		if _, err := e.prov.Reply(t.Context(), "comment:1443010/20", "which folder?"); !errors.Is(err, curseforge.ErrUnknownOutcome) {
-			t.Fatalf("%s: %v", code, err)
-		}
+	e.fake.Handle("post_comment", func(map[string]any) (any, error) { return nil, curseforge.ErrUnsure })
+	// "which folder?" already exists (id 21, before the post): not this reply.
+	if _, err := e.prov.Reply(t.Context(), "comment:1443010/20", "which folder?"); !errors.Is(err, curseforge.ErrUnknownOutcome) {
+		t.Fatalf("unsure: %v", err)
 	}
 	e.fake.Handle("post_comment", func(map[string]any) (any, error) {
-		return nil, &mcptest.CodeError{Code: mcpbridge.CodeInvalid, Message: "bad"}
+		return nil, errors.New("bad")
 	})
 	if _, err := e.prov.Reply(t.Context(), "comment:1443010/20", "x"); err == nil || errors.Is(err, curseforge.ErrUnknownOutcome) {
 		t.Fatalf("refusal: %v", err)
@@ -309,7 +299,7 @@ func TestReplyReadBackSurvivesCancel(t *testing.T) {
 		p1[0]["replies"] = append(p1[0]["replies"].([]map[string]any), rep("33", "20", "Morgott", "bye", 59, 1)) //nolint:forcetypeassert // fixture
 		e.site.mu.Unlock()
 		cancel()
-		return nil, mcptest.ErrCrash
+		return nil, curseforge.ErrUnsure
 	})
 	if cm, err := e.prov.Reply(ctx, "comment:1443010/20", "bye"); err != nil || cm.ExternalID != "33" {
 		t.Fatalf("%+v %v", cm, err)
@@ -327,7 +317,7 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("before the user signed in %+v %v", l, err)
 	}
 	e.site.mu.Lock()
-	e.site.loggedIn, e.site.cookies = true, true // signed in inside the server's window
+	e.site.loggedIn, e.site.cookies = true, true // signed in inside the sign-in window
 	e.site.mu.Unlock()
 	if l, err = e.prov.LoginStatus(t.Context()); err != nil || !l.LoggedIn || l.Account != "Morgott" {
 		t.Fatalf("after %+v %v", l, err)

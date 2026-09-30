@@ -109,8 +109,6 @@ func (n *native) fill() {
 	}
 }
 
-func (n *native) sigKey() string { return nativeSigV2 }
-
 func hostOf(u string) string {
 	p, err := url.Parse(u)
 	if err != nil {

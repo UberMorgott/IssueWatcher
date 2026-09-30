@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge/mcptest"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 )
 
@@ -44,27 +43,23 @@ func TestReplyBug(t *testing.T) {
 func TestReplyErrors(t *testing.T) {
 	e := setup(t)
 	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) {
-		return nil, &mcptest.CodeError{Code: "not_logged_in", Message: "log in"}
+		return nil, provider.ErrNotSignedIn
 	})
 	if _, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "hi"); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("not_logged_in: %v", err)
 	}
 	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) {
-		return nil, &mcptest.CodeError{Code: "invalid", Message: "text too long"}
+		return nil, errors.New("text too long")
 	})
 	if _, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "hi"); err == nil || errors.Is(err, nexus.ErrUnknownOutcome) {
 		t.Fatalf("refusal: %v", err)
 	}
 	// Failed after the send without a refusal, nothing saved: unknown, never a plain failure.
-	for _, code := range []string{"outcome_unknown", "error"} {
-		e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) {
-			return nil, &mcptest.CodeError{Code: code, Message: "HTTP 500"}
-		})
-		if _, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "hi"); !errors.Is(err, nexus.ErrUnknownOutcome) {
-			t.Fatalf("%s: %v", code, err)
-		}
+	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) { return nil, nexus.ErrUnsure })
+	if _, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "hi"); !errors.Is(err, nexus.ErrUnknownOutcome) {
+		t.Fatalf("unsure: %v", err)
 	}
-	if n := e.fake.Count("post_mod_comment"); n != 4 {
+	if n := e.fake.Count("post_mod_comment"); n != 3 {
 		t.Fatalf("posts = %d (never retried)", n)
 	}
 }
@@ -79,13 +74,13 @@ func TestReplyServerUnknownOutcomeReadBack(t *testing.T) {
 		bp["replies"] = append(bp["replies"].([]map[string]any), map[string]any{"id": "906", "parentId": "900", "author": "UberMorgott", //nolint:forcetypeassert // fixture
 			"authorId": 1, "createdAt": nil, "createdAtLocal": "2026-09-01T14:00", "body": "on it"})
 		e.site.mu.Unlock()
-		return nil, &mcptest.CodeError{Code: "outcome_unknown", Message: "HTTP 500"}
+		return nil, nexus.ErrUnsure
 	})
 	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) {
 		e.site.mu.Lock()
 		e.site.pages[1][1]["replies"] = []map[string]any{reply("201", "102", "UberMorgott", "thanks!", 21), reply("311", "102", "UberMorgott", "ok", 59)}
 		e.site.mu.Unlock()
-		return nil, &mcptest.CodeError{Code: "outcome_unknown", Message: "HTTP 502"}
+		return nil, nexus.ErrUnsure
 	})
 	c, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "ok")
 	if err != nil || c.ExternalID != "311" {
@@ -100,11 +95,11 @@ func TestReplyServerUnknownOutcomeReadBack(t *testing.T) {
 // not land (it existed before the post).
 func TestReplyReadBackIgnoresOlderIdenticalReply(t *testing.T) {
 	e := setup(t)
-	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) { return nil, mcptest.ErrCrash })
+	e.fake.Handle("post_mod_comment", func(map[string]any) (any, error) { return nil, nexus.ErrUnsure })
 	if _, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "thanks!"); !errors.Is(err, nexus.ErrUnknownOutcome) {
 		t.Fatalf("comment: %v", err)
 	}
-	e.fake.Handle("reply_mod_bug", func(map[string]any) (any, error) { return nil, mcptest.ErrCrash })
+	e.fake.Handle("reply_mod_bug", func(map[string]any) (any, error) { return nil, nexus.ErrUnsure })
 	if _, err := e.prov.Reply(t.Context(), "bug:900", "looking"); !errors.Is(err, nexus.ErrUnknownOutcome) {
 		t.Fatalf("bug: %v", err)
 	}
@@ -119,7 +114,7 @@ func TestReplyReadBackSurvivesCancel(t *testing.T) {
 		e.site.pages[1][1]["replies"] = []map[string]any{reply("201", "102", "UberMorgott", "thanks!", 21), reply("312", "102", "UberMorgott", "bye", 59)}
 		e.site.mu.Unlock()
 		cancel()
-		return nil, mcptest.ErrCrash
+		return nil, nexus.ErrUnsure
 	})
 	if c, err := e.prov.Reply(ctx, "comment:windrose/147/102", "bye"); err != nil || c.ExternalID != "312" {
 		t.Fatalf("%+v %v", c, err)
@@ -134,7 +129,7 @@ func TestReplyLostAnswerReadBack(t *testing.T) {
 		p2 := e.site.pages[2]
 		p2[0]["replies"] = []map[string]any{reply("201", "102", "UberMorgott", "thanks!", 21), reply("310", "102", "UberMorgott", "fixed  in\n1.3.1", 60)}
 		e.site.mu.Unlock()
-		return nil, mcptest.ErrCrash
+		return nil, nexus.ErrUnsure
 	})
 	c, err := e.prov.Reply(t.Context(), "comment:windrose/147/102", "fixed in 1.3.1")
 	if err != nil || c.ExternalID != "310" {
@@ -154,7 +149,7 @@ func TestReplyReadBackMissIsUnknown(t *testing.T) {
 	if !errors.Is(err, nexus.ErrUnknownOutcome) {
 		t.Fatalf("err = %v", err)
 	}
-	e.fake.Handle("reply_mod_bug", func(map[string]any) (any, error) { return nil, mcptest.ErrCrash })
+	e.fake.Handle("reply_mod_bug", func(map[string]any) (any, error) { return nil, nexus.ErrUnsure })
 	if _, err := e.prov.Reply(t.Context(), "bug:900", "lost"); !errors.Is(err, nexus.ErrUnknownOutcome) {
 		t.Fatalf("bug: %v", err)
 	}

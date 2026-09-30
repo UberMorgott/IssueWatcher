@@ -136,10 +136,9 @@ func Defaults() Settings {
 			Enabled: true, NewIssue: true, NewComment: true, Closed: true, MutedProjects: []string{},
 			Quiet: QuietHours{From: "22:00", To: "08:00"}, Group: true, AutoHideSeconds: 8,
 		},
-		Sync:      Sync{Mode: SyncBalanced, ActiveDays: 14, Providers: map[string]ProviderSync{"github": defaultGitHub()}},
-		Updates:   Updates{Channel: "stable", AutoCheck: true, IntervalHours: 24},
-		Agents:    defaultAgents(),
-		Providers: defaultProviders(),
+		Sync:    Sync{Mode: SyncBalanced, ActiveDays: 14, Providers: map[string]ProviderSync{"github": defaultGitHub()}},
+		Updates: Updates{Channel: "stable", AutoCheck: true, IntervalHours: 24},
+		Agents:  defaultAgents(),
 		Projects: Projects{
 			Roots: []string{}, ScanDepth: 3,
 			Exclude: []string{"node_modules", ".git", "vendor", "bin", "obj", "build", "dist", "Library", "Temp"},

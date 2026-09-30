@@ -26,7 +26,8 @@ const File = "config.json"
 //	5:   + agents.prompts.label, agents.automation (off, caps, rules), agents.projects.*.automation
 //	     overrides; only defaults are added
 //	6:   project keys source-qualified: agents.projects keys and rule projects owner/repo → github:owner/repo
-const SchemaVersion = 6
+//	7:   providers.nexus/curseforge lose mcp + engine (the MCP engine is gone; native only)
+const SchemaVersion = 7
 
 // ErrConflict means the caller edited an older revision.
 var ErrConflict = errors.New("config: settings changed elsewhere")

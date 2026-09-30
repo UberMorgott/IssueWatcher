@@ -352,16 +352,16 @@ func hasV2(st provider.PollState) bool {
 func TestOwnerDataSwitchE2E(t *testing.T) {
 	sites := newOwnerSites(t)
 	dir := t.TempDir()
-	writeConfig := func(providers map[string]any) {
+	writeConfig := func(version int, providers map[string]any) {
 		t.Helper()
-		body, _ := json.Marshal(map[string]any{"schemaVersion": config.SchemaVersion, "updates": map[string]any{"autoCheck": false}, "providers": providers})
+		body, _ := json.Marshal(map[string]any{"schemaVersion": version, "updates": map[string]any{"autoCheck": false}, "providers": providers})
 		if err := os.WriteFile(filepath.Join(dir, config.File), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// 1. The owner's data as the MCP engine left it: one source per platform,
 	// its projects, items and comments (seeded here by one sync over the fakes).
-	writeConfig(map[string]any{
+	writeConfig(config.SchemaVersion, map[string]any{
 		"nexus":      map[string]any{"enabled": false, "author": "UberMorgott"},
 		"curseforge": map[string]any{"enabled": false, "author": "Morgott"},
 		"factorio":   map[string]any{"enabled": false, "author": "Morgott"},
@@ -426,19 +426,19 @@ func TestOwnerDataSwitchE2E(t *testing.T) {
 	want := rowCounts(t, db)
 	before = modProjects(t, db)
 	_ = db.Close()
-	writeConfig(map[string]any{
-		"nexus":      map[string]any{"enabled": false, "author": "", "mcp": map[string]any{"command": "node", "args": []string{`E:\DEV\nexusmods-mcp-server\build\index.js`}}},
-		"curseforge": map[string]any{"enabled": false, "author": "", "mcp": map[string]any{"command": "node", "args": []string{`E:\DEV\curseforge\build\index.js`}}},
+	writeConfig(6, map[string]any{ // v6: the MCP engine's keys, dropped by the v7 migration
+		"nexus":      map[string]any{"enabled": false, "author": "", "engine": "mcp", "mcp": map[string]any{"command": "server", "args": []string{"index.js"}}},
+		"curseforge": map[string]any{"enabled": false, "author": "", "mcp": map[string]any{"command": "server", "args": []string{"index.js"}}},
 		"factorio":   map[string]any{"enabled": false, "author": "Morgott"},
 	})
 
-	// 3. First native start (default engine), signed out everywhere.
+	// 3. First native start, signed out everywhere.
 	sites.takeHits()
 	a := startOwnerApp(t, dir, sites)
 	defer a.stop()
 	got := a.cfgs.Get().Providers
-	if got.Nexus.Engine != config.EngineNative || got.CurseForge.Engine != config.EngineNative {
-		t.Fatalf("default engine: nexus %q, curseforge %q", got.Nexus.Engine, got.CurseForge.Engine)
+	if body, err := os.ReadFile(filepath.Join(dir, config.File)); err != nil || strings.Contains(string(body), `"mcp"`) || strings.Contains(string(body), `"engine"`) {
+		t.Fatalf("config.json keeps the MCP engine keys: %s %v", body, err)
 	}
 	if got.Nexus.Author != "UberMorgott" || got.CurseForge.Author != "Morgott" || got.Factorio.Author != "Morgott" {
 		t.Fatalf("adopted authors: nexus %q, curseforge %q, factorio %q", got.Nexus.Author, got.CurseForge.Author, got.Factorio.Author)

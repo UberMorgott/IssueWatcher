@@ -1,7 +1,7 @@
-// Package curseforge is the CurseForge provider over the owner's MCP server
-// (E:\DEV\curseforge, `format:"json"`): projects = the author's projects,
-// items = root comment threads (kind comment) with their nested replies.
-// The site needs the server's session cookies even to read.
+// Package curseforge is the CurseForge provider (native engine: the site's
+// own JSON API, CFWidget, the stored session): projects = the author's
+// projects, items = root comment threads (kind comment) with their nested
+// replies.
 package curseforge
 
 import (
@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
@@ -33,16 +32,9 @@ var ErrRelogin = fmt.Errorf("curseforge: re-login needed (%w)", provider.ErrRelo
 // not find it.
 var ErrUnknownOutcome = modkit.ErrUnknownOutcome
 
-// Caller is the bridge side the provider needs (*mcpbridge.Client).
-type Caller interface {
-	Call(ctx context.Context, tool string, args map[string]any, out any, read bool) error
-}
-
 // Options configures the provider.
 type Options struct {
-	// Bridge is the old engine (the MCP server); Native the built-in one
-	// (wins when both are set).
-	Bridge Caller
+	// Native configures the engine (nil = defaults).
 	Native *NativeOptions
 	// Author overrides the CFWidget author name whose projects are listed
 	// (default: the session's display name).
@@ -82,11 +74,11 @@ func New(opts Options) *Provider {
 		opts.ReadBackWaits = []time.Duration{5 * time.Second, 10 * time.Second}
 	}
 	p := &Provider{opts: opts, urls: map[string]string{}, codes: map[string]string{}}
+	var no NativeOptions
 	if opts.Native != nil {
-		p.b = newNative(*opts.Native, opts.Log, opts.Now)
-	} else {
-		p.b = &mcpBackend{bridge: opts.Bridge, now: opts.Now}
+		no = *opts.Native
 	}
+	p.b = newNative(no, opts.Log, opts.Now)
 	return p
 }
 
@@ -101,8 +93,10 @@ func (p *Provider) Capabilities() provider.Capabilities {
 	}
 }
 
-// Scheduling implements provider.Poller: a browser-backed site, polled gently.
-func (p *Provider) Scheduling() provider.Scheduling { return p.b.scheduling() }
+// Scheduling implements provider.Poller.
+func (p *Provider) Scheduling() provider.Scheduling {
+	return provider.Scheduling{PollMinInterval: 5 * time.Minute, RateBudget: 120}
+}
 
 type sessionResult struct {
 	LoggedIn      bool   `json:"loggedIn"`
@@ -120,20 +114,17 @@ type sessionResult struct {
 }
 
 // Account implements provider.Provider: the session's display name (what
-// comments show as author). No cookies → signed out, except natively with a
-// configured author: its reads are keyless (CFWidget by name, plain comments),
-// so that name is the account (replies still need the session: post checks
-// it); stored cookies refused → ErrRelogin; server missing → signed out
-// (unavailable).
+// comments show as author). No cookies → signed out, except with a configured
+// author: its reads are keyless (CFWidget by name, plain comments), so that
+// name is the account (replies still need the session: post checks it);
+// stored cookies refused → ErrRelogin.
 func (p *Provider) Account(ctx context.Context) (string, error) {
 	s, err := p.b.status(ctx)
 	switch {
-	case errors.Is(err, mcpbridge.ErrUnavailable):
-		return "", fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
 	case err != nil:
 		return "", err
 	case !s.LoggedIn && !s.CookiesStored:
-		if a := strings.TrimSpace(p.opts.Author()); a != "" && p.opts.Native != nil {
+		if a := strings.TrimSpace(p.opts.Author()); a != "" {
 			return a, nil // not cached as the signed-in account; a reply's post still needs the session
 		}
 		return "", fmt.Errorf("%w: curseforge: no session (%s)", provider.ErrNotSignedIn, s.Detail)
@@ -162,9 +153,8 @@ func (s sessionResult) name() string {
 	return ""
 }
 
-// Login implements provider.Loginer: the MCP server imports a browser's
-// session or opens its window; the native engine checks the stored session,
-// our signed-in profile, else opens the sign-in window.
+// Login implements provider.Loginer: the stored session, our signed-in
+// profile, else the sign-in window.
 func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
 	l, err := p.b.login(ctx)
 	if err == nil && l.LoggedIn && l.Account != "" {
@@ -177,13 +167,6 @@ func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
 
 // CancelLogin implements provider.LoginCanceller.
 func (p *Provider) CancelLogin(ctx context.Context) error { return p.b.cancelLogin(ctx) }
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 
 // LoginStatus implements provider.Loginer.
 func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
@@ -379,15 +362,14 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 	for _, t := range r.Comments {
 		var part strings.Builder
 		part.WriteString(t.ID + ":" + strconv.Itoa(len(t.Replies)))
-		if p.b.v2() { // an edit changes the modification time only
-			part.WriteString(":" + modkit.Latest(modkit.Time(t.CreatedAt), modkit.Time(t.UpdatedAt)).Format(time.RFC3339))
-			for _, r := range t.Replies {
-				part.WriteString("," + modkit.Latest(modkit.Time(r.CreatedAt), modkit.Time(r.UpdatedAt)).Format(time.RFC3339))
-			}
+		// An edit changes the modification time only.
+		part.WriteString(":" + modkit.Latest(modkit.Time(t.CreatedAt), modkit.Time(t.UpdatedAt)).Format(time.RFC3339))
+		for _, r := range t.Replies {
+			part.WriteString("," + modkit.Latest(modkit.Time(r.CreatedAt), modkit.Time(r.UpdatedAt)).Format(time.RFC3339))
 		}
 		parts = append(parts, part.String())
 	}
-	ch.Overflow = modkit.PageChanged(st, p.b.sigKey(), modkit.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, sigKey, modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
@@ -408,7 +390,7 @@ func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, 
 // ── reply ────────────────────────────────────────────────────────
 
 // readBackPages bounds the pages searched for a lost reply (new replies stay
-// on their thread's page; the server itself reads back the first 3).
+// on their thread's page).
 const readBackPages = 10
 
 // readBackTimeout bounds the read-back of a reply whose outcome is unknown; it

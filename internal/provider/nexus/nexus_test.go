@@ -10,24 +10,21 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge/mcptest"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
-// site is the fake Nexus state behind the fake MCP server.
+// site is the fake Nexus state behind the fake backend.
 type site struct {
 	mu        sync.Mutex
 	pages     map[int][]map[string]any // Posts page → root threads
 	bugs      []map[string]any
 	bugPosts  map[string]map[string]any // issue id → get_mod_bug result
 	failPage  int                       // get_mod_comments page answering an error
-	crashOnce bool
 	bugsOff   bool
-	oldServer bool // search_mods without the uploader filter
-	loggedIn  bool // the server's web session
+	oldServer bool // a listing without the uploader filter
+	loggedIn  bool // the stored session
 	window    bool // web_login opened the sign-in window (signs in on the next web_status)
 }
 
@@ -64,11 +61,11 @@ func newSite() *site {
 	}
 }
 
-func (s *site) install(f *mcptest.Server) {
+func (s *site) install(f *nexus.Tools) {
 	f.Handle("web_status", func(map[string]any) (any, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.window { // the user signed in inside the server's window
+		if s.window { // the user signed in inside the sign-in window
 			s.window, s.loggedIn = false, true
 			return map[string]any{"loggedIn": false, "loginInProgress": true, "cookiesStored": false, "detail": "UNAUTHORIZED", "account": nil}, nil
 		}
@@ -113,13 +110,9 @@ func (s *site) install(f *mcptest.Server) {
 	f.Handle("get_mod_comments", func(args map[string]any) (any, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.crashOnce {
-			s.crashOnce = false
-			return nil, mcptest.ErrCrash
-		}
 		page := int(args["page"].(float64)) //nolint:forcetypeassert // test fixture
 		if page == s.failPage {
-			return nil, &mcptest.CodeError{Code: "cloudflare", Message: "challenge"}
+			return nil, errors.New("cloudflare challenge")
 		}
 		total := 0
 		for _, p := range s.pages {
@@ -132,7 +125,7 @@ func (s *site) install(f *mcptest.Server) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.bugsOff {
-			return nil, &mcptest.CodeError{Code: mcpbridge.CodeDisabled, Message: "off"}
+			return nil, nexus.ErrDisabled
 		}
 		return map[string]any{"game": "windrose", "modId": 147, "filter": "all", "page": 1, "pages": 1, "perPage": 10,
 			"canReport": true, "url": "https://www.nexusmods.com/windrose/mods/147?tab=bugs", "bugs": s.bugs}, nil
@@ -142,7 +135,7 @@ func (s *site) install(f *mcptest.Server) {
 		defer s.mu.Unlock()
 		r, ok := s.bugPosts[fmt.Sprint(args["issue_id"])]
 		if !ok {
-			return nil, &mcptest.CodeError{Code: mcpbridge.CodeNotFound, Message: "gone"}
+			return nil, nexus.ErrNotFound
 		}
 		return r, nil
 	})
@@ -150,7 +143,7 @@ func (s *site) install(f *mcptest.Server) {
 
 type env struct {
 	site  *site
-	fake  *mcptest.Server
+	fake  *nexus.Tools
 	prov  *nexus.Provider
 	sy    *syncer.Syncer
 	db    *sql.DB
@@ -160,12 +153,10 @@ type env struct {
 
 func setup(t *testing.T) *env {
 	t.Helper()
-	e := &env{site: newSite(), fake: mcptest.New(), evs: make(chan []store.Event, 8)}
+	e := &env{site: newSite(), fake: nexus.NewTools(), evs: make(chan []store.Event, 8)}
 	e.site.install(e.fake)
-	b := mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial, CallTimeout: 5 * time.Second})
-	t.Cleanup(b.Close)
-	e.prov = nexus.New(nexus.Options{Bridge: b, Author: func() string { return "UberMorgott" }, ReadBackWaits: []time.Duration{time.Millisecond},
-		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }})
+	e.prov = nexus.NewWithTools(nexus.Options{Author: func() string { return "UberMorgott" }, ReadBackWaits: []time.Duration{time.Millisecond},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 11, 0, 0, 0, time.UTC) }}, e.fake)
 	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -278,33 +269,21 @@ func TestErrorMidListingKeepsCursorAndProjects(t *testing.T) {
 	}
 }
 
-func TestCrashRestartsAndBugsDisabled(t *testing.T) {
+func TestBugsDisabled(t *testing.T) {
 	e := setup(t)
-	e.site.crashOnce = true
 	e.site.bugsOff = true
 	if err := e.sy.SyncOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	<-e.evs
-	if e.fake.Starts() != 2 {
-		t.Fatalf("starts = %d, want 2", e.fake.Starts())
-	}
-	got := e.items(t)
-	if len(got) != 3 {
+	if got := e.items(t); len(got) != 3 {
 		t.Fatalf("items %v", got)
 	}
 }
 
-func TestMissingServerOrAuthorIsSignedOut(t *testing.T) {
-	b := mcpbridge.New(mcpbridge.Options{Name: "nexus", Command: func() (string, []string) {
-		return "node", []string{filepath.Join(t.TempDir(), "missing", "index.js")}
-	}})
-	p := nexus.New(nexus.Options{Bridge: b, Author: func() string { return "Morgott" }})
-	_, err := p.Account(t.Context())
-	if !errors.Is(err, provider.ErrNotSignedIn) || !errors.Is(err, mcpbridge.ErrUnavailable) {
-		t.Fatalf("err = %v", err)
-	}
-	p = nexus.New(nexus.Options{Bridge: b})
+func TestNoAuthorIsSignedOut(t *testing.T) {
+	e := setup(t)
+	p := nexus.NewWithTools(nexus.Options{}, e.fake)
 	if _, err := p.Account(t.Context()); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("no author: %v", err)
 	}
@@ -316,7 +295,7 @@ func TestMissingServerOrAuthorIsSignedOut(t *testing.T) {
 func TestUploaderAccount(t *testing.T) {
 	for _, who := range []string{"UberMorgott", "6541781"} {
 		e := setup(t)
-		p := nexus.New(nexus.Options{Bridge: mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial}), Author: func() string { return who }})
+		p := nexus.NewWithTools(nexus.Options{Author: func() string { return who }}, e.fake)
 		if a, err := p.Account(t.Context()); err != nil || a != "UberMorgott" {
 			t.Fatalf("%s: account %q %v", who, a, err)
 		}
@@ -357,11 +336,11 @@ func TestDetectChanges(t *testing.T) {
 }
 
 // Zero setup: without a configured account the signed-in member of the
-// server's web session is the account (web_login opens the window, web_status
-// reports the member once the user signed in there).
+// stored session is the account (login opens the window, the status reports
+// the member once the user signed in there).
 func TestSignInGivesTheAccount(t *testing.T) {
 	e := setup(t)
-	p := nexus.New(nexus.Options{Bridge: mcpbridge.New(mcpbridge.Options{Name: "nexus", Dial: e.fake.Dial})})
+	p := nexus.NewWithTools(nexus.Options{}, e.fake)
 	if _, err := p.Account(t.Context()); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("before sign-in: %v", err)
 	}

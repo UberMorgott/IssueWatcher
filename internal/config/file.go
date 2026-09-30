@@ -110,6 +110,16 @@ func migrate(raw map[string]any) bool {
 	// v5 → v6: project keys become source-qualified (platform:external_id);
 	// every older key was a GitHub owner/repo.
 	qualifyProjectKeys(raw)
+	// v6 → v7: the MCP engine is gone: providers.<id>.mcp and .engine are
+	// dropped (other keys kept).
+	if provs, ok := raw["providers"].(map[string]any); ok {
+		for _, id := range []string{"nexus", "curseforge"} {
+			if p, ok := provs[id].(map[string]any); ok {
+				delete(p, "mcp")
+				delete(p, "engine")
+			}
+		}
+	}
 	raw["schemaVersion"] = SchemaVersion
 	return true
 }

@@ -97,11 +97,9 @@ func (n *native) fill() {
 	}
 }
 
-func (n *native) sigKey() string { return "v2:curseforge:page1" }
-func (n *native) v2() bool       { return true }
-func (n *native) scheduling() provider.Scheduling {
-	return provider.Scheduling{PollMinInterval: 5 * time.Minute, RateBudget: 120}
-}
+// sigKey is the poll_state key of the page-1 fingerprint (v2: it carries the
+// entries' modification times).
+const sigKey = "v2:curseforge:page1"
 
 func host(u string) string {
 	p, err := url.Parse(u)

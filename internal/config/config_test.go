@@ -190,32 +190,40 @@ func TestMutedProjectsQualified(t *testing.T) {
 	}
 }
 
-// Phase 6: providers.<id>.engine defaults to native (owner-data switch), an explicit mcp is kept, a bad value
-// is refused, unknown nested keys survive, factorio is added.
-func TestProvidersEngine(t *testing.T) {
+// Phase 6 step 14 (v7): providers.<id>.mcp and .engine are dropped from the
+// file, unknown nested keys survive, factorio is added, authors are trimmed.
+func TestProvidersMigrationV7(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, `{"schemaVersion": 6, "providers": {"nexus": {"enabled": true, "future": 7, "mcp": {"command": "node", "args": []}}, "curseforge": {"engine": "mcp"}}}`)
+	write(t, dir, `{"schemaVersion": 6, "future": "keep", "providers": {"nexus": {"enabled": true, "future": 7, "author": "UberMorgott",
+		"engine": "native", "mcp": {"command": "server", "args": ["x.js"]}}, "curseforge": {"engine": "mcp", "mcp": {"command": "server"}}}}`)
 	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := s.Get()
-	if got.Providers.Nexus.Engine != EngineNative || got.Providers.CurseForge.Engine != EngineMCP || got.Providers.Factorio.Enabled {
-		t.Fatalf("engines: %+v", got.Providers)
+	if !got.Providers.Nexus.Enabled || got.Providers.Nexus.Author != "UberMorgott" || got.Providers.CurseForge.Enabled || got.Providers.Factorio.Enabled {
+		t.Fatalf("providers: %+v", got.Providers)
 	}
-	got, err = s.Patch(got.Revision, json.RawMessage(`{"providers": {"nexus": {"engine": "mcp"}, "factorio": {"enabled": true, "author": " Morgott "}}}`), nil)
+	raw := read(t, dir)
+	provs, _ := raw["providers"].(map[string]any)
+	nx, _ := provs["nexus"].(map[string]any)
+	cf, _ := provs["curseforge"].(map[string]any)
+	if raw["schemaVersion"] != float64(7) || raw["future"] != "keep" || nx["future"] != float64(7) || nx["author"] != "UberMorgott" {
+		t.Fatalf("file: %v", raw)
+	}
+	for id, p := range map[string]map[string]any{"nexus": nx, "curseforge": cf} {
+		if _, ok := p["mcp"]; ok {
+			t.Fatalf("%s keeps mcp: %v", id, p)
+		}
+		if _, ok := p["engine"]; ok {
+			t.Fatalf("%s keeps engine: %v", id, p)
+		}
+	}
+	got, err = s.Patch(got.Revision, json.RawMessage(`{"providers": {"factorio": {"enabled": true, "author": " Morgott "}}}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Providers.Nexus.Engine != EngineMCP || !got.Providers.Factorio.Enabled || got.Providers.Factorio.Author != "Morgott" {
+	if !got.Providers.Factorio.Enabled || got.Providers.Factorio.Author != "Morgott" {
 		t.Fatalf("patched: %+v", got.Providers)
-	}
-	raw := read(t, dir)
-	nx, _ := raw["providers"].(map[string]any)["nexus"].(map[string]any)
-	if nx["future"] != float64(7) || nx["engine"] != EngineMCP {
-		t.Fatalf("nexus on disk: %v", nx)
-	}
-	if _, err := s.Patch(got.Revision, json.RawMessage(`{"providers": {"nexus": {"engine": "chrome"}}}`), nil); err == nil {
-		t.Fatal("bad engine accepted")
 	}
 }

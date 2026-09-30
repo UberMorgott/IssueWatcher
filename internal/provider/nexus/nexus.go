@@ -1,6 +1,6 @@
-// Package nexus is the Nexus Mods provider over the owner's MCP server
-// (E:\DEV\nexusmods-mcp-server, `format:"json"`): projects = the mods of an
-// author, items = Posts root threads (kind comment) and bug reports (kind bug).
+// Package nexus is the Nexus Mods provider (native engine: v2 GraphQL, the site
+// GraphQL, in-page browser fetches): projects = the mods of an author, items =
+// Posts root threads (kind comment) and bug reports (kind bug).
 package nexus
 
 import (
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
@@ -25,16 +24,9 @@ const Platform = "nexus"
 
 const site = "https://www.nexusmods.com"
 
-// Caller is the bridge side the provider needs (*mcpbridge.Client).
-type Caller interface {
-	Call(ctx context.Context, tool string, args map[string]any, out any, read bool) error
-}
-
 // Options configures the provider.
 type Options struct {
-	// Bridge is the old engine (the MCP server); Native the built-in one.
-	// Native wins when both are set.
-	Bridge Caller
+	// Native configures the engine (nil = defaults).
 	Native *NativeOptions
 	// Author returns the uploader account whose mods are listed: its exact
 	// account name (e.g. "UberMorgott") or member id. Not the mod's free-text
@@ -56,7 +48,7 @@ type Provider struct {
 
 	mu      sync.Mutex
 	account string              // uploader account name (= comment author name)
-	member  *uploader           // the signed-in member (web_status), when no account is configured
+	member  *uploader           // the signed-in member, when no account is configured
 	bugs    map[string]bugCache // bug id → last read report, re-read when its list row changes
 }
 
@@ -80,11 +72,11 @@ func New(opts Options) *Provider {
 		opts.Author = func() string { return "" }
 	}
 	p := &Provider{opts: opts, bugs: map[string]bugCache{}}
+	var no NativeOptions
 	if opts.Native != nil {
-		p.b = newNative(*opts.Native, opts.Log, opts.Now)
-	} else {
-		p.b = &mcpBackend{bridge: opts.Bridge, now: opts.Now}
+		no = *opts.Native
 	}
+	p.b = newNative(no, opts.Log, opts.Now)
 	return p
 }
 
@@ -143,8 +135,6 @@ func (p *Provider) uploader(ctx context.Context) (uploader, error) {
 		}
 		l, err := p.LoginStatus(ctx)
 		switch {
-		case errors.Is(err, mcpbridge.ErrUnavailable):
-			return uploader{}, fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
 		case err != nil:
 			return uploader{}, err
 		case !l.LoggedIn:
@@ -164,14 +154,6 @@ func (p *Provider) uploader(ctx context.Context) (uploader, error) {
 	return uploader{name: v}, nil
 }
 
-// args is the search_mods filter for the account.
-func (u uploader) args() map[string]any {
-	if u.id > 0 {
-		return map[string]any{"uploader_id": u.id, "include_adult": true}
-	}
-	return map[string]any{"uploader": u.name, "include_adult": true}
-}
-
 // owns reports whether a listed mod was uploaded by the account.
 func (u uploader) owns(name *string, id *int) bool {
 	if u.id > 0 {
@@ -180,12 +162,12 @@ func (u uploader) owns(name *string, id *int) bool {
 	return name != nil && strings.EqualFold(*name, u.name)
 }
 
-// errOldServer: search_mods ignored the uploader filter (a server build from
-// before it existed) and listed other people's mods.
-var errOldServer = errors.New("nexus: the MCP server ignores the uploader filter — update and rebuild nexusmods-mcp-server")
+// errNotOwner: the listing ignored the uploader filter and listed other
+// people's mods (never watched).
+var errNotOwner = errors.New("nexus: the mod listing ignored the uploader filter")
 
 // Account implements provider.Provider: the configured uploader account, else
-// the member signed in to the MCP server's web session (web_status account),
+// the signed-in member of the stored session,
 // checked against its mods; the name is what comments show as author.
 func (p *Provider) Account(ctx context.Context) (string, error) {
 	u, err := p.uploader(ctx)
@@ -194,16 +176,13 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	}
 	r, err := p.b.searchMods(ctx, u, 1, 0)
 	if err != nil {
-		if errors.Is(err, mcpbridge.ErrUnavailable) {
-			return "", fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
-		}
 		return "", err
 	}
 	name := cmpName(u.name, p.memberName(u.id))
 	if len(r.Mods) > 0 {
 		m := r.Mods[0]
 		if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
-			return "", errOldServer
+			return "", errNotOwner
 		}
 		if m.Uploader.Name != nil && *m.Uploader.Name != "" {
 			name = *m.Uploader.Name
@@ -233,7 +212,7 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 		}
 		for _, m := range r.Mods {
 			if !u.owns(m.Uploader.Name, m.Uploader.MemberID) {
-				return nil, errOldServer
+				return nil, errNotOwner
 			}
 			url := modkit.HTTPS(m.URL, fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID))
 			out = append(out, provider.Project{ExternalID: fmt.Sprintf("%s/%d", m.Game, m.ModID), Name: m.Name, URL: url, CodeURL: m.codeURL})
@@ -517,7 +496,7 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 			parts = append(parts, fmt.Sprintf("%s:%d:%s:%s", r.ID, r.Replies, r.Status, modkit.Time(r.LastPostAt).Format(time.RFC3339)))
 		}
 	}
-	ch.Overflow = modkit.PageChanged(st, p.b.sigKey(), modkit.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, nativeSigV2, modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
@@ -539,22 +518,6 @@ func (p *Provider) FullReconcile(ctx context.Context, project provider.Project, 
 
 // ── sign-in ──────────────────────────────────────────────────────
 
-type sessionResult struct {
-	LoggedIn     bool   `json:"loggedIn"`
-	InProgress   bool   `json:"loginInProgress"`
-	WindowOpened bool   `json:"loginWindowOpened"`
-	Detail       string `json:"detail"`
-	Account      *struct {
-		MemberID int    `json:"memberId"`
-		Name     string `json:"name"`
-	} `json:"account"`
-	AccountError string  `json:"accountError"`
-	Source       *string `json:"sessionSource"`
-	Browser      *string `json:"sessionBrowser"`
-	Via          *string `json:"loginVia"`
-	ViaBrowser   *string `json:"loginBrowser"`
-}
-
 func (p *Provider) remember(m *uploader) {
 	if m == nil {
 		return
@@ -564,8 +527,8 @@ func (p *Provider) remember(m *uploader) {
 	p.mu.Unlock()
 }
 
-// Login implements provider.Loginer: the MCP server's web_login, or the
-// native sign-in (stored session, signed-in profile, sign-in window).
+// Login implements provider.Loginer: the stored session, the signed-in
+// profile, else the sign-in window.
 func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
 	l, m, err := p.b.login(ctx)
 	if err != nil {
@@ -600,12 +563,6 @@ func (p *Provider) Logout(ctx context.Context) error {
 
 // CancelLogin implements provider.LoginCanceller.
 func (p *Provider) CancelLogin(ctx context.Context) error { return p.b.cancelLogin(ctx) }
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
 
 // Member is the signed-in member id (0 = unknown), for storing it as the account.
 func (p *Provider) Member() int {

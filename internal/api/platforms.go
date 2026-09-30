@@ -10,20 +10,19 @@ import (
 
 // Platform states (Settings › Платформы).
 const (
-	PlatformDisabled    = "disabled"    // switched off / not configured
-	PlatformUnknown     = "unknown"     // on, not synced or checked yet
-	PlatformConnected   = "connected"   // account reached
-	PlatformSignedOut   = "signed_out"  // no session / author / SteamID
-	PlatformRelogin     = "relogin"     // session expired or refused (Cloudflare): sign in again
-	PlatformUnavailable = "unavailable" // MCP server missing or failed to start
-	PlatformError       = "error"
+	PlatformDisabled  = "disabled"   // switched off / not configured
+	PlatformUnknown   = "unknown"    // on, not synced or checked yet
+	PlatformConnected = "connected"  // account reached
+	PlatformSignedOut = "signed_out" // no session / author / SteamID
+	PlatformRelogin   = "relogin"    // session expired or refused (Cloudflare): sign in again
+	PlatformError     = "error"
 )
 
 // Where a platform's web session came from (PlatformStatus.Session).
 const (
 	SessionNone    = "none"    // no session: public reads only
 	SessionBrowser = "browser" // imported from an installed browser
-	SessionWindow  = "window"  // signed in in the server's sign-in window
+	SessionWindow  = "window"  // signed in in the sign-in window
 	SessionManual  = "manual"  // cookies pasted by hand
 	SessionQR      = "qr"      // Steam QR sign-in (renews itself)
 	SessionStored  = "stored"  // a session of unknown origin
@@ -44,7 +43,6 @@ type PlatformStatus struct {
 	Session      string                `json:"session,omitempty"`     // Session* below; "" = not known yet
 	Browser      string                `json:"browser,omitempty"`     // SessionBrowser: which browser
 	Error        string                `json:"error,omitempty"`
-	Running      bool                  `json:"running"` // MCP server child alive
 	Projects     int                   `json:"projects"`
 	LastSync     string                `json:"lastSync,omitempty"`
 	CheckedAt    string                `json:"checkedAt,omitempty"`

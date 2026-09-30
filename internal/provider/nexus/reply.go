@@ -107,7 +107,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	case err != nil && !errors.Is(err, errWriteUnsure):
 		return provider.Comment{}, err
 	}
-	// Posted without an id (the server's own read-back missed it), the answer
+	// Posted without an id (the engine's own read-back missed it), the answer
 	// was lost, or the site failed after the post was sent (it may have saved
 	// it). A new post can take seconds to show up: look again a few times.
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
