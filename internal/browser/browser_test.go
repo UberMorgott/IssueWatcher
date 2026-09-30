@@ -1,0 +1,231 @@
+package browser
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// fakeChrome answers the CDP calls Browser makes; fetch answers come from fetch.
+type fakeChrome struct {
+	mu      sync.Mutex
+	title   string
+	fetch   func(url string) Response
+	cookies []Cookie
+	starts  atomic.Int32
+	args    [][]string
+	uaSet   atomic.Int32
+	crash   chan struct{} // closed = the current process dies
+}
+
+func (f *fakeChrome) start(_ string, args []string) (*process, error) {
+	f.starts.Add(1)
+	f.mu.Lock()
+	f.args = append(f.args, args)
+	f.crash = make(chan struct{})
+	crash := f.crash
+	f.mu.Unlock()
+	cr, pw := io.Pipe()
+	pr, cw := io.Pipe()
+	p := &process{t: NewPipeTransport(cr, cw, 0, cr, cw), kill: func() { _ = pw.Close(); _ = pr.Close() }, exited: make(chan struct{})}
+	go func() {
+		<-crash
+		_ = pw.CloseWithError(errors.New("crashed"))
+	}()
+	go f.serve(pr, pw, p.exited)
+	return p, nil
+}
+
+func (f *fakeChrome) serve(r io.Reader, w *io.PipeWriter, exited chan struct{}) {
+	defer close(exited)
+	peerT := NewPipeTransport(r, w, 0)
+	var wmu sync.Mutex
+	send := func(v any) {
+		b, _ := json.Marshal(v)
+		wmu.Lock()
+		_ = peerT.Write(b)
+		wmu.Unlock()
+	}
+	for {
+		b, err := peerT.Read()
+		if err != nil {
+			return
+		}
+		var m message
+		_ = json.Unmarshal(b, &m)
+		var result any = map[string]any{}
+		switch m.Method {
+		case "Browser.getVersion":
+			result = map[string]string{"product": "HeadlessChrome/154.0.1.2", "userAgent": "Mozilla/5.0 HeadlessChrome/154.0.1.2 Safari/537.36"}
+		case "Target.createTarget":
+			result = map[string]string{"targetId": "T1"}
+		case "Target.attachToTarget":
+			result = map[string]string{"sessionId": "S1"}
+		case "Emulation.setUserAgentOverride":
+			var ua uaOverride
+			_ = json.Unmarshal(m.Params, &ua)
+			if !strings.Contains(ua.UserAgent, "HeadlessChrome") {
+				f.uaSet.Add(1)
+			}
+		case "Page.navigate":
+			send(map[string]any{"id": m.ID, "sessionId": m.SessionID, "result": map[string]string{"frameId": "F"}})
+			send(map[string]any{"method": "Page.domContentEventFired", "sessionId": m.SessionID, "params": map[string]any{}})
+			continue
+		case "Runtime.evaluate":
+			var p struct {
+				Expression string `json:"expression"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			if p.Expression == "document.title" {
+				f.mu.Lock()
+				title := f.title
+				f.mu.Unlock()
+				result = map[string]any{"result": map[string]any{"value": title}}
+				break
+			}
+			i := strings.LastIndex(p.Expression, "})(")
+			var a struct {
+				URL string `json:"url"`
+			}
+			_ = json.Unmarshal([]byte(strings.TrimSuffix(p.Expression[i+3:], ")")), &a)
+			f.mu.Lock()
+			fetch := f.fetch
+			f.mu.Unlock()
+			result = map[string]any{"result": map[string]any{"value": fetch(a.URL)}}
+		case "Storage.getCookies":
+			f.mu.Lock()
+			result = map[string]any{"cookies": f.cookies}
+			f.mu.Unlock()
+		}
+		send(map[string]any{"id": m.ID, "sessionId": m.SessionID, "result": result})
+	}
+}
+
+func newFake(t *testing.T) (*fakeChrome, *Browser) {
+	f := &fakeChrome{title: "Mod page", fetch: func(u string) Response { return Response{Status: 200, URL: u, Body: "ok"} }}
+	b := New(Options{Dir: t.TempDir(), Origins: []string{"https://www.example.com"}, Start: f.start,
+		Find: func() (Exe, error) { return Exe{Path: "chrome.exe", Name: "Fake"}, nil }, ChallengeWait: 50 * time.Millisecond})
+	t.Cleanup(b.Close)
+	return f, b
+}
+
+func TestFetchHeadlessWithUserAgentOverride(t *testing.T) {
+	f, b := newFake(t)
+	ctx := context.Background()
+	r, err := b.Fetch(ctx, Request{URL: "https://www.example.com/api?x=1"})
+	if err != nil || r.Status != 200 || r.Body != "ok" {
+		t.Fatalf("fetch = %+v, %v", r, err)
+	}
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/api?x=2"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.starts.Load() != 1 || f.uaSet.Load() != 1 {
+		t.Fatalf("starts = %d, ua overrides = %d (want one browser, one tab)", f.starts.Load(), f.uaSet.Load())
+	}
+	args := strings.Join(f.args[0], " ")
+	for _, want := range []string{"--headless=new", "--disable-blink-features=AutomationControlled", "--user-data-dir="} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("args %q lack %s", args, want)
+		}
+	}
+	if !strings.Contains(b.UserAgent(), "Chrome/154") || strings.Contains(b.UserAgent(), "Headless") {
+		t.Fatalf("user agent = %q", b.UserAgent())
+	}
+}
+
+func TestFetchOriginAllowlist(t *testing.T) {
+	f, b := newFake(t)
+	ctx := context.Background()
+	for _, u := range []string{"http://www.example.com/", "https://evil.example.org/", "javascript:alert(1)"} {
+		if _, err := b.Fetch(ctx, Request{URL: u}); !errors.Is(err, ErrOrigin) {
+			t.Fatalf("%s: err = %v", u, err)
+		}
+	}
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/a", Page: "https://evil.example.org/"}); !errors.Is(err, ErrOrigin) {
+		t.Fatalf("foreign page: err = %v", err)
+	}
+	f.setFetch(func(string) Response { return Response{Status: 200, URL: "https://evil.example.org/x", Body: "x"} })
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/r"}); !errors.Is(err, ErrOrigin) {
+		t.Fatalf("redirect: err = %v", err)
+	}
+}
+
+func TestFetchChallenge(t *testing.T) {
+	f, b := newFake(t)
+	f.mu.Lock()
+	f.title = "Just a moment..."
+	f.mu.Unlock()
+	if _, err := b.Fetch(context.Background(), Request{URL: "https://www.example.com/a"}); !errors.Is(err, ErrChallenge) {
+		t.Fatalf("challenged page: err = %v", err)
+	}
+	f.mu.Lock()
+	f.title = "ok"
+	f.mu.Unlock()
+	f.setFetch(func(u string) Response {
+		return Response{Status: 403, URL: u, Body: "<title>Just a moment...</title>"}
+	})
+	if _, err := b.Fetch(context.Background(), Request{URL: "https://www.example.com/a"}); !errors.Is(err, ErrChallenge) {
+		t.Fatalf("challenged fetch: err = %v", err)
+	}
+}
+
+func TestBrowserRestartsAfterCrash(t *testing.T) {
+	f, b := newFake(t)
+	ctx := context.Background()
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/a"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	close(f.crash)
+	f.mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := b.Fetch(ctx, Request{URL: "https://www.example.com/b"}); err != nil {
+		t.Fatalf("after crash: %v", err)
+	}
+	if f.starts.Load() != 2 {
+		t.Fatalf("starts = %d", f.starts.Load())
+	}
+}
+
+func TestCookiesFilteredByDomain(t *testing.T) {
+	f, b := newFake(t)
+	f.cookies = []Cookie{
+		{Name: "a", Value: "1", Domain: ".example.com"},
+		{Name: "b", Value: "2", Domain: "www.example.com"},
+		{Name: "c", Value: "3", Domain: "notexample.com"},
+		{Name: "d", Value: "4", Domain: ".other.org"},
+	}
+	cks, err := b.Cookies(context.Background(), []string{"example.com"})
+	if err != nil || len(cks) != 2 || cks[0].Name != "a" || cks[1].Name != "b" {
+		t.Fatalf("cookies = %+v, %v", cks, err)
+	}
+}
+
+func TestIdleStop(t *testing.T) {
+	f := &fakeChrome{title: "x", fetch: func(u string) Response { return Response{Status: 200, URL: u} }}
+	b := New(Options{Dir: t.TempDir(), Origins: []string{"https://www.example.com"}, Start: f.start, IdleStop: 30 * time.Millisecond,
+		Find: func() (Exe, error) { return Exe{Path: "chrome.exe"}, nil }})
+	defer b.Close()
+	if _, err := b.Fetch(context.Background(), Request{URL: "https://www.example.com/a"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for b.Running() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if b.Running() {
+		t.Fatal("browser still running after the idle stop")
+	}
+}
+
+func (f *fakeChrome) setFetch(fn func(string) Response) {
+	f.mu.Lock()
+	f.fetch = fn
+	f.mu.Unlock()
+}
