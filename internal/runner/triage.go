@@ -27,6 +27,15 @@ const (
 // triageMaxIssues is how many open issues the prompt lists (a var: tests lower it).
 var triageMaxIssues = 200
 
+// TriagePick.Queue codes (the UI shows its own text; "" = below the top N).
+const (
+	PickQueued   = "queued"    // JobID = the new fix job
+	PickExists   = "exists"    // JobID = the unfinished fix job of the issue
+	PickClosed   = "closed"    // the issue closed meanwhile
+	PickNoFolder = "no_folder" // the project has no usable local folder
+	PickFailed   = "failed"    // queueing failed (the job log has the error)
+)
+
 // Severities, most critical first.
 var severities = []string{"critical", "high", "medium", "low"}
 
@@ -81,10 +90,10 @@ func (r *Runner) Triage(ctx context.Context, projectID int64, profileID string) 
 		profileID = cfg.Roles.Responder
 	}
 	if _, ok := cfg.Profile(profileID); !ok {
-		return store.Job{}, fmt.Errorf("%w: no agent profile %q (Settings › Agents)", ErrBadRequest, profileID)
+		return store.Job{}, coded(CodeNoProfile, fmt.Errorf("%w: no agent profile %q (Settings › Agents)", ErrBadRequest, profileID))
 	}
 	if _, ok := cfg.Profile(cfg.Roles.Coder); !ok {
-		return store.Job{}, fmt.Errorf("%w: no coder profile for the fix jobs (Settings › Agents)", ErrBadRequest)
+		return store.Job{}, coded(CodeNoProfile, fmt.Errorf("%w: no coder profile for the fix jobs (Settings › Agents)", ErrBadRequest))
 	}
 	j, err := r.opts.Store.CreateProjectJob(ctx, projectID, flowTriage, profileID, store.OriginManual, "")
 	if err != nil {
@@ -116,9 +125,11 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 	topN := cfg.TriageTopNFor(t.ProjectKey)
 	tr := &TriageResult{Open: len(t.Issues), More: t.More, TopN: topN, Picks: []TriagePick{}}
 	res.Triage = tr
-	log.addf(StepInfo, "%s: %d open issues%s, top %d get a fix job", t.ProjectName, len(t.Issues), map[bool]string{true: " (most recent)"}[t.More], topN)
+	more := map[bool]string{true: r.say(" (самые свежие)", " (most recent)")}[t.More]
+	log.add(StepInfo, fmt.Sprintf(r.say("%s: открытых issues — %d%s, задачу исправления получат первые %d", "%s: %d open issues%s, top %d get a fix job"),
+		t.ProjectName, len(t.Issues), more, topN))
 	if len(t.Issues) == 0 {
-		log.add(StepInfo, "no open issues: nothing to rank")
+		log.add(StepInfo, r.say("открытых issues нет: разбирать нечего", "no open issues: nothing to rank"))
 		return store.JobDone, nil
 	}
 	in := store.JobInput{ProjectName: t.ProjectName, ProjectKey: t.ProjectKey, ProjectURL: t.ProjectURL, LocalPath: t.LocalPath}
@@ -160,15 +171,15 @@ func (r *Runner) runTriage(ctx context.Context, j *store.Job, res *Result, log *
 		for i, p := range tr.Dropped {
 			nums[i] = "#" + strconv.Itoa(p.Number)
 		}
-		log.addf(StepInfo, "dropped picks (not open in %s, repeated or over %d): %s", t.ProjectName, triageMaxPicks, strings.Join(nums, ", "))
+		log.add(StepInfo, fmt.Sprintf(r.say("отброшены (не открыты в %s, повтор или больше %d): %s", "dropped picks (not open in %s, repeated or over %d): %s"),
+			t.ProjectName, triageMaxPicks, strings.Join(nums, ", ")))
 	}
 	// A fix job runs in the mapped folder: without one each would fail at once.
 	if st := folders.Check(t.LocalPath, t.ProjectURL); !st.Exists() {
-		why := fmt.Sprintf("not queued: no usable local folder (%s); map it in Settings › Projects and folders", st)
 		for i := range tr.Picks[:min(tr.TopN, len(tr.Picks))] {
-			tr.Picks[i].Queue = why
+			tr.Picks[i].Queue = PickNoFolder
 		}
-		log.add(StepInfo, "no fix job queued: "+t.ProjectName+" has no usable local folder ("+string(st)+")")
+		log.add(StepInfo, fmt.Sprintf(r.say("задачи исправления не поставлены: у %s нет рабочей папки (%s)", "no fix job queued: %s has no usable local folder (%s)"), t.ProjectName, st))
 		return store.JobDone, nil
 	}
 	// A cancel up to here cancels the triage; from here the top-N fix jobs are
@@ -193,23 +204,23 @@ func (r *Runner) queueFixes(ctx context.Context, j store.Job, coder config.Agent
 		fj, err := r.opts.Store.CreateOpenJob(ctx, p.ItemID, flowFix, coder.ID, j.Origin, j.RuleID)
 		switch {
 		case err == nil:
-			p.Queue, p.JobID = "queued", fj.ID
+			p.Queue, p.JobID = PickQueued, fj.ID
 			queued++
 			r.opts.OnJob(fj)
-			log.addf(StepInfo, "#%d (%s): fix job %d queued", p.Number, cmp.Or(p.Severity, "?"), fj.ID)
+			log.add(StepInfo, fmt.Sprintf(r.say("#%d (%s): поставлена задача исправления %d", "#%d (%s): fix job %d queued"), p.Number, cmp.Or(p.Severity, "?"), fj.ID))
 		case errors.Is(err, store.ErrJobExists):
-			p.Queue, p.JobID = "exists", fj.ID
-			log.addf(StepInfo, "#%d: skipped, fix job %d is unfinished", p.Number, fj.ID)
+			p.Queue, p.JobID = PickExists, fj.ID
+			log.add(StepInfo, fmt.Sprintf(r.say("#%d: пропущено, задача исправления %d ещё не завершена", "#%d: skipped, fix job %d is unfinished"), p.Number, fj.ID))
 		case errors.Is(err, store.ErrNotOpen):
-			p.Queue = "closed meanwhile"
-			log.addf(StepInfo, "#%d: skipped, closed meanwhile", p.Number)
+			p.Queue = PickClosed
+			log.add(StepInfo, fmt.Sprintf(r.say("#%d: пропущено, issue уже закрыт", "#%d: skipped, closed meanwhile"), p.Number))
 		default:
-			p.Queue = err.Error()
+			p.Queue = PickFailed
 			log.add(StepError, fmt.Sprintf("#%d: queue fix job: %v", p.Number, err))
 		}
 	}
 	if queued == 0 {
-		log.add(StepInfo, "no fix job queued")
+		log.add(StepInfo, r.say("ни одной задачи исправления не поставлено", "no fix job queued"))
 	}
 	r.kick()
 }

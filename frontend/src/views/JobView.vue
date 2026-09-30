@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { safeUrl } from '../lib/safeUrl'
 import { jobCache } from '../lib/cache'
-import { jobPlatform } from '../lib/platforms'
+import { jobPlatform, platformName } from '../lib/platforms'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
@@ -23,7 +23,23 @@ import LabelTag from '../components/LabelTag.vue'
 import { api } from '../api/client'
 import type { AgentResult, Job, JobAttempt, RepoLabel } from '../api/types'
 import { absTime, elapsed, num, relTime, usd } from '../lib/format'
-import { canPush, FLOW_ICON, isActive, isDirect, isFolderRun, jobCost, jobDuration, jobOutcome, jobRef, usePush } from '../lib/jobs'
+import {
+  actionError,
+  canPush,
+  errorCodeKey,
+  errorCodeLink,
+  FLOW_ICON,
+  isActive,
+  isDirect,
+  isFolderRun,
+  jobCost,
+  jobDuration,
+  jobOutcome,
+  jobRef,
+  modPushOff,
+  pushEligible,
+  usePush,
+} from '../lib/jobs'
 import { useCrumbs } from '../lib/crumbs'
 import { useAppStore } from '../stores/app'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
@@ -145,9 +161,10 @@ watch(
   { immediate: true },
 )
 function attemptNote(a: JobAttempt): string {
-  const known = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'git', 'interrupted']
-  if (a.errorCode) return known.includes(a.errorCode) ? t('job.errorCode.' + a.errorCode) : a.errorCode
-  return a.error
+  if (a.state === 'cancelled') return t('job.cancelledNote')
+  const key = errorCodeKey(a.errorCode)
+  if (key) return t(key)
+  return a.error ? t('job.failedNote') : ''
 }
 
 // Label flow: the repository's labels for the editor (loaded while under review),
@@ -199,10 +216,19 @@ const can = computed(() => {
     retry: j.state === 'failed' || j.state === 'cancelled' || j.state === 'needs_review' || folderDone,
     dismiss: j.state === 'needs_review' || j.state === 'failed' || folderDone,
     pr: j.flow === 'fix' && j.state === 'needs_review' && !isDirect(j),
-    push: canPush(j),
+    // Push shows (disabled, with the reason) for a mod-page fix while modPush is off.
+    push: canPush(j) || pushEligible(j),
     reply: j.flow === 'reply' && j.state === 'needs_review',
   }
 })
+/** Push / PR are off for this mod-page fix (Settings › Агенты › mod pages: allow push). */
+const modOff = computed(() => !!job.value && modPushOff(job.value))
+/** The job's platform and whether the app is signed in there (Reply / Labels publish there). */
+const platform = computed(() => (job.value ? jobPlatform(job.value, app.repos) : 'github'))
+const signedIn = computed(() =>
+  platform.value === 'github' ? app.githubConnected : app.platforms.some((p) => p.id === platform.value && p.state === 'connected'),
+)
+const signInTip = computed(() => (signedIn.value ? undefined : t('job.signInFirst', { platform: platformName(platform.value) })))
 const direct = computed(() => !!job.value && isDirect(job.value))
 const logOpen = ref(false)
 
@@ -222,8 +248,7 @@ async function run(action: 'cancel' | 'retry' | 'dismiss' | 'pr') {
   const r = await api.jobAction(j.id, action)
   busy.value = ''
   if (!r.ok) {
-    const detail = r.status === 409 ? t('job.notAllowed', { error: r.error }) : r.error
-    toast.add({ severity: 'error', summary: t('job.actionFailed.' + action), detail, life: 8000 })
+    toast.add({ severity: 'error', summary: t('job.actionFailed.' + action), detail: actionError(t, r), life: 8000 })
     void load(true) // a failed PR puts the job back to needs_review with publishError
     return
   }
@@ -234,17 +259,31 @@ async function run(action: 'cancel' | 'retry' | 'dismiss' | 'pr') {
   }
 }
 
-function ask(action: 'dismiss' | 'pr' | 'reply' | 'labels') {
+/** «Отклонить»'s confirm text: what is dropped depends on the flow and run mode. */
+function dismissKey(j: Job): string {
+  if (j.flow === 'fix') return isFolderRun(j) ? 'dismissFolder' : isDirect(j) ? 'dismissDirect' : j.worktree ? 'dismiss' : 'dismissPlain'
+  if (j.state === 'needs_review') return j.flow === 'reply' ? 'dismissReply' : j.flow === 'label' ? 'dismissLabels' : 'dismissPlain'
+  return 'dismissPlain'
+}
+
+function ask(action: 'dismiss' | 'pr' | 'reply' | 'labels' | 'retry') {
   const j = job.value
   if (!j) return
+  const danger = action === 'dismiss' || action === 'retry'
   confirm.require({
     header: t('job.confirm.' + action + 'Title'),
-    message: t('job.confirm.' + (action !== 'dismiss' ? action : isFolderRun(j) ? 'dismissFolder' : isDirect(j) ? 'dismissDirect' : action), { ref: `${j.repo}#${j.number}`, labels: picked.value.join(', ') }),
-    icon: action === 'dismiss' ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
+    message: t('job.confirm.' + (action === 'dismiss' ? dismissKey(j) : action), { ref: jobRef(j), labels: picked.value.join(', '), platform: platformName(platform.value) }),
+    icon: danger ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
     acceptProps: { label: t('job.actions.' + action), severity: action === 'dismiss' ? 'danger' : undefined },
     accept: () => void (action === 'reply' ? sendReply() : action === 'labels' ? applyLabels() : run(action)),
   })
+}
+
+/** «Повторить»: a result under review is dropped by the new attempt — confirm that first. */
+function retry() {
+  if (job.value?.state === 'needs_review') ask('retry')
+  else void run('retry')
 }
 
 async function applyLabels() {
@@ -254,15 +293,14 @@ async function applyLabels() {
   const r = await api.jobLabels(j.id, picked.value)
   busy.value = ''
   if (!r.ok) {
-    const detail = r.status === 409 ? t('job.notAllowed', { error: r.error }) : r.error
-    toast.add({ severity: 'error', summary: t('job.actionFailed.labels'), detail, life: 8000 })
+    toast.add({ severity: 'error', summary: t('job.actionFailed.labels'), detail: actionError(t, r), life: 8000 })
     void load(true)
     return
   }
   pickedDirty.value = false
   setJob(r.data)
   const n = r.data.result.appliedLabels?.length ?? 0
-  toast.add({ severity: 'success', summary: n ? t('job.labels.added', n) : t('job.labels.nothingNew'), detail: `${j.repo}#${j.number}`, life: 5000 })
+  toast.add({ severity: 'success', summary: n ? t('job.labels.added', n) : t('job.labels.nothingNew'), detail: jobRef(j), life: 5000 })
 }
 
 async function sendReply() {
@@ -273,22 +311,34 @@ async function sendReply() {
   const r = await api.jobReply(j.id, body)
   busy.value = ''
   if (!r.ok) {
-    const detail = r.status === 409 ? t('item.notSignedIn') : r.error
+    const detail = r.status === 409 && !errorCodeKey((r.body as { code?: string } | undefined)?.code) ? t('job.signInFirst', { platform: platformName(platform.value) }) : actionError(t, r)
     toast.add({ severity: 'error', summary: t('job.actionFailed.reply'), detail, life: 8000 })
     void load(true)
     return
   }
   draftDirty.value = false
   setJob(r.data)
-  toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: `${j.repo}#${j.number}`, life: 4000 })
+  toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: jobRef(j), life: 4000 })
 }
 
+/**
+ * The failure of the shown job: our own text for a known code (the server's
+ * message folds under «Подробности»), a link to the settings page that fixes it.
+ * A cancelled job is not an error: it gets a neutral note instead.
+ */
 const errorHelp = computed(() => {
-  const c = res.value.errorCode
-  if (!c) return null
-  const to = c === 'no_folder' ? '/settings/projects' : c === 'no_cli' || c === 'no_profile' ? '/settings/agents' : ''
-  const known = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'git', 'interrupted'].includes(c)
-  return { text: known ? t('job.errorCode.' + c) : c, to, link: to === '/settings/projects' ? t('settings.sections.projects') : to ? t('settings.sections.agents') : '' }
+  const j = job.value
+  if (!j || j.state === 'cancelled' || (!j.error && !res.value.errorCode)) return null
+  const c = res.value.errorCode ?? ''
+  const key = errorCodeKey(c)
+  const to = errorCodeLink(c)
+  return {
+    text: key ? t(key) : t('job.failedNote'),
+    // interrupted: the server text repeats ours; everything else keeps the raw detail.
+    detail: c === 'interrupted' ? '' : j.error,
+    to,
+    link: to === '/settings/projects' ? t('settings.sections.projects') : to ? t('settings.sections.agents') : '',
+  }
 })
 
 function agentStats(a: AgentResult): string[] {
@@ -390,26 +440,37 @@ function agentStats(a: AgentResult): string[] {
               :disabled="!!busy"
               @click="run('cancel')"
             />
-            <Button
+            <span
               v-if="can.push"
-              :label="t('job.actions.push')"
-              icon="pi pi-upload"
-              :loading="pusher.busy.value"
-              :disabled="!!busy || pusher.busy.value"
-              @click="push"
-            />
+              v-tooltip.bottom="modOff ? t('job.modPushOff') : undefined"
+            >
+              <Button
+                :label="t('job.actions.push')"
+                icon="pi pi-upload"
+                :loading="pusher.busy.value"
+                :disabled="!!busy || pusher.busy.value || modOff"
+                @click="push"
+              />
+            </span>
             <span
               v-if="can.pr"
-              v-tooltip.bottom="!diffFiles ? t('job.noDiffTip') : undefined"
+              v-tooltip.bottom="modOff ? t('job.modPushOff') : !diffFiles ? t('job.noDiffTip') : undefined"
             >
               <Button
                 :label="busy === 'pr' ? t('job.creatingPr') : t('job.actions.pr')"
                 icon="pi pi-github"
                 :loading="busy === 'pr'"
-                :disabled="!!busy || !diffFiles"
+                :disabled="!!busy || !diffFiles || modOff"
                 @click="ask('pr')"
               />
             </span>
+            <RouterLink
+              v-if="modOff && (can.push || can.pr)"
+              to="/settings/agents"
+              class="small settings-link"
+            >
+              {{ t('settings.sections.agents') }} <i class="pi pi-arrow-right" />
+            </RouterLink>
             <Button
               v-if="can.retry"
               :label="t('job.actions.retry')"
@@ -417,7 +478,7 @@ function agentStats(a: AgentResult): string[] {
               severity="secondary"
               :loading="busy === 'retry'"
               :disabled="!!busy"
-              @click="run('retry')"
+              @click="retry"
             />
             <Button
               v-if="can.dismiss"
@@ -430,6 +491,8 @@ function agentStats(a: AgentResult): string[] {
               @click="ask('dismiss')"
             />
             <Button
+              v-if="job.itemUrl"
+              v-tooltip.bottom="t('job.openOn', { platform: platformName(platform) })"
               as="a"
               :href="safeUrl(job.itemUrl)"
               target="_blank"
@@ -437,7 +500,7 @@ function agentStats(a: AgentResult): string[] {
               icon="pi pi-external-link"
               severity="secondary"
               text
-              :aria-label="t('item.openOnGithub')"
+              :aria-label="t('job.openOn', { platform: platformName(platform) })"
             />
           </div>
         </div>
@@ -512,18 +575,27 @@ function agentStats(a: AgentResult): string[] {
 
       <!-- errors and publish results -->
       <Message
-        v-if="job.error || errorHelp"
+        v-if="job.state === 'cancelled'"
+        severity="secondary"
+      >
+        {{ job.error ? t('job.cancelledNote') : t('job.dismissedNote') }}
+      </Message>
+      <Message
+        v-else-if="errorHelp"
         severity="error"
       >
         <div class="err">
-          <b v-if="errorHelp">{{ errorHelp.text }}</b>
-          <span v-if="job.error">{{ job.error }}</span>
+          <b>{{ errorHelp.text }}</b>
           <RouterLink
-            v-if="errorHelp?.to"
+            v-if="errorHelp.to"
             :to="errorHelp.to"
           >
             {{ errorHelp.link }} <i class="pi pi-arrow-right" />
           </RouterLink>
+          <details v-if="errorHelp.detail">
+            <summary>{{ t('job.errorDetails') }}</summary>
+            <span class="mono small">{{ errorHelp.detail }}</span>
+          </details>
         </div>
       </Message>
       <Message
@@ -596,13 +668,15 @@ function agentStats(a: AgentResult): string[] {
         />
         <div class="card-foot">
           <span class="muted mono small">{{ num(draft.length) }} / {{ num(MAX_REPLY) }}</span>
-          <Button
-            :label="t('job.actions.reply')"
-            icon="pi pi-send"
-            :loading="busy === 'reply'"
-            :disabled="!draft.trim() || !!busy || !app.githubConnected"
-            @click="ask('reply')"
-          />
+          <span v-tooltip.top="signInTip">
+            <Button
+              :label="t('job.actions.reply')"
+              icon="pi pi-send"
+              :loading="busy === 'reply'"
+              :disabled="!draft.trim() || !!busy || !signedIn"
+              @click="ask('reply')"
+            />
+          </span>
         </div>
       </section>
 
@@ -651,10 +725,18 @@ function agentStats(a: AgentResult): string[] {
             >
               {{ t('job.triage.' + (p.queue === 'queued' ? 'queued' : 'exists')) }} · #{{ p.jobId }}
             </RouterLink>
+            <RouterLink
+              v-else-if="p.queue === 'no_folder' || p.queue?.includes('local folder')"
+              to="/settings/projects"
+              class="small pick-queue err"
+            >
+              {{ t('job.triage.noFolder') }} <i class="pi pi-arrow-right" />
+            </RouterLink>
             <span
               v-else-if="p.queue"
+              v-tooltip.top="p.queue === 'closed' || p.queue === 'failed' ? undefined : p.queue"
               class="small pick-queue err"
-            >{{ p.queue }}</span>
+            >{{ t(p.queue === 'closed' || p.queue === 'closed meanwhile' ? 'job.triage.closed' : 'job.triage.queueFailed') }}</span>
             <span
               v-else
               class="muted small pick-queue"
@@ -718,13 +800,15 @@ function agentStats(a: AgentResult): string[] {
           </div>
           <div class="card-foot">
             <span class="muted small">{{ t('job.labels.addOnly') }}</span>
-            <Button
-              :label="t('job.actions.labels')"
-              :icon="FLOW_ICON.label"
-              :loading="busy === 'labels'"
-              :disabled="!picked.length || !!busy || !app.githubConnected"
-              @click="ask('labels')"
-            />
+            <span v-tooltip.top="signInTip">
+              <Button
+                :label="t('job.actions.labels')"
+                :icon="FLOW_ICON.label"
+                :loading="busy === 'labels'"
+                :disabled="!picked.length || !!busy || !signedIn"
+                @click="ask('labels')"
+              />
+            </span>
           </div>
         </template>
         <template v-else>
@@ -1053,6 +1137,15 @@ function agentStats(a: AgentResult): string[] {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.err details summary {
+  cursor: pointer;
+  font-size: calc(12px * var(--iw-fs, 1));
+}
+
+.settings-link {
+  white-space: nowrap;
 }
 
 .grid {

@@ -150,7 +150,7 @@ func TestTriageNoFolderQueuesNothing(t *testing.T) {
 		t.Fatalf("triage: %+v %+v", j, tr)
 	}
 	for _, p := range tr.Picks {
-		if p.JobID != 0 || !strings.Contains(p.Queue, "local folder") {
+		if p.JobID != 0 || p.Queue != PickNoFolder {
 			t.Fatalf("pick #%d: %+v", p.Number, p)
 		}
 	}
@@ -174,7 +174,7 @@ func TestTriageNoOpenIssues(t *testing.T) {
 	if _, err := e.r.Triage(t.Context(), 9999, ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("no project: %v", err)
 	}
-	if _, err := e.r.Triage(t.Context(), e.proj[0].ID, "ghost"); !errors.Is(err, ErrBadRequest) {
+	if _, err := e.r.Triage(t.Context(), e.proj[0].ID, "ghost"); !errors.Is(err, ErrBadRequest) || ErrorCode(err) != CodeNoProfile {
 		t.Fatalf("unknown profile: %v", err)
 	}
 }

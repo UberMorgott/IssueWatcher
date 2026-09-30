@@ -150,7 +150,11 @@ const originOptions = computed(() => [
   { label: t('jobs.origin.manual'), value: 'manual' },
   { label: t('jobs.origin.rule'), value: 'rule' },
 ])
-const projectOptions = computed(() => [{ label: t('issues.allProjects'), value: 0, platform: '' }, ...app.repos.map((r) => ({ label: r.name, value: r.id, platform: r.platform }))])
+/** Grouped projects only: a linked mod page's jobs belong to its project (the filter spans the group). */
+const projectOptions = computed(() => [
+  { label: t('issues.allProjects'), value: 0, platform: '' },
+  ...app.repos.filter((r) => !r.linkedTo || r.id === filters.value.project).map((r) => ({ label: r.name, value: r.id, platform: r.platform })),
+])
 const selectedProject = computed(() => projectOptions.value.find((o) => o.value === filters.value.project))
 const anyFilter = computed(() => !!(filters.value.state || filters.value.flow || filters.value.origin || filters.value.project))
 const state = computed(() => (list.error.value ? (list.status.value === 404 ? 'unavailable' : 'error') : 'ok'))
@@ -250,7 +254,12 @@ function open(it: Row) {
             <span
               class="c-attempt"
               role="columnheader"
-            />
+              :title="t('jobs.attempt')"
+              :aria-label="t('jobs.attempt')"
+            ><i
+              class="pi pi-replay"
+              aria-hidden="true"
+            /></span>
             <span role="columnheader">{{ t('jobs.colTime') }}</span>
             <span
               class="c-cost"
@@ -297,6 +306,14 @@ function open(it: Row) {
                 to="/issues"
                 :label="t('nav.issues')"
                 icon="pi pi-inbox"
+                size="small"
+                severity="secondary"
+              />
+              <Button
+                as="router-link"
+                to="/projects"
+                :label="t('nav.projects')"
+                icon="pi pi-folder"
                 size="small"
                 severity="secondary"
               />

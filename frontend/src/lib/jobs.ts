@@ -4,8 +4,9 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
-import type { Job, JobFlow, JobState, LocalOutcome, QueuedJob } from '../api/types'
+import type { Agents, Job, JobErrorCode, JobFlow, JobState, LocalOutcome, QueuedJob } from '../api/types'
 import { summarise } from '../stores/jobs'
+import { useSettingsStore } from '../stores/settings'
 
 export const JOB_STATES: JobState[] = ['queued', 'running', 'needs_review', 'done', 'failed', 'cancelled']
 export const ACTIVE_STATES: JobState[] = ['queued', 'running', 'needs_review']
@@ -32,6 +33,27 @@ export const JOB_FLOWS: JobFlow[] = ['fix', 'reply', 'label', 'triage']
 /** owner/repo#N of an issue job; owner/repo of a project job (triage, no item). */
 export function jobRef(j: Pick<Job, 'repo' | 'number' | 'itemId'>): string {
   return j.itemId ? `${j.repo}#${j.number}` : j.repo
+}
+
+/** Error codes the UI has its own text for (runner Code* constants). */
+export const JOB_ERROR_CODES: JobErrorCode[] = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'git', 'interrupted', 'mod_item']
+
+/** The settings page that fixes an error code ('' = none). */
+export function errorCodeLink(code: string): string {
+  if (code === 'no_folder') return '/settings/projects'
+  if (code === 'no_cli' || code === 'no_profile' || code === 'mod_item') return '/settings/agents'
+  return ''
+}
+
+/** A known error code's text key ('' = unknown code). */
+export function errorCodeKey(code: string | undefined): string {
+  return code && (JOB_ERROR_CODES as string[]).includes(code) ? 'job.errorCode.' + code : ''
+}
+
+/** Push / PR of a mod-page fix are allowed (agents.modPush, overridable per mod page); always true for a code project's fix. */
+export function modPushAllowed(j: Pick<Job, 'mod' | 'projectKey'>, agents: Agents | undefined): boolean {
+  if (!j.mod) return true
+  return agents?.projects?.[j.projectKey ?? '']?.modPush ?? agents?.modPush ?? false
 }
 
 export function isActive(s: JobState): boolean {
@@ -83,9 +105,26 @@ export const OUTCOME_TONE: Record<LocalOutcome, string> = {
   failed: 'failed',
 }
 
-/** Push is offered for a direct fix job under review that made commits. */
-export function canPush(j: Job): boolean {
+/** A direct fix job under review that made commits: Push applies to it (see canPush). */
+export function pushEligible(j: Job): boolean {
   return isDirect(j) && !isFolderRun(j) && j.state === 'needs_review' && !!j.result.local?.commits?.length
+}
+
+/** Push / PR of this job are off: a mod-page fix while agents.modPush is off for that mod page. */
+export function modPushOff(j: Job): boolean {
+  return !!j.mod && !modPushAllowed(j, useSettingsStore().doc?.settings.agents)
+}
+
+/** Push is offered for a direct fix job under review that made commits (a mod-page fix only with modPush). */
+export function canPush(j: Job): boolean {
+  return pushEligible(j) && !modPushOff(j)
+}
+
+/** The user-facing text of a failed job action: a known error code's text, else the server's message. */
+export function actionError(t: (key: string) => string, r: { status: number; error: string; body?: unknown }): string {
+  const key = errorCodeKey((r.body as { code?: string } | undefined)?.code)
+  if (key) return t(key)
+  return r.status === 409 ? t('job.notAllowed') : r.error
 }
 
 /** A ticking clock (1 s) shared by every running-job view while one is mounted. */
@@ -118,7 +157,7 @@ export function usePush() {
     return new Promise((resolve) => {
       confirm.require({
         header: t('job.confirm.pushTitle'),
-        message: t('job.confirm.push', { ref: `${j.repo}#${j.number}`, path: j.localPath || j.result.local?.dir || '—' }),
+        message: t('job.confirm.push', { ref: jobRef(j), path: j.localPath || j.result.local?.dir || '—' }),
         icon: 'pi pi-question-circle',
         rejectProps: { label: t('common.cancel'), severity: 'secondary', text: true },
         acceptProps: { label: t('job.actions.push') },
@@ -128,12 +167,11 @@ export function usePush() {
           const r = await api.jobAction(j.id, 'push')
           busy.value = false
           if (!r.ok) {
-            const detail = r.status === 409 ? t('job.notAllowed', { error: r.error }) : r.error
-            toast.add({ severity: 'error', summary: t('job.actionFailed.push'), detail, life: 8000 })
+            toast.add({ severity: 'error', summary: t('job.actionFailed.push'), detail: actionError(t, r), life: 8000 })
             resolve(null)
             return
           }
-          toast.add({ severity: 'success', summary: t('job.pushed'), detail: `${j.repo}#${j.number}`, life: 6000 })
+          toast.add({ severity: 'success', summary: t('job.pushed'), detail: jobRef(j), life: 6000 })
           resolve(r.data)
         },
       })
@@ -162,7 +200,7 @@ export function useDispatchToast() {
     if (!res.ok) {
       const body = res.body as { code?: string; hint?: string } | undefined
       const noFolder = body?.code === 'no_folder' // 409: nothing queued
-      const detail = noFolder ? (body?.hint === 'link_mod' ? t('folder.neededMod') : t('folder.needed')) : res.error
+      const detail = noFolder ? (body?.hint === 'link_mod' ? t('folder.neededMod') : t('folder.needed')) : actionError(t, { status: 0, ...res })
       toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail, life: 6000 })
       return
     }
@@ -190,17 +228,21 @@ export function useDispatchToast() {
 
 /**
  * «Разобрать проект»: POST /api/projects/{id}/triage, then open the triage job
- * (the unfinished one when the project already has it).
+ * (the unfinished one when the project already has it). busy = the projects
+ * whose start is in flight (each row spins on its own).
  */
 export function useTriage() {
   const toast = useToast()
   const router = useRouter()
   const { t } = useI18n()
-  const busy = ref(false)
+  const busy = ref(new Set<number>())
   async function run(projectId: number, repo: string) {
-    busy.value = true
+    if (busy.value.has(projectId)) return
+    busy.value = new Set(busy.value).add(projectId)
     const r = await api.triage(projectId)
-    busy.value = false
+    const rest = new Set(busy.value)
+    rest.delete(projectId)
+    busy.value = rest
     if (r.ok) {
       toast.add({ severity: 'success', summary: t('jobs.triage.queued'), detail: repo, life: 5000 })
       void router.push(`/jobs/${r.data.id}`)
@@ -211,7 +253,16 @@ export function useTriage() {
       void router.push(`/jobs/${r.job.id}`)
       return
     }
-    toast.add({ severity: 'error', summary: t('jobs.triage.failed'), detail: r.error, life: 8000 })
+    const code = (r.body as { code?: string } | undefined)?.code ?? ''
+    const to = errorCodeLink(code)
+    toast.add({
+      group: 'jobs',
+      severity: 'error',
+      summary: t('jobs.triage.failed'),
+      detail: `${repo}: ${actionError(t, r)}`,
+      life: 8000,
+      data: { links: to ? [{ label: t(to === '/settings/projects' ? 'settings.sections.projects' : 'settings.sections.agents'), to, note: '' }] : [] },
+    } as never)
   }
   return { run, busy }
 }

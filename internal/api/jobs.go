@@ -308,6 +308,8 @@ func (s *Server) jobError(w http.ResponseWriter, err error) bool {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": runner.CodeModItem})
 	case errors.Is(err, runner.ErrNotAllowed), errors.Is(err, store.ErrJobExists):
 		errJSON(w, http.StatusConflict, err.Error())
+	case errors.Is(err, runner.ErrBadRequest) && runner.ErrorCode(err) != "":
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": runner.ErrorCode(err)}) // e.g. no_profile
 	case errors.Is(err, runner.ErrBadRequest):
 		errJSON(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, runner.ErrUnavailable), errors.Is(err, provider.ErrNotSignedIn):

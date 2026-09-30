@@ -79,7 +79,13 @@ watch(sentinel, (el) => {
 onBeforeUnmount(() => observer?.disconnect())
 /** Projects = grouped rows (linked mod pages are part of their project), unfiltered. */
 const projectCount = computed(() => (!filter.value.trim() && list.total.value != null ? list.total.value : app.repos.filter((r) => !r.linkedTo).length))
-const totals = computed(() => app.repos.reduce((a, r) => ({ open: a.open + r.open, closed: a.closed + r.closed }), { open: 0, closed: 0 }))
+/** Header totals: open issues and bug reports, open comment threads apart (Открыто = the same count as the column and chips). */
+const totals = computed(() =>
+  app.repos.reduce(
+    (a, r) => ({ open: a.open + openIssues(r), comments: a.comments + (r.openComments ?? 0), closed: a.closed + r.closed }),
+    { open: 0, comments: 0, closed: 0 },
+  ),
+)
 
 async function onExpand(e: { data: Repo }) {
   const id = e.data.id
@@ -249,7 +255,9 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
       class="page-head"
     >
       <div class="summary muted">
-        <b class="mono">{{ projectCount }}</b> {{ t('words.projects', projectCount) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }} · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
+        <b class="mono">{{ projectCount }}</b> {{ t('words.projects', projectCount) }} · <b class="mono">{{ totals.open }}</b> {{ t('words.open', totals.open) }}<template v-if="totals.comments">
+          · <b class="mono">{{ totals.comments }}</b> {{ t('projects.openThreads', totals.comments) }}
+        </template> · <b class="mono">{{ totals.closed }}</b> {{ t('words.closed', totals.closed) }}
       </div>
     </div>
 
@@ -473,7 +481,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 />
                 <span
                   v-if="!isModPlatform(data.platform)"
-                  v-tooltip.top="data.fixable ? t('jobs.triage.runTip', { n: triageTopN(data.key) }) : t('folder.needed')"
+                  v-tooltip.top="!data.fixable ? t('folder.needed') : !openIssues(data) ? t('jobs.triage.nothingOpen') : t('jobs.triage.runTip', { n: triageTopN(data.key) })"
                 >
                   <Button
                     :label="t('jobs.triage.run')"
@@ -482,8 +490,8 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     severity="secondary"
                     text
                     class="nowrap"
-                    :loading="triage.busy.value"
-                    :disabled="!data.open || !data.fixable"
+                    :loading="triage.busy.value.has(data.id)"
+                    :disabled="!openIssues(data) || !data.fixable"
                     @click.stop="triage.run(data.id, data.name)"
                   />
                 </span>
@@ -496,7 +504,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               class="num"
             >
               <template #body="{ data }: { data: Repo }">
-                <span class="mono strong">{{ data.open }}</span>
+                <span
+                  v-tooltip.top="data.openComments ? t('projects.openSplit', { issues: openIssues(data), comments: data.openComments }) : undefined"
+                  class="mono strong"
+                >{{ openIssues(data) }}</span>
               </template>
             </Column>
             <Column
@@ -554,9 +565,15 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     class="mapped mono"
                   ><i class="pi pi-folder-open" /> {{ t('platforms.viaCode', { name: codeOf(data)?.name }) }}</span>
                   <span
-                    v-else
+                    v-else-if="codeOf(data)"
                     class="not-mapped"
-                  ><i class="pi pi-folder" /> {{ codeOf(data) ? t('projects.notMapped') : t('platforms.notLinked') }}</span>
+                  ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
+                  <!-- Not linked to a repository: the name cell already says so; the folder comes with the link -->
+                  <span
+                    v-else
+                    v-tooltip.top="t('platforms.fixNeedsLink')"
+                    class="not-mapped"
+                  ><i class="pi pi-folder" /> —</span>
                 </div>
                 <div
                   v-else
@@ -612,7 +629,14 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     <div class="exp-label">
                       {{ t('projects.colOpen') }}
                     </div><div class="exp-val mono">
-                      {{ data.open }}
+                      {{ openIssues(data) }}
+                    </div>
+                  </div>
+                  <div v-if="data.openComments">
+                    <div class="exp-label">
+                      {{ t('projects.colThreads') }}
+                    </div><div class="exp-val mono">
+                      {{ data.openComments }}
                     </div>
                   </div>
                   <div>
@@ -634,7 +658,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                     :href="safeUrl(data.url)"
                     target="_blank"
                     rel="noopener noreferrer"
-                    :label="t('projects.openRepo')"
+                    :label="isModPlatform(data.platform) ? t('projects.openModPage') : t('projects.openRepo')"
                     icon="pi pi-external-link"
                     size="small"
                     severity="secondary"

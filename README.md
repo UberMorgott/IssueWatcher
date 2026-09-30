@@ -82,7 +82,7 @@ Nothing is written to the CLIs' config. Settings › Агенты › «MCP Issu
 (`agents.projects["owner/repo"].jobMcp`, unset = inherit).
 
 Two ways to start agents: per issue (issue page, or select issues → «Отправить
-агенту»), or per project — «Запустить проект» on the Projects page
+агенту»), or per project — «Разобрать проект» on the Projects page
 (`POST /api/projects/{id}/triage`): a read-only triage agent (the responder)
 ranks the project's open issues by criticality (it gets their titles, labels,
 age, comment counts and body starts, plus `mcp --project <id>`: read-only

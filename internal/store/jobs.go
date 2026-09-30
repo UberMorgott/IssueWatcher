@@ -65,7 +65,7 @@ type Job struct {
 	ProjectKey string `json:"projectKey"`
 	Number     int    `json:"number"`
 	Title      string `json:"title"`
-	ItemURL    string `json:"itemUrl"`
+	ItemURL    string `json:"itemUrl"` // a project job (triage): the project's URL
 	// LocalPath is the folder fix jobs run in: the project's mapped folder, or
 	// for a mod page the linked code project's.
 	LocalPath string `json:"localPath"`
@@ -80,7 +80,7 @@ type Job struct {
 
 const jobColumns = `j.id, coalesce(j.item_id, 0), j.project_id, j.flow, j.state, j.origin, j.rule_id, j.profile_id, j.attempt, j.phase, j.branch,
 	j.worktree, j.base_sha, j.error, j.result, j.created_at, j.started_at, j.finished_at, j.updated_at,
-	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, ''),
+	p.name, s.platform || ':' || p.external_id, coalesce(i.number, 0), coalesce(i.title, ''), coalesce(i.url, p.url),
 	coalesce(cp.local_path, p.local_path), s.platform <> '` + CodePlatform + `', coalesce(cp.name, ''), coalesce(cp.id, 0)`
 
 // A project job (triage) has no item (item_id NULL): its item fields read as zero.

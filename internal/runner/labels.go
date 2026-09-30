@@ -121,7 +121,7 @@ func (r *Runner) runLabel(ctx context.Context, j *store.Job, res *Result, log *j
 	if len(repo) == 0 {
 		return "", fmt.Errorf("%s has no labels to pick from", in.ProjectName)
 	}
-	log.addf(StepInfo, "%s has %d labels", in.ProjectName, len(repo))
+	log.add(StepInfo, fmt.Sprintf(r.say("меток в %s: %d", "%s has %d labels"), in.ProjectName, len(repo)))
 	files, dir, err := r.readOnlyDir(*j, in, log)
 	if err != nil {
 		return "", err
@@ -140,15 +140,15 @@ func (r *Runner) runLabel(ctx context.Context, j *store.Job, res *Result, log *j
 	if res.Labels == nil {
 		res.Labels = []string{}
 	}
-	log.addf(StepInfo, "suggested labels: %s", listOrNone(res.Labels))
+	log.add(StepInfo, r.say("предложенные метки: ", "suggested labels: ")+listOrNone(res.Labels))
 	if len(res.DroppedLabels) > 0 {
-		log.addf(StepInfo, "dropped (not in the repository): %s", strings.Join(res.DroppedLabels, ", "))
+		log.add(StepInfo, r.say("отброшены (нет в репозитории): ", "dropped (not in the repository): ")+strings.Join(res.DroppedLabels, ", "))
 	}
 	if j.Origin == store.OriginRule {
 		if len(res.Labels) == 0 && len(res.DroppedLabels) == 0 {
 			// The agent found no label fits: nothing to apply or review, and a
 			// needs_review job would block the next label job of the issue.
-			log.add(StepInfo, "no label fits: nothing to apply")
+			log.add(StepInfo, r.say("ни одна метка не подходит: добавлять нечего", "no label fits: nothing to apply"))
 			return store.JobDone, nil
 		}
 		if len(res.Labels) > 0 && cfg.AutomationFor(in.ProjectKey).AutoApplyLabels {
@@ -168,7 +168,7 @@ func (r *Runner) autoApply(ctx context.Context, itemID int64, res *Result, log *
 		return store.JobNeedsReview
 	}
 	res.AppliedLabels = added
-	log.addf(StepInfo, "labels added automatically: %s", listOrNone(added))
+	log.add(StepInfo, r.say("метки добавлены автоматически: ", "labels added automatically: ")+listOrNone(added))
 	return store.JobDone
 }
 
@@ -210,7 +210,7 @@ func (r *Runner) ApplyLabels(ctx context.Context, id int64, names []string) (sto
 		log.add(StepError, "add labels: "+perr.Error())
 	} else {
 		res.AppliedLabels = added
-		log.addf(StepInfo, "labels added: %s", listOrNone(added))
+		log.add(StepInfo, r.say("метки добавлены: ", "labels added: ")+listOrNone(added))
 	}
 	return r.unlockPublish(ctx, j, res, perr)
 }

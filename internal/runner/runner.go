@@ -321,6 +321,29 @@ func (e *codedError) Unwrap() error { return e.err }
 
 func coded(code string, err error) error { return &codedError{code: code, err: err} }
 
+// ErrorCode is the error code err carries for the UI ("" = none): the API
+// sends it along so the UI shows its own text and a link to the fix.
+func ErrorCode(err error) string {
+	var ce *codedError
+	switch {
+	case errors.As(err, &ce):
+		return ce.code
+	case errors.Is(err, ErrModItem):
+		return CodeModItem
+	case errors.Is(err, ErrNoFolder):
+		return CodeNoFolder
+	}
+	return ""
+}
+
+// say picks the app language's text of a user-facing job log line.
+func (r *Runner) say(ru, en string) string {
+	if r.opts.Settings().General.Language == "en" {
+		return en
+	}
+	return ru
+}
+
 // run executes one attempt of job j and records the outcome.
 func (r *Runner) run(ctx context.Context, j store.Job) {
 	id, attempt := j.ID, j.Attempt // j is updated by the flow while the batcher's timer reads these
@@ -349,12 +372,14 @@ func (r *Runner) run(ctx context.Context, j store.Job) {
 		err = cause // a killed git/agent step reports its own error; the reason is the cancel
 	}
 	switch {
+	case errors.Is(err, ErrCancelled):
+		log.add(StepInfo, r.say("отменено пользователем", "cancelled by the user"))
 	case err != nil:
 		log.add(StepError, err.Error())
 	case state == store.JobDone:
-		log.addf(StepInfo, "done")
+		log.add(StepInfo, r.say("готово", "done"))
 	default:
-		log.addf(StepInfo, "ready for review")
+		log.add(StepInfo, r.say("готово к проверке", "ready for review"))
 	}
 	log.close()
 	batch.close()
@@ -624,7 +649,7 @@ func (r *Runner) readOnlyDir(j store.Job, in store.JobInput, log *jobLog) (files
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return "", "", err
 		}
-		log.add(StepInfo, "no local folder mapped: the agent answers from the issue text only")
+		log.add(StepInfo, r.say("папка проекта не выбрана: агент отвечает только по тексту issue", "no local folder mapped: the agent answers from the issue text only"))
 	}
 	return files, dir, nil
 }

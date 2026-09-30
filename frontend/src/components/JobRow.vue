@@ -6,7 +6,7 @@ import JobProgress from './JobProgress.vue'
 import PlatformIcon from './PlatformIcon.vue'
 import type { JobRowData as Row } from '../api/types'
 import { absTime, elapsed, relTime, usd } from '../lib/format'
-import { FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome, jobRef } from '../lib/jobs'
+import { errorCodeKey, FLOW_ICON, isActive, jobCost, jobDuration, jobOutcome, jobRef, useNow } from '../lib/jobs'
 import { jobPlatform } from '../lib/platforms'
 import { useAppStore } from '../stores/app'
 
@@ -15,6 +15,14 @@ defineProps<{ item: Row; top: number; profile: string }>()
 const emit = defineEmits<{ open: [] }>()
 const { t } = useI18n()
 const app = useAppStore()
+/** Running rows' duration ticks (one shared clock). */
+const now = useNow()
+/** A failed row's reason: our text for a known code, else a pointer to the job page (a cancel is no error). */
+function failure(r: Row): string {
+  if (r.state !== 'failed' || (!r.error && !r.result?.errorCode)) return ''
+  const key = errorCodeKey(r.result?.errorCode)
+  return key ? t(key) : t('job.failedNote')
+}
 </script>
 
 <template>
@@ -78,7 +86,7 @@ const app = useAppStore()
         ><PlatformIcon
           :platform="jobPlatform(item, app.repos)"
           :size="13"
-        /><span class="mono">{{ jobRef(item) }}</span><template v-if="item.error"> · <span class="err">{{ item.error }}</span></template></span>
+        /><span class="mono">{{ jobRef(item) }}</span><template v-if="failure(item)"> · <span class="err">{{ failure(item) }}</span></template></span>
       </span>
       <span
         class="c-flow"
@@ -104,7 +112,7 @@ const app = useAppStore()
         :title="absTime(item.createdAt)"
       >
         <span>{{ relTime(item.createdAt) }}</span>
-        <span class="t-meta">{{ elapsed(jobDuration(item)) }}</span>
+        <span class="t-meta">{{ elapsed(jobDuration(item, now)) }}</span>
       </span>
       <span
         class="c-cost mono"
