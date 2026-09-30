@@ -243,6 +243,39 @@ func TestStopDoesNotHangOnStuckPipe(t *testing.T) {
 	}
 }
 
+func TestCloseDuringStartKillsLaunch(t *testing.T) {
+	f := &fakeChrome{title: "x", fetch: func(u string) Response { return Response{Status: 200, URL: u} }}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var killed atomic.Bool
+	b := New(Options{Dir: t.TempDir(), Origins: []string{"https://www.example.com"},
+		Find: func() (Exe, error) { return Exe{Path: "chrome.exe"}, nil },
+		Start: func(exe string, args []string) (*process, error) {
+			close(entered)
+			<-release
+			p, err := f.start(exe, args)
+			if err == nil {
+				kill := p.kill
+				p.kill = func() { killed.Store(true); kill() }
+			}
+			return p, err
+		}})
+	b.stopWait = 100 * time.Millisecond
+	done := make(chan error, 1)
+	go func() {
+		_, err := b.Fetch(context.Background(), Request{URL: "https://www.example.com/a"})
+		done <- err
+	}()
+	<-entered
+	b.Close()
+	close(release)
+	if err := <-done; !errors.Is(err, ErrClosed) {
+		t.Fatalf("fetch after Close err = %v", err)
+	}
+	if b.Running() || !killed.Load() {
+		t.Fatalf("running = %v, killed = %v: the launch outlived Close", b.Running(), killed.Load())
+	}
+}
+
 func (f *fakeChrome) setFetch(fn func(string) Response) {
 	f.mu.Lock()
 	f.fetch = fn

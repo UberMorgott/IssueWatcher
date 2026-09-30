@@ -219,9 +219,15 @@ func (b *Browser) ensure(ctx context.Context, headed bool) (*Conn, error) {
 	}
 	c = NewConn(p.t)
 	b.mu.Lock()
+	if b.closed { // Close ran during the launch: it saw no process, so kill this one here
+		b.mu.Unlock()
+		b.shutdown(ctx, p, c)
+		return nil, ErrClosed
+	}
 	b.proc, b.conn, b.headed, b.exe = p, c, headed, exe
 	b.tabs = map[string]*tab{}
 	b.gen++
+	gen := b.gen
 	b.mu.Unlock()
 	if !headed {
 		ua, err := b.userAgent(ctx, c)
@@ -230,6 +236,10 @@ func (b *Browser) ensure(ctx context.Context, headed bool) (*Conn, error) {
 			return nil, err
 		}
 		b.mu.Lock()
+		if b.gen != gen { // stopped or closed meanwhile: that run is gone
+			b.mu.Unlock()
+			return nil, ErrClosed
+		}
 		b.ua = ua
 		b.mu.Unlock()
 	}
