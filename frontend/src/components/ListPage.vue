@@ -122,7 +122,7 @@ defineExpose({ focusSearch })
    wraps only on narrow windows. Pages pass bare PrimeVue controls: no widths. */
 .lp-toolbar {
   --lp-h: 38px;
-  --lp-frame: 1px solid var(--p-inputtext-border-color);
+  --lp-frame: 1px solid var(--p-form-field-border-color);
 
   display: flex;
   flex-wrap: wrap;
@@ -176,8 +176,8 @@ defineExpose({ focusSearch })
   gap: 2px;
   padding: 3px;
   border: var(--lp-frame);
-  border-radius: var(--p-inputtext-border-radius);
-  background: var(--p-inputtext-background);
+  border-radius: var(--p-form-field-border-radius);
+  background: var(--p-form-field-background);
 }
 
 .lp-toolbar :deep(.p-selectbutton .p-togglebutton) {
@@ -189,7 +189,26 @@ defineExpose({ focusSearch })
 
 .lp-toolbar :deep(.p-togglebutton-content) {
   height: 100%;
-  padding: 0 9px;
+  padding: 0 10px;
+  border-radius: calc(var(--p-form-field-border-radius) - 2px);
+  color: var(--iw-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+.lp-toolbar :deep(.p-togglebutton-icon) {
+  color: inherit;
+}
+
+.lp-toolbar :deep(.p-togglebutton:not(.p-togglebutton-checked):hover .p-togglebutton-content) {
+  color: var(--iw-text);
+}
+
+/* The chosen option reads at a glance in both themes: a primary tint with
+   primary text, not a grey pill on a grey track. */
+.lp-toolbar :deep(.p-togglebutton-checked .p-togglebutton-content) {
+  color: var(--iw-primary);
+  background: color-mix(in srgb, var(--iw-primary) 16%, transparent);
 }
 
 /* A narrower bar (1280–1440 px windows beside the sidebar) tightens instead of
