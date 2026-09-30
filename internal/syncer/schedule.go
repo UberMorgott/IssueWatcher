@@ -302,7 +302,7 @@ func (s *Syncer) checkDue(ctx context.Context, now time.Time) {
 			t.minEvery = r.ch.MinInterval
 		}
 		if len(r.items) == 0 {
-			if err := s.opts.Store.SavePollState(ctx, t.ID, t.poll, now); err != nil {
+			if err := s.write(func() error { return s.opts.Store.SavePollState(ctx, t.ID, t.poll, now) }); err != nil {
 				s.opts.Log.Error("sync: save poll state", "project", t.ExternalID, "err", err)
 			}
 			s.reschedule(t, now)
@@ -311,7 +311,11 @@ func (s *Syncer) checkDue(ctx context.Context, now time.Time) {
 		// Items, cursor and poll state in one transaction: when storing fails
 		// nothing moves (cursor, since marks, ETags), so the next check sees
 		// the same changes again instead of losing them.
-		evs, err := s.opts.Store.ApplyChecked(ctx, src, t.ID, r.items, login, t.poll, now)
+		var evs []store.Event
+		err := s.write(func() (err error) {
+			evs, err = s.opts.Store.ApplyChecked(ctx, src, t.ID, r.items, login, t.poll, now)
+			return err
+		})
 		if err != nil {
 			s.opts.Log.Error("sync: store changes", "project", t.ExternalID, "err", err)
 			t.poll = r.prev

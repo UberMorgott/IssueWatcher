@@ -71,8 +71,9 @@ func (g *Group) Add(syncers ...*Syncer) {
 	}
 }
 
-// Remove stops and drops every syncer of platform (never the primary one)
-// and returns them.
+// Remove stops, retires and drops every syncer of platform (never the
+// primary one) and returns them: their row syncs in flight are cancelled and
+// store nothing (ErrRetired), so a replaced engine never overwrites the new one.
 func (g *Group) Remove(platform string) []*Syncer {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -85,6 +86,7 @@ func (g *Group) Remove(platform string) []*Syncer {
 				stop()
 				delete(g.stops, s)
 			}
+			s.Retire()
 			continue
 		}
 		kept = append(kept, s)

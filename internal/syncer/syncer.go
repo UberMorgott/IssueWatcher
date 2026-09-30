@@ -111,6 +111,11 @@ type Syncer struct {
 	budgetFree     time.Time
 	checks         int
 	notModified    int
+
+	life    context.Context // cancelled by Retire
+	kill    context.CancelFunc
+	wmu     sync.RWMutex // store writes vs Retire
+	retired bool
 }
 
 // OnProgress registers a listener for cycle progress (called on the sync goroutine).
@@ -145,6 +150,7 @@ func New(opts Options) *Syncer {
 		opts: opts, trigger: make(chan struct{}, 1), wake: make(chan struct{}, 1),
 		targets: map[int64]*target{},
 	}
+	s.life, s.kill = context.WithCancel(context.Background())
 	if pl, ok := opts.Provider.(provider.Poller); ok {
 		s.minPoll = pl.Scheduling().PollMinInterval
 	}
@@ -193,6 +199,8 @@ func (s *Syncer) SetPlan(p Plan) {
 
 // Run follows the schedule until ctx ends.
 func (s *Syncer) Run(ctx context.Context) {
+	ctx, cancel := s.bind(ctx)
+	defer cancel()
 	for {
 		wait := s.Step(ctx)
 		t := time.NewTimer(wait)
@@ -260,6 +268,8 @@ func (s *Syncer) SyncOnce(ctx context.Context) error { return s.syncOnce(ctx, fa
 
 // syncOnce runs one full reconcile; bg marks its progress as background.
 func (s *Syncer) syncOnce(ctx context.Context, bg bool) error {
+	ctx, cancel := s.bind(ctx)
+	defer cancel()
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
@@ -267,7 +277,7 @@ func (s *Syncer) syncOnce(ctx context.Context, bg bool) error {
 	events, src, complete, err := s.cycleOnce(ctx, &changed, bg)
 	now := s.now()
 	if complete { // every project was read (per-project errors included): a restart resumes from here
-		if merr := s.opts.Store.MarkReconciled(ctx, src, now); merr != nil {
+		if merr := s.write(func() error { return s.opts.Store.MarkReconciled(ctx, src, now) }); merr != nil {
 			s.opts.Log.Error("sync: mark reconciled", "err", merr)
 		}
 	}
@@ -341,7 +351,8 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 		return nil, src, false, fmt.Errorf("list projects: %w", err)
 	}
 	c0 := s.opts.Store.Changes()
-	projects, err := s.opts.Store.SyncProjects(ctx, src, list)
+	var projects []store.Project
+	err = s.write(func() (err error) { projects, err = s.opts.Store.SyncProjects(ctx, src, list); return err })
 	if err != nil {
 		return nil, src, false, err
 	}
@@ -384,7 +395,10 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 			var evs []store.Event
 			if err == nil {
 				full := s.now()
-				evs, err = s.opts.Store.ApplyReconciled(ctx, src, pr.ID, items, login, full)
+				err = s.write(func() (err error) {
+					evs, err = s.opts.Store.ApplyReconciled(ctx, src, pr.ID, items, login, full)
+					return err
+				})
 				if err == nil {
 					s.mu.Lock()
 					if t := s.targets[pr.ID]; t != nil {
@@ -440,6 +454,8 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 // sourceID is the project's source: a project of another account (the
 // provider switched accounts) is not written, ErrNoSource.
 func (s *Syncer) SyncProject(ctx context.Context, sourceID int64, pr store.Project) error {
+	ctx, cancel := s.bind(ctx)
+	defer cancel()
 	s.cycle.Lock()
 	defer s.cycle.Unlock()
 	s.update(func(st *Status) { st.Running = true })
@@ -484,7 +500,9 @@ func (s *Syncer) syncProject(ctx context.Context, sourceID int64, pr store.Proje
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", pr.ExternalID, err)
 	}
-	return s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login)
+	var evs []store.Event
+	err = s.write(func() (err error) { evs, err = s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login); return err })
+	return evs, err
 }
 
 // refreshTargets reloads the change-check targets after a reconcile: active

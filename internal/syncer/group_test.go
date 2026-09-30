@@ -310,3 +310,74 @@ func TestGroupSyncProjectsAccountSwitch(t *testing.T) {
 		t.Fatalf("direct sync of A's project through B: %v", err)
 	}
 }
+
+// blockingProvider holds SyncItems until release closes (an old engine's
+// request already on the wire when its platform is switched).
+type blockingProvider struct {
+	*fakeProvider
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingProvider) SyncItems(ctx context.Context, p provider.Project, since time.Time) ([]provider.Item, error) {
+	close(b.entered)
+	<-b.release
+	items, err := b.fakeProvider.SyncItems(ctx, p, since)
+	for i := range items {
+		items[i].UpdatedAt = t0.Add(time.Hour) // newer: a write would overwrite
+	}
+	return items, err
+}
+
+// F3: a row sync still running when its syncer is removed (engine switch,
+// platform off) never writes: the new source's items stay.
+func TestRemovedSyncerProjectSyncWritesNothing(t *testing.T) {
+	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	st := store.New(db)
+	log := slog.New(slog.DiscardHandler)
+	nx := &fakeProvider{platform: "nexus", account: "me", item: "fresh"}
+	old := New(Options{Store: st, Provider: nx, Log: log})
+	if err := old.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	g := NewGroup(New(Options{Store: st, Provider: &fakeProvider{platform: "github", account: "me", item: "code"}, Log: log}), old)
+	repos, err := st.Repos(t.Context())
+	if err != nil || len(repos) != 1 {
+		t.Fatalf("repos: %+v %v", repos, err)
+	}
+	targets, err := st.GroupTargets(t.Context(), repos[0].ID)
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets: %+v %v", targets, err)
+	}
+	bp := &blockingProvider{fakeProvider: &fakeProvider{platform: "nexus", account: "me", item: "stale"},
+		entered: make(chan struct{}), release: make(chan struct{})}
+	old.opts.Provider = bp // the old engine's request is slow
+	done := make(chan Progress, 1)
+	g.OnProgress(func(p Progress) {
+		if p.State == ProgressDone || p.State == ProgressError {
+			done <- p
+		}
+	})
+	if started, _ := g.SyncProjects(t.Context(), targets); len(started) != 1 {
+		t.Fatalf("started %v", started)
+	}
+	<-bp.entered
+	g.Remove("nexus") // the engine switch
+	close(bp.release)
+	select {
+	case p := <-done:
+		if p.State != ProgressError {
+			t.Fatalf("removed syncer's sync reported %+v", p)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("row sync never ended")
+	}
+	page, err := st.Issues(t.Context(), store.IssueFilter{})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Title != "fresh" {
+		t.Fatalf("items after removal: %+v %v", page.Items, err)
+	}
+}
