@@ -485,6 +485,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 >
                   <Button
                     :label="t('jobs.triage.run')"
+                    :aria-label="t('jobs.triage.run')"
                     icon="pi pi-sort-amount-down"
                     size="small"
                     severity="secondary"
@@ -553,7 +554,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                 >—</span>
               </template>
             </Column>
-            <Column :header="t('projects.colFolder')">
+            <Column
+              :header="t('projects.colFolder')"
+              class="folder-col"
+            >
               <template #body="{ data }: { data: Repo }">
                 <div
                   v-if="isModPlatform(data.platform)"
@@ -590,6 +594,9 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   ><i class="pi pi-folder" /> {{ t('projects.notMapped') }}</span>
                   <Button
                     :label="data.localPath ? t('projects.change') : t('projects.choose')"
+                    :aria-label="data.localPath ? t('projects.change') : t('projects.choose')"
+                    :icon="data.localPath ? 'pi pi-pencil' : 'pi pi-folder-plus'"
+                    class="folder-btn"
                     size="small"
                     severity="secondary"
                     text
@@ -613,6 +620,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
               field="lastSync"
               :header="t('projects.colLastSync')"
               sortable
+              class="sync-col"
             >
               <template #body="{ data }: { data: Repo }">
                 <span
@@ -720,6 +728,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 
 .table-panel {
   overflow: hidden;
+  container: projects / inline-size;
 }
 
 .name-cell {
@@ -911,7 +920,7 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 220px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: calc(12px * var(--iw-fs, 1));
@@ -970,14 +979,44 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
 }
 
 :deep(.num) {
-  width: 90px;
+  width: 72px;
 }
 
-@media (width <= 1023px) {
+/* The table fits its panel at every width instead of being clipped by it: the
+   panel is a size container and, as it narrows, the row actions and folder
+   buttons drop their labels (tooltip and aria-label keep them), then the
+   progress bar and the last-sync column go (.table-panel is the container). */
+@container projects (width < 1300px) {
+  :deep(.actions-col .p-button-label),
+  :deep(.folder-btn .p-button-label) {
+    display: none;
+  }
+
   :deep(.progress-col) {
     display: none;
   }
 
+  .name-main {
+    min-width: 180px;
+  }
+
+  :deep(.iw-projects .p-datatable-thead > tr > th),
+  :deep(.iw-projects .p-datatable-tbody > tr > td) {
+    padding-inline: 8px;
+  }
+
+  .mapped {
+    max-width: 140px;
+  }
+}
+
+@container projects (width < 1000px) {
+  :deep(.sync-col) {
+    display: none;
+  }
+}
+
+@media (width <= 1023px) {
   .expansion {
     grid-template-columns: minmax(0, 1fr);
     padding-left: 8px;
