@@ -217,3 +217,29 @@ func TestEngineSwitchLive(t *testing.T) {
 		t.Fatalf("factorio card %+v", p)
 	}
 }
+
+// F9b: the portal user found by a one-click «Подключить» is kept in settings
+// (providers.factorio.author): «Выйти» drops only the session, so public reads
+// keep their account (also after a restart); «Отключить» clears it.
+func TestFactorioAuthorSurvivesLogout(t *testing.T) {
+	m, cfgs, _, dir := newTestPlatforms(t, nil)
+	withNative(t, m, dir)
+	if _, err := m.Login(t.Context(), factorio.Platform); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for cfgs.Get().Providers.Factorio.Author != "Morgott" {
+		if time.Now().After(deadline) {
+			t.Fatalf("factorio author = %q, want the signed-in user", cfgs.Get().Providers.Factorio.Author)
+		}
+		_, _ = m.LoginStatus(t.Context(), factorio.Platform)
+		time.Sleep(10 * time.Millisecond)
+	}
+	p, err := m.Logout(t.Context(), factorio.Platform, false)
+	if err != nil || cfgs.Get().Providers.Factorio.Author != "Morgott" || p.Account != "Morgott" || p.State != api.PlatformConnected {
+		t.Fatalf("after «Выйти»: %+v %v, author %q", p, err, cfgs.Get().Providers.Factorio.Author)
+	}
+	if _, err := m.Logout(t.Context(), factorio.Platform, true); err != nil || cfgs.Get().Providers.Factorio.Author != "" {
+		t.Fatalf("after «Отключить»: %v, author %q", err, cfgs.Get().Providers.Factorio.Author)
+	}
+}

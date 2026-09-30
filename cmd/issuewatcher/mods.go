@@ -399,6 +399,11 @@ func (m *modPlatforms) Check(ctx context.Context, id string) (api.PlatformStatus
 		res.Session, res.Browser = sessionOf(ctx, p)
 	}
 	res.State, res.Error = checkState(err)
+	if err == nil && id == factorio.Platform && res.Account != "" {
+		// The portal user a one-click sign-in found is kept apart from the
+		// session: «Выйти» drops the session, public reads keep the user.
+		m.setAuthor(id, res.Account)
+	}
 	if err == nil {
 		m.group.Trigger() // read what the account now reaches
 	}
