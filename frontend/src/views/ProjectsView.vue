@@ -199,7 +199,7 @@ async function syncProject(r: Repo) {
   const res = await api.syncProject(r.id)
   if (!res.ok) {
     endRowSync(r.id)
-    toast.add({ severity: 'error', summary: res.error, life: 4000 })
+    toast.add({ severity: 'error', summary: t('topbar.syncStartFailed'), detail: r.name, life: 4000 })
     return
   }
   const started = res.data?.started ?? []
@@ -219,7 +219,7 @@ function setRowFolder(id: number, localPath: string) {
 async function unmapFolder(r: Repo) {
   const res = await api.setFolder(r.id, '')
   if (!res.ok) {
-    toast.add({ severity: 'error', summary: res.error, life: 4000 })
+    toast.add({ severity: 'error', summary: t('settings.folders.saveFailed'), detail: r.name, life: 4000 })
     return
   }
   setRowFolder(r.id, '')
@@ -237,7 +237,7 @@ const suggestionsOf = (r: Repo) =>
 async function acceptSuggestion(mod: Repo, code: Repo) {
   const r = await api.setLinks(code.id, [...new Set([...(code.links ?? []), mod.id])])
   if (!r.ok) {
-    toast.add({ severity: 'error', summary: r.error, life: 4000 })
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: mod.name, life: 4000 })
     return
   }
   toast.add({ severity: 'success', summary: t('platforms.linkedTo', { name: code.name }), life: 2500 })

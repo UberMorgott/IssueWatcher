@@ -311,6 +311,7 @@ const ru: Messages = {
     sendReply: 'Отправить',
     notSignedIn: 'Вход в GitHub не выполнен — переподключитесь на странице «Подключения».',
     replyPosted: 'Ответ опубликован',
+    replyFailed: 'Ответ не отправлен',
     metaProject: 'Проект',
     metaSource: 'Источник',
     metaLabels: 'Метки',
@@ -817,7 +818,8 @@ const ru: Messages = {
     relogin: '{platform}: сессия истекла — войдите снова и проверьте в Настройки › Платформы.',
     no_source: 'Нет подключённого аккаунта {platform} для этой записи.',
     reply_off: 'Ответы в {platform} пока недоступны.',
-  },  settings: {
+  },
+  settings: {
     sub: 'Всё хранится рядом с exe в {path} — портативно; реестр только для автозагрузки, если она включена.',
     sections: {
       general: 'Общие',

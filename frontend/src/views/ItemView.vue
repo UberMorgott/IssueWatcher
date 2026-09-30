@@ -175,7 +175,7 @@ async function setResolved(resolved: boolean) {
   const r = await api.setResolved([it.id], resolved)
   marking.value = false
   if (!r.ok) {
-    toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+    toast.add({ severity: 'error', summary: t('issues.bulkFailed'), detail: itemRef(it), life: 5000 })
     return
   }
   toast.add({ severity: 'success', summary: t(resolved ? 'comments.resolvedToast' : 'comments.reopenedToast', 1), detail: itemRef(it), life: 3000 })
@@ -247,7 +247,7 @@ async function send() {
   const here = String(it.id) === props.id // still on the item the reply went to
   if (!r.ok) {
     if (!here) {
-      toast.add({ severity: 'error', summary: r.error, detail: itemRef(it), life: 5000 })
+      toast.add({ severity: 'error', summary: t('item.replyFailed'), detail: itemRef(it), life: 5000 })
       return
     }
     const b = r.body as { code?: string; platform?: string } | undefined

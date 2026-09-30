@@ -310,6 +310,7 @@ const en = {
     sendReply: 'Send reply',
     notSignedIn: 'Not signed in to GitHub — reconnect on the Connections page.',
     replyPosted: 'Reply posted',
+    replyFailed: 'Reply not sent',
     metaProject: 'Project',
     metaSource: 'Source',
     metaLabels: 'Labels',
@@ -821,7 +822,8 @@ const en = {
     relogin: '{platform}: the session expired — sign in again, then check it in Settings › Platforms.',
     no_source: 'No connected {platform} account serves this item.',
     reply_off: 'Replying is not available for {platform} yet.',
-  },  settings: {
+  },
+  settings: {
     sub: 'Everything is stored next to the exe in {path} — portable; the registry is touched only for autostart, when enabled.',
     sections: {
       general: 'General',
