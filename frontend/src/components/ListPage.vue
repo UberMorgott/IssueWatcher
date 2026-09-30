@@ -64,7 +64,8 @@ defineExpose({ focusSearch })
         <slot name="filters" />
         <Button
           v-if="resettable"
-          :label="t('issues.reset')"
+          v-tooltip.bottom="t('issues.reset')"
+          :aria-label="t('issues.reset')"
           icon="pi pi-filter-slash"
           severity="secondary"
           text
@@ -112,38 +113,109 @@ defineExpose({ focusSearch })
   margin: -8px calc(-1 * var(--iw-gutter));
   padding: 8px var(--iw-gutter);
   background: var(--iw-bg);
+  container: lp / inline-size;
 }
 
-/* Every control shares one height. */
+/* One control language for every page's filters: each control is --lp-h high,
+   framed like an input; selects size to their value (capped, ellipsis), the
+   search takes what is left, so the whole bar fits one row at desktop widths and
+   wraps only on narrow windows. Pages pass bare PrimeVue controls: no widths. */
 .lp-toolbar {
   --lp-h: 38px;
+  --lp-frame: 1px solid var(--p-inputtext-border-color);
 
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .lp-search {
-  flex: 1 1 220px;
-  min-width: 200px;
+  flex: 1 1 180px;
+  min-width: 140px;
 }
 
 .lp-toolbar :deep(.p-inputtext),
 .lp-toolbar :deep(.p-select),
-.lp-toolbar :deep(.p-togglebutton),
+.lp-toolbar :deep(.p-selectbutton),
+.lp-toolbar > :deep(.p-togglebutton),
 .lp-toolbar :deep(.p-button) {
   height: var(--lp-h);
   box-sizing: border-box;
 }
 
-.lp-toolbar :deep(.p-select) {
-  align-items: center;
+.lp-toolbar :deep(.p-button-icon-only) {
+  width: var(--lp-h);
 }
 
-.lp-toolbar :deep(.p-selectbutton) {
+.lp-toolbar :deep(.p-select) {
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 96px;
+  max-width: 200px;
+}
+
+.lp-toolbar :deep(.p-select-label) {
+  overflow: hidden;
+  padding-inline: 10px 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-toolbar :deep(.p-select-dropdown) {
+  width: 28px;
+}
+
+/* Segmented controls and lone toggles: an input-framed track, the options as
+   pills inside it, so they line up with the selects. */
+.lp-toolbar :deep(.p-selectbutton),
+.lp-toolbar > :deep(.p-togglebutton) {
   display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: var(--lp-frame);
+  border-radius: var(--p-inputtext-border-radius);
+  background: var(--p-inputtext-background);
+}
+
+.lp-toolbar :deep(.p-selectbutton .p-togglebutton) {
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.lp-toolbar :deep(.p-togglebutton-content) {
+  height: 100%;
+  padding: 0 9px;
+}
+
+/* A narrower bar (1280–1440 px windows beside the sidebar) tightens instead of
+   wrapping: smaller gaps and paddings, a lone toggle keeps only its icon (its
+   aria-label and tooltip carry the name). */
+@container lp (max-width: 1100px) {
+  .lp-toolbar {
+    gap: 6px;
+  }
+
+  .lp-search {
+    flex-basis: 140px;
+    min-width: 120px;
+  }
+
+  .lp-toolbar :deep(.p-select-label) {
+    padding-inline: 8px 0;
+  }
+
+  .lp-toolbar :deep(.p-togglebutton-content) {
+    padding: 0 7px;
+  }
+
+  .lp-toolbar > :deep(.p-togglebutton .p-togglebutton-label) {
+    display: none;
+  }
 }
 
 .lp-end {

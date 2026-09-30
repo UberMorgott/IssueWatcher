@@ -502,7 +502,6 @@ onBeforeUnmount(() => {
             option-value="value"
             option-disabled="disabled"
             :aria-label="t('issues.source')"
-            class="f-source"
             @update:model-value="setSource"
           >
             <template #value="{ value }">
@@ -527,7 +526,6 @@ onBeforeUnmount(() => {
             option-label="label"
             option-value="value"
             :aria-label="t('platforms.kindFilter')"
-            class="f-kind"
             @update:model-value="(v: string) => setQuery({ kind: v })"
           />
           <Select
@@ -538,7 +536,6 @@ onBeforeUnmount(() => {
             filter
             :placeholder="t('issues.allProjects')"
             :aria-label="t('issues.project')"
-            class="f-repo"
             @update:model-value="(v: number) => setQuery({ repo: v })"
           >
             <template #value="{ placeholder }">
@@ -568,7 +565,6 @@ onBeforeUnmount(() => {
             option-value="value"
             filter
             :aria-label="t('issues.label')"
-            class="f-label"
             @update:model-value="(v: string) => setQuery({ label: v })"
           />
           <SelectButton
@@ -581,6 +577,7 @@ onBeforeUnmount(() => {
             @update:model-value="(v: string) => setQuery({ state: v === 'open' ? '' : v })"
           />
           <ToggleButton
+            v-tooltip.bottom="t('issues.onlyUnread')"
             :model-value="filters.unread"
             :on-label="t('issues.unread')"
             :off-label="t('issues.unread')"
@@ -803,26 +800,10 @@ onBeforeUnmount(() => {
   background: var(--iw-dimmed);
 }
 
-.f-source {
-  width: 170px;
-}
-
-.f-kind {
-  width: 150px;
-}
-
 .opt {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-
-.f-repo {
-  width: 200px;
-}
-
-.f-label {
-  width: 150px;
 }
 
 .table-panel {

@@ -179,7 +179,6 @@ function open(it: Row) {
           option-label="label"
           option-value="value"
           :aria-label="t('jobs.stateLabel')"
-          class="f-state"
           @update:model-value="(v: string) => setQuery({ state: v })"
         />
         <SelectButton
@@ -197,7 +196,6 @@ function open(it: Row) {
           option-label="label"
           option-value="value"
           :aria-label="t('jobs.originLabel')"
-          class="f-origin"
           @update:model-value="(v: string) => setQuery({ origin: v })"
         />
         <Select
@@ -207,7 +205,6 @@ function open(it: Row) {
           option-value="value"
           filter
           :aria-label="t('issues.project')"
-          class="f-repo"
           @update:model-value="(v: number) => setQuery({ project: v })"
         >
           <template #value="{ placeholder }">
@@ -345,18 +342,6 @@ function open(it: Row) {
 </template>
 
 <style scoped>
-.f-state {
-  width: 190px;
-}
-
-.f-repo {
-  width: 220px;
-}
-
-.f-origin {
-  width: 170px;
-}
-
 .opt {
   display: inline-flex;
   align-items: center;
