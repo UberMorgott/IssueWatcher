@@ -55,6 +55,7 @@ type env struct {
 	record string
 	src    int64
 	proj   []store.Project
+	stop   func() // ends setup's runner (idempotent; also a cleanup)
 
 	mu    sync.Mutex
 	cfg   config.Settings
@@ -187,7 +188,8 @@ func setup(t *testing.T, n int, edit func(*config.Settings)) *env {
 		OnFinished: func(j store.Job) { e.mu.Lock(); e.cards = append(e.cards, j); e.mu.Unlock() },
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() { cancel(); e.r.Wait() })
+	e.stop = func() { cancel(); e.r.Wait() }
+	t.Cleanup(e.stop)
 	if err := e.r.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -702,6 +704,9 @@ func (e *env) waitRunning(n int) {
 func TestRestartRecovery(t *testing.T) {
 	mode(t, "ok")
 	e := setup(t, 2, nil)
+	// The app has one runner: stop setup's before the restart, or its first
+	// schedule (woken late) can start b, which r2 then recovers as interrupted.
+	e.stop()
 	// Simulate a crash: one job left running, one queued, before a runner starts.
 	a, err := e.st.CreateJob(t.Context(), e.items[0], "fix", "claude", "", "")
 	if err != nil {
@@ -724,7 +729,7 @@ func TestRestartRecovery(t *testing.T) {
 	if res := result(t, ja); res.ErrorCode != CodeInterrupted {
 		t.Fatalf("interrupted job: %+v", ja)
 	}
-	e.wait(b.ID, store.JobNeedsReview, store.JobRunning) // the queued one runs (on either runner)
+	e.wait(b.ID, store.JobNeedsReview, store.JobRunning) // the queued one runs
 }
 
 func TestEnqueueRules(t *testing.T) {
