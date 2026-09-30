@@ -117,7 +117,8 @@ func (e *e2e) install(name string) *app {
 
 func (e *e2e) start(a *app) {
 	cmd := exec.Command(a.exe) //nolint:gosec,noctx // our test build; outlives no test
-	cmd.Env = append(os.Environ(), "IW_HEADLESS=1", "IW_DATA_DIR="+a.data, "IW_UPDATE_BASE="+e.base, "IW_PORT=")
+	_ = os.Remove(a.launchFile())
+	cmd.Env = append(os.Environ(), "IW_HEADLESS=1", "IW_DATA_DIR="+a.data, "IW_UPDATE_BASE="+e.base, "IW_PORT=", "IW_LAUNCH_FILE="+a.launchFile())
 	if err := cmd.Start(); err != nil {
 		e.t.Fatal(err)
 	}
@@ -195,23 +196,33 @@ func (a *app) status(t *testing.T) selfupdate.Status {
 	return st
 }
 
-var launchRe = regexp.MustCompile(`url="?(http://127\.0\.0\.1:\d+/auth\?t=[0-9a-f]+)`)
+var launchRe = regexp.MustCompile(`^http://127\.0\.0\.1:\d+/auth\?t=[0-9a-f]+$`)
 
-// signIn opens the launch URL the headless start logged, like the browser
+// launchFile gets the launch URL of a headless start (IW_LAUNCH_FILE).
+func (a *app) launchFile() string { return filepath.Join(a.dir, "launch-url.txt") }
+
+// signIn opens the launch URL the headless start wrote, like the browser
 // would: the session cookie then signs the SSE client in across restarts.
+// The log must hold only the masked form of it.
 func (e *e2e) signIn(a *app) {
 	e.t.Helper()
 	var u string
 	for range 100 {
-		b, _ := os.ReadFile(filepath.Join(a.data, "logs", "issuewatcher.log"))
-		if m := launchRe.FindAllStringSubmatch(string(b), -1); len(m) > 0 {
-			u = m[len(m)-1][1]
+		if b, _ := os.ReadFile(a.launchFile()); launchRe.Match(b) {
+			u = string(b)
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if u == "" {
-		e.t.Fatal("no launch URL in the log")
+		e.t.Fatal("no launch URL in the launch file")
+	}
+	logb, _ := os.ReadFile(filepath.Join(a.data, "logs", "issuewatcher.log"))
+	if _, tok, _ := strings.Cut(u, "?t="); strings.Contains(string(logb), tok) {
+		e.t.Fatal("the log holds the one-time sign-in token")
+	}
+	if !strings.Contains(string(logb), "/auth?t=***") {
+		e.t.Fatal("the log has no masked launch URL")
 	}
 	c := &http.Client{Jar: a.jar, Timeout: 10 * time.Second}
 	resp, err := c.Get(u) //nolint:noctx // test

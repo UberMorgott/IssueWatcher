@@ -38,6 +38,7 @@ import (
 	folderpicker "github.com/UberMorgott/issuewatcher/internal/picker"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
+	"github.com/UberMorgott/issuewatcher/internal/redact"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -62,6 +63,9 @@ const (
 	// the API base). The user token goes there: never set it with real credentials.
 	envGitHubAPI = "IW_GITHUB_API"
 	envGitHubWeb = "IW_GITHUB_WEB"
+	// Tests only, with the browser suppressed: =<file> gets the latest launch
+	// URL (with its one-time token, which the log masks).
+	envLaunchFile = "IW_LAUNCH_FILE"
 )
 
 // newAuth is the GitHub sign-in owner for dataDir, with the dev endpoint override.
@@ -94,7 +98,7 @@ func main() {
 	if err := run(); err != nil {
 		// Release builds have no console: show the reason (never block an automated run).
 		if os.Getenv(envHeadless) != "1" {
-			msgBox("IssueWatcher не запустился", err.Error())
+			msgBox("IssueWatcher не запустился", redact.String(err.Error()))
 		}
 		os.Exit(1)
 	}
@@ -187,7 +191,15 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 ) error {
 	open := func(u string) { go openBrowser(log, u) }
 	if headless || os.Getenv(envNoBrowser) == "1" {
-		open = func(u string) { log.Info("browser open suppressed", "url", u) }
+		launchFile := os.Getenv(envLaunchFile)
+		open = func(u string) {
+			log.Info("browser open suppressed", "url", u) // the handler masks the one-time token
+			if launchFile != "" {
+				if err := os.WriteFile(launchFile, []byte(u), 0o600); err != nil {
+					log.Error("write launch file", "err", err)
+				}
+			}
+		}
 	}
 	preferred, _ := strconv.Atoi(os.Getenv(envPort))
 	if app, err := auth.App(); preferred == 0 && err == nil {
@@ -568,7 +580,10 @@ func openLog(dataDir string) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return nil, nil, fmt.Errorf("log dir: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(logDir, "issuewatcher.log"), //nolint:gosec // G304: fixed name inside our own data dir
+	logPath := filepath.Join(logDir, "issuewatcher.log")
+	// Older versions logged the one-time sign-in URL in full: mask it once.
+	redactErr := redact.File(logPath)
+	f, err := os.OpenFile(logPath, //nolint:gosec // G304: fixed name inside our own data dir
 		os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open log: %w", err)
@@ -581,8 +596,12 @@ func openLog(dataDir string) (*slog.Logger, func(), error) {
 	if os.Getenv(envDebug) == "1" {
 		level = slog.LevelDebug
 	}
-	h := slog.NewTextHandler(io.MultiWriter(f, os.Stderr), &slog.HandlerOptions{Level: level})
-	return slog.New(h), func() { _ = f.Close() }, nil
+	// Every line goes through redact: tokens, OAuth codes, keys and cookies never reach the file or stderr.
+	log := slog.New(redact.NewHandler(slog.NewTextHandler(io.MultiWriter(f, os.Stderr), &slog.HandlerOptions{Level: level})))
+	if redactErr != nil {
+		log.Warn("log: masking secrets in the old log failed", "err", redactErr)
+	}
+	return log, func() { _ = f.Close() }, nil
 }
 
 var procAllowSetForegroundWindow = windows.NewLazySystemDLL("user32.dll").NewProc("AllowSetForegroundWindow")

@@ -19,6 +19,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/control"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
+	"github.com/UberMorgott/issuewatcher/internal/redact"
 )
 
 // CLI exit codes (docs/ARCHITECTURE.md → Control).
@@ -413,7 +414,7 @@ func runMCP(dataDir string, item, project int64) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	log := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn})).With("pid", os.Getpid())
+	log := slog.New(redact.NewHandler(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelWarn}))).With("pid", os.Getpid())
 	var s *mcp.Server
 	switch {
 	case project > 0:
