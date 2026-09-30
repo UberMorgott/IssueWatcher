@@ -364,8 +364,22 @@ func (c *Client) Do(ctx context.Context, method, rawURL string, header http.Head
 		if len(via) >= 5 || !c.allowed(r.URL) {
 			return fmt.Errorf("%w: redirect to %s", ErrHost, r.URL.Redacted())
 		}
-		return nil // net/http forwards the Cookie header on the same host
-
+		// net/http copies the first request's headers to every hop; the Cookie
+		// header is never trusted from that copy: it is rebuilt from the jar
+		// (after this hop's Set-Cookie) for the destination URL.
+		r.Header.Del("Cookie")
+		if jar == nil {
+			return nil
+		}
+		if r.Response != nil && len(via) > 0 {
+			_ = jar.Ingest(via[len(via)-1].URL, r.Response)
+		}
+		if h := jar.Header(r.URL); h != "" {
+			// Not the blind copy G119 guards against: the header is recomputed from
+			// the jar's domain/path/secure rules for this allowed https hop only.
+			r.Header.Set("Cookie", h) //nolint:gosec // G119: rebuilt per hop from the jar, host allow-listed above
+		}
+		return nil
 	}
 	resp, err := cl.Do(req)
 	if err != nil {

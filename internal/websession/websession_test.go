@@ -124,6 +124,33 @@ func TestClientCookiesUserAgentAndIngest(t *testing.T) {
 	}
 }
 
+// A redirect hop's Set-Cookie lands in the jar, and each hop's Cookie header is
+// rebuilt from the jar for its own URL (path-scoped cookies stay on their path).
+func TestClientRedirectCookiesPerHop(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.SetCookie(w, &http.Cookie{Name: "hop", Value: "1", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+			http.Redirect(w, r, "/next/", http.StatusFound)
+		case "/next/":
+			_, _ = w.Write([]byte(r.Header.Get("Cookie")))
+		}
+	}))
+	defer srv.Close()
+	c, j := testClient(t, srv)
+	h := c.Hosts[0]
+	if err := j.Replace(append(j.Cookies(), Cookie{Name: "scoped", Value: "s", Domain: h, Path: "/start", Secure: true}), "UA/9", "", "window"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := c.Do(context.Background(), "GET", srv.URL+"/start", nil, nil, false)
+	if err != nil || string(r.Body) != "sid=abc; hop=1" {
+		t.Fatalf("redirect cookies: %q %v", r.Body, err)
+	}
+	if j.Value("hop") != "1" {
+		t.Fatalf("redirect Set-Cookie not ingested: %q", j.Value("hop"))
+	}
+}
+
 // challengePage is a saved (trimmed) Cloudflare managed-challenge answer.
 const challengePage = `<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title><meta http-equiv="refresh" content="360"></head><body><div class="main-wrapper" role="main"><div class="main-content"><noscript>Enable JavaScript and cookies to continue</noscript></div></div><script>(function(){window._cf_chl_opt = {cvId: '3',cZone: 'www.nexusmods.com',cType: 'managed'};var a = document.createElement('script');a.src = '/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=abc';})();</script></body></html>`
 
