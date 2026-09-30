@@ -43,39 +43,41 @@ defineExpose({ focusSearch })
 
 <template>
   <div class="list-page">
-    <div
-      class="lp-toolbar panel"
-      role="toolbar"
-    >
-      <IconField
-        v-if="search !== undefined"
-        class="lp-search"
+    <div class="lp-sticky">
+      <div
+        class="lp-toolbar panel"
+        role="toolbar"
       >
-        <InputIcon class="pi pi-search" />
-        <InputText
-          ref="box"
-          v-model="search"
-          :placeholder="searchPlaceholder"
-          :aria-label="searchAria || searchPlaceholder"
-          fluid
+        <IconField
+          v-if="search !== undefined"
+          class="lp-search"
+        >
+          <InputIcon class="pi pi-search" />
+          <InputText
+            ref="box"
+            v-model="search"
+            :placeholder="searchPlaceholder"
+            :aria-label="searchAria || searchPlaceholder"
+            fluid
+          />
+        </IconField>
+        <slot name="filters" />
+        <Button
+          v-if="resettable"
+          :label="t('issues.reset')"
+          icon="pi pi-filter-slash"
+          severity="secondary"
+          text
+          @click="emit('reset')"
         />
-      </IconField>
-      <slot name="filters" />
-      <Button
-        v-if="resettable"
-        :label="t('issues.reset')"
-        icon="pi pi-filter-slash"
-        severity="secondary"
-        text
-        @click="emit('reset')"
-      />
-      <span class="lp-end">
-        <slot name="actions" />
-        <span
-          v-if="total !== null && totalLabel"
-          class="lp-total"
-        ><b class="mono">{{ total }}</b> {{ totalLabel }}</span>
-      </span>
+        <span class="lp-end">
+          <slot name="actions" />
+          <span
+            v-if="total !== null && totalLabel"
+            class="lp-total"
+          ><b class="mono">{{ total }}</b> {{ totalLabel }}</span>
+        </span>
+      </div>
     </div>
     <div
       v-if="skeleton"
@@ -99,13 +101,23 @@ defineExpose({ focusSearch })
   gap: 20px;
 }
 
-/* Sticky under the top bar; every control shares one height. */
+/* Sticks flush under the top bar as an opaque page-coloured band: it spans the
+   gutters and pads the toolbar by 8px above and below, so no scrolled row shows above the
+   toolbar, beside it or through its rounded corners. The negative margins keep
+   the unstuck layout where it was. */
+.lp-sticky {
+  position: sticky;
+  top: var(--iw-topbar);
+  z-index: 6;
+  margin: -8px calc(-1 * var(--iw-gutter));
+  padding: 8px var(--iw-gutter);
+  background: var(--iw-bg);
+}
+
+/* Every control shares one height. */
 .lp-toolbar {
   --lp-h: 38px;
 
-  position: sticky;
-  top: calc(var(--iw-topbar) + 8px);
-  z-index: 6;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
