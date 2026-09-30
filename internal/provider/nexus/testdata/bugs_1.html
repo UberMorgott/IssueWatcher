@@ -1,0 +1,450 @@
+<span><script>
+$( document ).ready
+(
+	function( $ )
+	{
+		var RH = new RequestHelper();
+		RH.id = 'ModBugsTab';
+		RH.group_id = '';
+		RH.target = 'tab-modbugs';
+		RH.uri = '/Core/Libs/Common/Widgets/ModBugsTab';
+		RH.in_items = JSON.parse("{\"game_id\":1704,\"id\":2347,\"page_size\":\"10\",\"page\":\"1\"}");
+		RH.out_items = JSON.parse("{\"id\":2347,\"game_id\":1704,\"page\":1,\"page_size\":10}");
+		RH.InitSessionStorage();
+		window.RH_ModBugsTab = RH;
+	}
+);
+</script></span>
+<div id="tab-modbugs" class="container tab-bugs condensed">
+    <h2 id="bugs_tab_h2" data-game-id="1704" data-mod-id="2347">Bug reports</h2>
+    <div class="comments">
+    <div class="comment-nav clearfix head-nav">
+        <script>$( function(){Filters_Pagination.Load(
+    {
+        RequestHelper: window.RH_ModBugsTab,
+        id: "page",
+                pages: [
+                    {id: '1', text: '1'},
+                    {id: '2', text: '2'},
+                    {id: '3', text: '3'},
+                    {id: '4', text: '4'},
+                    {id: '5', text: '5'},
+                    {id: '6', text: '6'},
+                    {id: '7', text: '7'},
+                    {id: '8', text: '8'},
+                    {id: '9', text: '9'},
+                    {id: '10', text: '10'},
+                    {id: '11', text: '11'},
+                    {id: '12', text: '12'},
+                    {id: '13', text: '13'},
+                    {id: '14', text: '14'},
+                    {id: '15', text: '15'},
+                    {id: '16', text: '16'},
+                    {id: '17', text: '17'},
+                    {id: '18', text: '18'},
+                    {id: '19', text: '19'},
+                    {id: '20', text: '20'},
+                    {id: '21', text: '21'},
+                    {id: '22', text: '22'},
+                    {id: '23', text: '23'},
+                    {id: '24', text: '24'},
+                    {id: '25', text: '25'},
+                    {id: '26', text: '26'},
+                    {id: '27', text: '27'},
+                    {id: '28', text: '28'},
+                    {id: '29', text: '29'},
+                    {id: '30', text: '30'},
+                    {id: '31', text: '31'},
+                    {id: '32', text: '32'},
+                    {id: '33', text: '33'},
+                    {id: '34', text: '34'},
+                    {id: '35', text: '35'},
+                    {id: '36', text: '36'},
+                    {id: '37', text: '37'},
+                    {id: '38', text: '38'},
+             ]
+    }
+);});</script>
+
+<div class="pagination clearfix">
+    <div class="navlabel">
+        Pages
+    </div>
+
+    <ul class="clearfix">
+            
+        <!-- this is our ACTIVE page, we always display it -->
+        <li>
+            <a class="page-selected mfp-prevent-close">
+                1            </a>
+        </li>
+
+                    <li>
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '2');"
+            >
+                    2            </a>
+        </li>
+                        <li>
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '3');"
+            >
+                    3            </a>
+        </li>
+                            <li class="empty extra">...</li>
+                    <li class="extra">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '38');"
+            >
+                38            </a>
+        </li>
+                    <li class="next">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '2');"
+            >
+                <svg title="" class="icon-arrow-thin"><use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-arrow-thin"></use></svg>            </a>
+        </li>
+                </ul>
+
+                <select
+            id="page_t"
+            class="select-jump-page select-custom page_jump-to-page "
+    >
+    >
+        <option value="0" selected="selected">Jump</option>
+    </select>
+            </div>
+                <ul class="sorting clearfix">
+                    <li class="">
+    <div class="navlabel">Status</div>
+    <select id="status" name="status" class="select-custom" onchange="return window.RH_ModBugsTab.Send('status', this );">
+                        <option value="-1" selected="selected">All issues</option>
+                        <option value="0" >New issues</option>
+                        <option value="2" >Being looked at</option>
+                        <option value="3" >Fixed</option>
+                        <option value="1" >Known issues</option>
+                        <option value="4" >Duplicates</option>
+                        <option value="5" >Not a bug</option>
+                        <option value="6" >Won't fix</option>
+                        <option value="7" >Need more info</option>
+                </select>
+</li>
+                <li class="">
+    <div class="navlabel">Priority</div>
+    <select id="priority" name="priority" class="select-custom" onchange="return window.RH_ModBugsTab.Send('priority', this );">
+                        <option value="-1" selected="selected">All priorities</option>
+                        <option value="0" >Not set</option>
+                        <option value="1" >Low</option>
+                        <option value="2" >Medium</option>
+                        <option value="3" >High</option>
+                </select>
+</li>
+                <li class="sort-by">
+    <div class="navlabel">Sort by</div>
+    <select id="sort_by" name="sort_by" class="select-custom" onchange="window.RH_ModBugsTab.Out('page', '1' ); return window.RH_ModBugsTab.Send('sort_by', this );">
+                        <option 
+                value="status" 
+                            >
+                Status            </option>
+                        <option 
+                value="date" 
+                            >
+                Date            </option>
+                        <option 
+                value="last_reply" 
+                selected="selected"            >
+                Last reply            </option>
+                        <option 
+                value="severity" 
+                            >
+                Priority            </option>
+                </select>
+</li>
+                <li class="sort-order">
+    <div class="navlabel">Order</div>
+    <select id="order" name="order" class="select-custom" onchange="window.RH_ModBugsTab.Out('page', '1' ); return window.RH_ModBugsTab.Send('order', this );">
+                        <option 
+                value="ASC" 
+                            >
+                Asc            </option>
+                        <option 
+                value="DESC" 
+                selected="selected"            >
+                Desc            </option>
+                </select>
+</li>
+    </ul>
+    
+    </div>
+
+            <script>
+            let loadedIssues = new Array();
+        </script>
+
+        <table class="table forum-bugs flex-table">
+            <thead>
+                <tr>
+                        <th class="table-bug-title sorter-false"><span>Bug title</span></th>
+                        <th class="table-bug-status sorter-false"><span class="">Status</span></th>
+                        <th class="table-bug-replies sorter-false"><span class="">Replies</span></th>
+                        <th class="table-bug-version sorter-false"><span class="">Version</span></th>
+                        <th class="table-bug-priority sorter-false"><span class="">Priority</span></th>
+                        <th class="table-bug-post sorter-false"><span class="">Last post</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                                            <tr id="issue_1062068" data-issue-id="1062068" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(1062068);" id="issueClickLink_1062068" >Crash Near Windhelm Gate and Docks</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_1062068" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_1062068" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">5</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</td>
+                                <td id="issuePriority_1062068" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_1062068" class="table-bug-post"><time class="dst-date-adjust" data-date="1775236557" data-date-format="G:i, j M Y">17:15, 3 Apr 2026</time></td>
+                                                    </tr>
+                                        <tr id="issue_958735" data-issue-id="958735" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(958735);" id="issueClickLink_958735" >Black textures in Bleak Falls Barrow using &quot;Part 3&quot; of this mod. </a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_958735" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_958735" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">2</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_958735" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_958735" class="table-bug-post"><time class="dst-date-adjust" data-date="1771958653" data-date-format="G:i, j M Y">18:44, 24 Feb 2026</time></td>
+                                                    </tr>
+                                        <tr id="issue_1027950" data-issue-id="1027950" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(1027950);" id="issueClickLink_1027950" >Even using Mod Manager it&#039;s not working :O</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_1027950" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_1027950" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">1</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</td>
+                                <td id="issuePriority_1027950" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_1027950" class="table-bug-post"><time class="dst-date-adjust" data-date="1767949761" data-date-format="G:i, j M Y">9:09, 9 Jan 2026</time></td>
+                                                    </tr>
+                                        <tr id="issue_1017702" data-issue-id="1017702" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(1017702);" id="issueClickLink_1017702" >Terrain bug</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Fixed</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_1017702" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_1017702" class="table-bug-status"><span class="green">Fixed</span></td>
+                                <td class="table-bug-replies">1</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</td>
+                                <td id="issuePriority_1017702" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_1017702" class="table-bug-post"><time class="dst-date-adjust" data-date="1765535295" data-date-format="G:i, j M Y">10:28, 12 Dec 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_1016993" data-issue-id="1016993" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(1016993);" id="issueClickLink_1016993" >Ratwayhall metal textures</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_1016993" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_1016993" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">4</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.2 - Other PART 3 </i> - Version 10.5.2</td>
+                                <td id="issuePriority_1016993" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_1016993" class="table-bug-post"><time class="dst-date-adjust" data-date="1765366121" data-date-format="G:i, j M Y">11:28, 10 Dec 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_944488" data-issue-id="944488" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(944488);" id="issueClickLink_944488" >Whiterun texture </a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_944488" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_944488" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">6</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_944488" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_944488" class="table-bug-post"><time class="dst-date-adjust" data-date="1760982238" data-date-format="G:i, j M Y">17:43, 20 Oct 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_953369" data-issue-id="953369" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(953369);" id="issueClickLink_953369" >Missing floor in Downguard Fort</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_953369" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_953369" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">2</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_953369" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_953369" class="table-bug-post"><time class="dst-date-adjust" data-date="1748933286" data-date-format="G:i, j M Y">6:48, 3 Jun 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_952243" data-issue-id="952243" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(952243);" id="issueClickLink_952243" >Parallax, odd spots outside whiterun by the river.</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_952243" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_952243" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">4</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_952243" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_952243" class="table-bug-post"><time class="dst-date-adjust" data-date="1748777328" data-date-format="G:i, j M Y">11:28, 1 Jun 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_944770" data-issue-id="944770" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(944770);" id="issueClickLink_944770" >FishingGear01.dds is missing</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Fixed</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_944770" style="width:100%;">
+                                                                                    Fixed in version: 10.6
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_944770" class="table-bug-status"><span class="green">Fixed</span></td>
+                                <td class="table-bug-replies">3</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_944770" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_944770" class="table-bug-post"><time class="dst-date-adjust" data-date="1747035996" data-date-format="G:i, j M Y">7:46, 12 May 2025</time></td>
+                                                    </tr>
+                                        <tr id="issue_942845" data-issue-id="942845" class="mod-issue-row">
+                                                            <td class="table-bug-title">
+                                                                                                            <a class="issue-title" href="javascript:;" onclick="loadIssueReplies(942845);" id="issueClickLink_942845" >Ground textures stretching</a>
+                                    <span class="table-inline-hidden">Version: <i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</span>
+                                    <span class="table-inline-hidden inline-status"><span class="green">Not a bug</span></span>
+                                    <span class="table-inline-hidden">Priority: Not set</span>
+                                    <span id="issueFixedInVersion_942845" style="width:100%;">
+                                                                            </span>
+                                                                    </td>
+                                <td id="issueStatus_942845" class="table-bug-status"><span class="green">Not a bug</span></td>
+                                <td class="table-bug-replies">1</td>
+                                <td class="table-bug-version"><i>-Skyrim 202X 10.5.1 Update </i> - Version 10.5.1</td>
+                                <td id="issuePriority_942845" class="table-bug-priority">Not set</td>
+                                <td id="placeRepliesAfterMe_942845" class="table-bug-post"><time class="dst-date-adjust" data-date="1746606382" data-date-format="G:i, j M Y">8:26, 7 May 2025</time></td>
+                                                    </tr>
+                            </tbody>
+        </table>
+
+        <div class="comment-nav clearfix bottom-nav">
+            <script>$( function(){Filters_Pagination.Load(
+    {
+        RequestHelper: window.RH_ModBugsTab,
+        id: "page",
+                pages: [
+                    {id: '1', text: '1'},
+                    {id: '2', text: '2'},
+                    {id: '3', text: '3'},
+                    {id: '4', text: '4'},
+                    {id: '5', text: '5'},
+                    {id: '6', text: '6'},
+                    {id: '7', text: '7'},
+                    {id: '8', text: '8'},
+                    {id: '9', text: '9'},
+                    {id: '10', text: '10'},
+                    {id: '11', text: '11'},
+                    {id: '12', text: '12'},
+                    {id: '13', text: '13'},
+                    {id: '14', text: '14'},
+                    {id: '15', text: '15'},
+                    {id: '16', text: '16'},
+                    {id: '17', text: '17'},
+                    {id: '18', text: '18'},
+                    {id: '19', text: '19'},
+                    {id: '20', text: '20'},
+                    {id: '21', text: '21'},
+                    {id: '22', text: '22'},
+                    {id: '23', text: '23'},
+                    {id: '24', text: '24'},
+                    {id: '25', text: '25'},
+                    {id: '26', text: '26'},
+                    {id: '27', text: '27'},
+                    {id: '28', text: '28'},
+                    {id: '29', text: '29'},
+                    {id: '30', text: '30'},
+                    {id: '31', text: '31'},
+                    {id: '32', text: '32'},
+                    {id: '33', text: '33'},
+                    {id: '34', text: '34'},
+                    {id: '35', text: '35'},
+                    {id: '36', text: '36'},
+                    {id: '37', text: '37'},
+                    {id: '38', text: '38'},
+             ]
+    }
+);});</script>
+
+<div class="pagination clearfix">
+    <div class="navlabel">
+        Pages
+    </div>
+
+    <ul class="clearfix">
+            
+        <!-- this is our ACTIVE page, we always display it -->
+        <li>
+            <a class="page-selected mfp-prevent-close">
+                1            </a>
+        </li>
+
+                    <li>
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '2');"
+            >
+                    2            </a>
+        </li>
+                        <li>
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '3');"
+            >
+                    3            </a>
+        </li>
+                            <li class="empty extra">...</li>
+                    <li class="extra">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '38');"
+            >
+                38            </a>
+        </li>
+                    <li class="next">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_ModBugsTab.Send('page', '2');"
+            >
+                <svg title="" class="icon-arrow-thin"><use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-arrow-thin"></use></svg>            </a>
+        </li>
+                </ul>
+
+                <select
+            id="page_b"
+            class="select-jump-page select-custom page_jump-to-page "
+    >
+    >
+        <option value="0" selected="selected">Jump</option>
+    </select>
+            </div>
+        
+        </div>
+        </div>
+
+    </div>

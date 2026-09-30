@@ -32,7 +32,10 @@ type Caller interface {
 
 // Options configures the provider.
 type Options struct {
+	// Bridge is the old engine (the MCP server); Native the built-in one.
+	// Native wins when both are set.
 	Bridge Caller
+	Native *NativeOptions
 	// Author returns the uploader account whose mods are listed: its exact
 	// account name (e.g. "UberMorgott") or member id. Not the mod's free-text
 	// author field, which anyone can set to any name.
@@ -47,6 +50,9 @@ type Options struct {
 // Provider implements provider.Provider and provider.Poller.
 type Provider struct {
 	opts Options
+	b    backend
+	// writes serialized per thread (one reply at a time on an item).
+	threads sync.Map // item external id → *sync.Mutex
 
 	mu      sync.Mutex
 	account string              // uploader account name (= comment author name)
@@ -73,7 +79,13 @@ func New(opts Options) *Provider {
 	if opts.Author == nil {
 		opts.Author = func() string { return "" }
 	}
-	return &Provider{opts: opts, bugs: map[string]bugCache{}}
+	p := &Provider{opts: opts, bugs: map[string]bugCache{}}
+	if opts.Native != nil {
+		p.b = newNative(*opts.Native, opts.Log, opts.Now)
+	} else {
+		p.b = &mcpBackend{bridge: opts.Bridge, now: opts.Now}
+	}
+	return p
 }
 
 // Platform implements provider.Provider.
@@ -92,24 +104,23 @@ func (p *Provider) Scheduling() provider.Scheduling {
 	return provider.Scheduling{PollMinInterval: 15 * time.Minute, RateBudget: 60}
 }
 
-func (p *Provider) call(ctx context.Context, tool string, args map[string]any, out any) error {
-	return mcpbridge.ProviderError(p.opts.Bridge.Call(ctx, tool, args, out, true), p.opts.Now())
-}
-
 // ── projects ─────────────────────────────────────────────────────
 
 type modsResult struct {
-	Total int `json:"total"`
-	Mods  []struct {
-		Game     string `json:"game"`
-		ModID    int    `json:"modId"`
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Uploader struct {
-			Name     *string `json:"name"`
-			MemberID *int    `json:"memberId"`
-		} `json:"uploader"`
-	} `json:"mods"`
+	Total int      `json:"total"`
+	Mods  []modRow `json:"mods"`
+}
+
+type modRow struct {
+	Game     string `json:"game"`
+	ModID    int    `json:"modId"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Uploader struct {
+		Name     *string `json:"name"`
+		MemberID *int    `json:"memberId"`
+	} `json:"uploader"`
+	codeURL string // GitHub repo the description links (native engine)
 }
 
 // uploader is the configured account: an exact uploader account name or its
@@ -181,10 +192,8 @@ func (p *Provider) Account(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	args := u.args()
-	args["count"] = 1
-	var r modsResult
-	if err := p.call(ctx, "search_mods", args, &r); err != nil {
+	r, err := p.b.searchMods(ctx, u, 1, 0)
+	if err != nil {
 		if errors.Is(err, mcpbridge.ErrUnavailable) {
 			return "", fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
 		}
@@ -218,10 +227,8 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 	}
 	var out []provider.Project
 	for offset := 0; ; {
-		args := u.args()
-		args["count"], args["offset"] = 50, offset
-		var r modsResult
-		if err := p.call(ctx, "search_mods", args, &r); err != nil {
+		r, err := p.b.searchMods(ctx, u, 50, offset)
+		if err != nil {
 			return nil, err
 		}
 		for _, m := range r.Mods {
@@ -229,7 +236,7 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 				return nil, errOldServer
 			}
 			url := modkit.HTTPS(m.URL, fmt.Sprintf("%s/%s/mods/%d", site, m.Game, m.ModID))
-			out = append(out, provider.Project{ExternalID: fmt.Sprintf("%s/%d", m.Game, m.ModID), Name: m.Name, URL: url})
+			out = append(out, provider.Project{ExternalID: fmt.Sprintf("%s/%d", m.Game, m.ModID), Name: m.Name, URL: url, CodeURL: m.codeURL})
 		}
 		offset += len(r.Mods)
 		if len(r.Mods) == 0 || offset >= r.Total {
@@ -329,9 +336,8 @@ func (p *Provider) comments(ctx context.Context, game string, mod int) ([]provid
 	seen := map[string]bool{}
 	var out []provider.Item
 	for page := 1; page <= maxPages; page++ {
-		var r commentsResult
-		err := p.call(ctx, "get_mod_comments", map[string]any{"game": game, "mod_id": mod, "page": page}, &r)
-		if mcpbridge.IsCode(err, mcpbridge.CodeDisabled) {
+		r, err := p.b.comments(ctx, game, mod, page)
+		if errors.Is(err, errDisabled) {
 			return nil, nil // no Posts tab
 		}
 		if err != nil {
@@ -382,9 +388,8 @@ func (p *Provider) bugItems(ctx context.Context, game string, mod int) ([]provid
 	seen := map[string]bool{}
 	var out []provider.Item
 	for page := 1; page <= maxPages; page++ {
-		var r bugsResult
-		err := p.call(ctx, "get_mod_bugs", map[string]any{"game": game, "mod_id": mod, "page": page}, &r)
-		if mcpbridge.IsCode(err, mcpbridge.CodeDisabled) {
+		r, err := p.b.bugs(ctx, game, mod, page)
+		if errors.Is(err, errDisabled) {
 			return nil, nil // Bugs tab off
 		}
 		if err != nil {
@@ -421,9 +426,8 @@ func (p *Provider) bug(ctx context.Context, game string, mod int, listURL string
 	if ok && c.stamp == stamp {
 		return c.item, true, nil
 	}
-	var r bugResult
-	err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": modkit.Number(b.ID)}, &r)
-	if mcpbridge.IsCode(err, mcpbridge.CodeNotFound) {
+	r, err := p.b.bug(ctx, modkit.Number(b.ID))
+	if errors.Is(err, errNotFound) {
 		return provider.Item{}, false, nil
 	}
 	if err != nil {
@@ -478,8 +482,6 @@ func localTime(s *string) time.Time {
 
 // ── change check ─────────────────────────────────────────────────
 
-const sigKey = "nexus:page1"
-
 // DetectChanges implements provider.Poller: page 1 of Posts and Bugs against
 // the last fingerprint; a difference, a missing fingerprint (restart, new
 // target: a comment may have landed since the last full read) or FullEvery
@@ -491,11 +493,10 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 		return ch, err
 	}
 	parts := []string{}
-	var c commentsResult
 	ch.Requests++
-	err = p.call(ctx, "get_mod_comments", map[string]any{"game": game, "mod_id": mod, "page": 1}, &c)
+	c, err := p.b.comments(ctx, game, mod, 1)
 	switch {
-	case mcpbridge.IsCode(err, mcpbridge.CodeDisabled):
+	case errors.Is(err, errDisabled):
 	case err != nil:
 		return ch, err
 	default:
@@ -504,11 +505,10 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 			parts = append(parts, t.ID+":"+strconv.Itoa(len(t.Replies)))
 		}
 	}
-	var b bugsResult
 	ch.Requests++
-	err = p.call(ctx, "get_mod_bugs", map[string]any{"game": game, "mod_id": mod, "page": 1}, &b)
+	b, err := p.b.bugs(ctx, game, mod, 1)
 	switch {
-	case mcpbridge.IsCode(err, mcpbridge.CodeDisabled):
+	case errors.Is(err, errDisabled):
 	case err != nil:
 		return ch, err
 	default:
@@ -517,7 +517,7 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 			parts = append(parts, fmt.Sprintf("%s:%d:%s:%s", r.ID, r.Replies, r.Status, modkit.Time(r.LastPostAt).Format(time.RFC3339)))
 		}
 	}
-	ch.Overflow = modkit.PageChanged(st, sigKey, modkit.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, p.b.sigKey(), modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
@@ -555,62 +555,51 @@ type sessionResult struct {
 	ViaBrowser   *string `json:"loginBrowser"`
 }
 
-func (p *Provider) session(s sessionResult) provider.Login {
-	l := provider.Login{LoggedIn: s.LoggedIn, InProgress: s.InProgress, Window: s.WindowOpened, Detail: cmpName(s.AccountError, s.Detail)}
-	if s.LoggedIn {
-		l.Source, l.Browser = deref(s.Source), deref(s.Browser)
-	} else if s.InProgress || s.WindowOpened {
-		l.Via, l.ViaBrowser = deref(s.Via), deref(s.ViaBrowser)
+func (p *Provider) remember(m *uploader) {
+	if m == nil {
+		return
 	}
-	if s.LoggedIn && s.Account != nil && s.Account.MemberID > 0 {
-		p.mu.Lock()
-		p.member = &uploader{id: s.Account.MemberID, name: s.Account.Name}
-		p.mu.Unlock()
-		l.Account = cmpName(s.Account.Name, strconv.Itoa(s.Account.MemberID))
-	}
-	return l
+	p.mu.Lock()
+	p.member = m
+	p.mu.Unlock()
 }
 
-// Login implements provider.Loginer: web_login imports a browser's session or
-// opens the server's sign-in window (captured by the server itself).
+// Login implements provider.Loginer: the MCP server's web_login, or the
+// native sign-in (stored session, signed-in profile, sign-in window).
 func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
-	var s sessionResult
-	if err := p.call(ctx, "web_login", nil, &s); err != nil {
+	l, m, err := p.b.login(ctx)
+	if err != nil {
 		return provider.Login{}, err
 	}
-	l := p.session(s)
-	if l.LoggedIn && l.Account == "" {
-		return p.LoginStatus(ctx) // web_login does not report the member
-	}
+	p.remember(m)
 	return l, nil
 }
 
-// LoginStatus implements provider.Loginer (web_status: session + member).
+// LoginStatus implements provider.Loginer (session + member).
 func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
-	var s sessionResult
-	if err := p.call(ctx, "web_status", nil, &s); err != nil {
+	l, m, err := p.b.loginStatus(ctx)
+	if err != nil {
 		return provider.Login{}, err
 	}
-	return p.session(s), nil
+	p.remember(m)
+	return l, nil
 }
 
-// Logout implements provider.Logouter: web_logout drops the stored session
-// (the server stops importing browser cookies until the next web_login).
+// Logout implements provider.Logouter: the stored session is dropped (public
+// reads go on).
 func (p *Provider) Logout(ctx context.Context) error {
-	if err := p.opts.Bridge.Call(ctx, "web_logout", nil, nil, false); err != nil {
-		return mcpbridge.ProviderError(err, p.opts.Now())
+	if err := p.b.logout(ctx); err != nil {
+		return err
 	}
 	p.mu.Lock()
 	p.member = nil
+	p.account = ""
 	p.mu.Unlock()
 	return nil
 }
 
-// CancelLogin implements provider.LoginCanceller (web_login_cancel).
-func (p *Provider) CancelLogin(ctx context.Context) error {
-	return mcpbridge.ProviderError(p.opts.Bridge.Call(ctx, "web_login_cancel", nil, nil, false), p.opts.Now())
-}
-
+// CancelLogin implements provider.LoginCanceller.
+func (p *Provider) CancelLogin(ctx context.Context) error { return p.b.cancelLogin(ctx) }
 func deref(s *string) string {
 	if s == nil {
 		return ""

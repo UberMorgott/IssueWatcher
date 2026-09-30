@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/browser"
 	"github.com/UberMorgott/issuewatcher/internal/parity"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 )
 
 // nativeForParity builds a native provider for the parity check; work is a
@@ -93,4 +95,12 @@ func parityRun(db, platform, only string, build func(string, string) (provider.P
 		}
 	}
 	return nil
+}
+
+func init() {
+	nativeForParity[nexus.Platform] = func(work, account string) (provider.Provider, func(), error) {
+		br := browser.New(browser.Options{Dir: filepath.Join(work, "browser"), Origins: nexus.Origins})
+		p := nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br}, Author: func() string { return account }})
+		return p, br.Close, nil
+	}
 }

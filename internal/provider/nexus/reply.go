@@ -2,13 +2,14 @@ package nexus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
-	"github.com/UberMorgott/issuewatcher/internal/provider/mcpbridge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 )
 
@@ -60,7 +61,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	}
 	var (
 		tool     string
-		args     map[string]any
+		send     func(context.Context) (postResult, error)
 		url      string
 		snapshot func(context.Context) (map[string]bool, error)
 		find     func(context.Context, match) (string, error)
@@ -72,17 +73,24 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 			return provider.Comment{}, err
 		}
 		tool, url = "post_mod_comment", commentURL(game, mod, id)
-		args = map[string]any{"game": game, "mod_id": mod, "text": body, "parent_id": modkit.Number(id)}
+		send = func(ctx context.Context) (postResult, error) {
+			return p.b.postComment(ctx, game, mod, body, modkit.Number(id))
+		}
 		snapshot = func(ctx context.Context) (map[string]bool, error) { return p.commentReplyIDs(ctx, game, mod, id) }
 		find = func(ctx context.Context, m match) (string, error) { return p.findCommentReply(ctx, game, mod, id, m) }
 	case "bug":
 		tool = "reply_mod_bug"
-		args = map[string]any{"issue_id": modkit.Number(rest), "text": body}
+		send = func(ctx context.Context) (postResult, error) { return p.b.replyBug(ctx, modkit.Number(rest), body) }
 		snapshot = func(ctx context.Context) (map[string]bool, error) { return p.bugReplyIDs(ctx, rest) }
 		find = func(ctx context.Context, m match) (string, error) { return p.findBugReply(ctx, rest, m) }
 	default:
 		return provider.Comment{}, fmt.Errorf("nexus: bad item id %q", itemExternalID)
 	}
+	// One write at a time per thread.
+	lock, _ := p.threads.LoadOrStore(itemExternalID, &sync.Mutex{})
+	mu, _ := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
 	// The replies already there: an older reply with the same text is never
 	// taken for this one. A failed read sends nothing.
 	before, err := snapshot(ctx)
@@ -90,15 +98,14 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 		return provider.Comment{}, fmt.Errorf("nexus: read thread before reply: %w", err)
 	}
 	m := match{account: account, body: body, before: before, sent: p.opts.Now()}
-	var r postResult
-	err = p.opts.Bridge.Call(ctx, tool, args, &r, false)
+	r, err := send(ctx)
 	switch {
 	case err == nil && r.Posted && r.ID != nil && *r.ID != "":
 		return p.posted(*r.ID, account, body, url), nil
 	case err == nil && !r.Posted:
 		return provider.Comment{}, fmt.Errorf("nexus: %s: not posted", tool)
-	case err != nil && !mcpbridge.WriteUnsure(err):
-		return provider.Comment{}, mcpbridge.ProviderError(err, p.opts.Now())
+	case err != nil && !errors.Is(err, errWriteUnsure):
+		return provider.Comment{}, err
 	}
 	// Posted without an id (the server's own read-back missed it), the answer
 	// was lost, or the site failed after the post was sent (it may have saved
@@ -186,8 +193,8 @@ func newest(ids []string) string {
 // first readBackPages Posts pages that list it, until fn returns true.
 func (p *Provider) threadReplies(ctx context.Context, game string, mod int, parent string, fn func([]post) bool) error {
 	for page := 1; page <= readBackPages; page++ {
-		var r commentsResult
-		if err := p.call(ctx, "get_mod_comments", map[string]any{"game": game, "mod_id": mod, "page": page}, &r); err != nil {
+		r, err := p.b.comments(ctx, game, mod, page)
+		if err != nil {
 			return err
 		}
 		for _, t := range r.Comments {
@@ -230,8 +237,8 @@ func (p *Provider) findCommentReply(ctx context.Context, game string, mod int, p
 }
 
 func (p *Provider) bugReplies(ctx context.Context, issue string) ([]bugPost, error) {
-	var r bugResult
-	if err := p.call(ctx, "get_mod_bug", map[string]any{"issue_id": modkit.Number(issue)}, &r); err != nil {
+	r, err := p.b.bug(ctx, modkit.Number(issue))
+	if err != nil {
 		return nil, err
 	}
 	return r.Replies, nil

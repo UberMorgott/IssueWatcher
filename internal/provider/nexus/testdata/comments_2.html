@@ -1,0 +1,328 @@
+        <span><script>
+$( document ).ready
+(
+	function( $ )
+	{
+		var RH = new RequestHelper();
+		RH.id = 'CommentContainer';
+		RH.group_id = '';
+		RH.target = 'comment-container';
+		RH.uri = '/Core/Libs/Common/Widgets/CommentContainer';
+		RH.in_items = JSON.parse("{\"game_id\":\"8851\",\"object_id\":\"147\",\"object_type\":\"1\",\"thread_id\":\"16796543\",\"tabbed\":\"1\",\"skip_opening_post\":\"0\",\"page\":\"2\",\"search_text\":\"\"}");
+		RH.out_items = JSON.parse("{\"game_id\":8851,\"object_id\":147,\"object_type\":1,\"thread_id\":16796543,\"tabbed\":1,\"skip_opening_post\":0,\"display_title\":0,\"search_text\":\"\",\"searchable\":false,\"page\":2,\"page_size\":10}");
+		RH.InitSessionStorage();
+		window.RH_CommentContainer = RH;
+	}
+);
+</script></span>                <div id="comment-container" class="container comments condensed">
+            <h2 id="comment-count" data-comment-count="32">
+                32 comments            </h2>
+            <div class="comment-nav clearfix head-nav">
+                <input type="hidden" id="reload-tab-url" value="/Core/Libs/Common/Widgets/CommentContainer?object_id=147&object_type=1&thread_id=16796543&game_id=8851&tabbed=1&page=2&skip_opening_post=0&searchable=0&reload_target=.tabcontent">
+                <input type="hidden" id="reload-js-target" value=".tabcontent">
+                <input type="hidden" id="current-page-number" value="2">
+                <input type="hidden" id="bubble-reply-behaviour" value="1">
+
+                                    <script>$( function(){Filters_Pagination.Load(
+    {
+        RequestHelper: window.RH_CommentContainer,
+        id: "page",
+                pages: [
+                    {id: '1', text: '1'},
+                    {id: '2', text: '2'},
+             ]
+    }
+);});</script>
+
+<div class="pagination clearfix">
+    <div class="navlabel">
+        Pages
+    </div>
+
+    <ul class="clearfix">
+                    <li class="prev">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_CommentContainer.Send('page', '1');"
+            >
+                <svg title="" class="icon-arrow-thin"><use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-arrow-thin"></use></svg>            </a>
+        </li>
+        <li class="extra">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_CommentContainer.Send('page', 1 );"
+            >
+                1
+            </a>
+        </li>
+            
+        <!-- this is our ACTIVE page, we always display it -->
+        <li>
+            <a class="page-selected mfp-prevent-close">
+                2            </a>
+        </li>
+
+                </ul>
+
+                <select
+            id="page_t"
+            class="select-jump-page select-custom page_jump-to-page "
+    >
+    >
+        <option value="0" selected="selected">Jump</option>
+    </select>
+            </div>
+                                        <div class="forum-nav">
+                    <ul class="actions clearfix">
+                                            </ul>
+                </div>
+            </div>
+            
+            
+                        <ol>
+                                    <li class="comment comment-sticky" id="comment-168798341">
+    <a name="comment-168798341" ><!-- anchor --></a>
+
+            <div class="comment-head clearfix">
+            <a class="comment-user" href="https://next.nexusmods.com/profile/UberMorgott">
+                <img src="https://avatars.nexusmods.com/6541781/100" title="UberMorgott" alt="UberMorgott" width="55" height="55" />
+            </a>
+            <div class="comment-details">
+                <span class="comment-name">
+                    <a href="https://next.nexusmods.com/profile/UberMorgott">
+                        UberMorgott
+                    </a>
+                </span>
+
+                <ul class="clearfix">
+                    <li>
+                        <span class="status-user">
+                            member
+                        </span>
+                    </li>
+                    <li>1 kudos</li>
+                                    </ul>
+            </div>
+            <a name="reply-to-168798341"><!-- anchor --></a>
+            <div class="comment-actions">
+                <ul class="actions clearfix">
+                    
+                    
+                    
+                    
+                    
+                                            <li class="fake-accordion">
+                            <a class="accopen comment-collapse" data-pid="168798341" title="Collapse / expand sticky post">
+                                <span class="acc-status">
+                                    <svg
+    class="icon icon-arrow">
+    <use xlink:href="/assets/images/icons/icons.svg#icon-arrow"></use>
+</svg>
+                                </span>
+                            </a>
+                        </li>
+                                    </ul>
+            </div>
+        </div>
+
+        <div class="comment-content">
+            <div id="locked-comment-label-168798341" class="locked" style="">
+                Locked
+            </div>
+            <div id="sticky-comment-label-168798341" class="sticky" style="">
+                Sticky
+            </div>
+            <time class="dst-date-adjust" data-date="1777198225" data-date-format="d M Y, g:iA">26 Apr 2026, 10:10AM</time>
+            
+            <div class="comment-content-text" id="comment-content-168798341" style="">
+                UPDATE 2026-04-27: real cause found, fixed in v1.1.1. Sticky is rewritten because the previous version got the diagnosis wrong.<br><br>Massive thanks to Hawk243, who DMed me his R5.log and the first lines made the bug obvious. Four days of wrong theories collapsed in about 30 seconds:<br><br><pre><code>R5LogCheck: Class of type '' doesnt exists. Asset: /Game/Paks/~mods/ShareShip/mod<br>R5LogJsonAssets: Cannot create asset: '/Game/Paks/~mods/ShareShip/mod'</code></pre><br><br>DamianKrat had also called this exact fix in the thread below back on April 23, and the old sticky waved him off. Wrong call, sorry Damian.<br><br>What was actually broken: the v1.0.0 and v1.1.0 release zips contained three UE4SS leftover files (mod.json, enabled.txt, Scripts/main.lua) that I left in from an early dev iteration. The IoStore pak loader ignores them, which is why I assumed they were inert. They are not. Windrose's own R5JsonAssets plugin auto-scans every *.json under ~mods/ and tries to build a UObject out of each one. The UE4SS-style mod.json has no Class field, R5JsonAssets throws, and the splash damage matches every report in this thread: journal and discoveries UI gone, backpack mods losing their slot bumps, fast-travel hangs on dedicated.<br><br>Fix: install v1.1.1 (Nexus + GitHub), or just open &lt;install&gt;\R5\Content\Paks\~mods\ShareShip\ and delete mod.json, enabled.txt, and the Scripts/ folder. Same result either way. The .pak / .ucas / .utoc bytes are unchanged from v1.1.0, the feature itself didn't move.<br><br>First published mod, shipped a folder of dev leftovers right next to the three files that actually do the work. The pak loader didn't care, the JSON plugin cared a lot. Lesson absorbed. Sorry for the broken saves, please update.<br><br>If you're STILL seeing trouble after v1.1.1:<br>- Don't use Vortex for Windrose mods, manual install only.<br>- BackPacks10x and ShipInventory10x had their own packing-tool issues around April 21 to 23 (unrelated to ShareShip). Grab TheHeechee's post-April-23 re-uploads if you use either.<br>- Otherwise post your R5.log (%LocalAppData%\R5\Saved\Logs\R5.log) and the ~mods folder contents and I'll keep digging.<br><br>Thanks for the patience, and especially thanks to Hawk243 for the log that nailed it.
+            </div>
+
+            
+            <ul class="comment-inline clearfix">
+                            </ul>
+
+                    </div>
+    
+    </li>
+                                                                            <li class="comment " id="comment-168616832">
+    <a name="comment-168616832" ><!-- anchor --></a>
+
+            <div class="comment-head clearfix">
+            <a class="comment-user" href="https://next.nexusmods.com/profile/MattT9P">
+                <img src="https://avatars.nexusmods.com/20378479/100" title="MattT9P" alt="MattT9P" width="55" height="55" />
+            </a>
+            <div class="comment-details">
+                <span class="comment-name">
+                    <a href="https://next.nexusmods.com/profile/MattT9P">
+                        MattT9P
+                    </a>
+                </span>
+
+                <ul class="clearfix">
+                    <li>
+                        <span class="status-supporter">
+                            supporter
+                        </span>
+                    </li>
+                    <li>0 kudos</li>
+                                    </ul>
+            </div>
+            <a name="reply-to-168616832"><!-- anchor --></a>
+            <div class="comment-actions">
+                <ul class="actions clearfix">
+                    
+                    
+                    
+                    
+                    
+                                    </ul>
+            </div>
+        </div>
+
+        <div class="comment-content">
+            <div id="locked-comment-label-168616832" class="locked" style="display:none;">
+                Locked
+            </div>
+            <div id="sticky-comment-label-168616832" class="sticky" style="display:none;">
+                Sticky
+            </div>
+            <time class="dst-date-adjust" data-date="1776869388" data-date-format="d M Y, g:iA">22 Apr 2026, 2:49PM</time>
+            
+            <div class="comment-content-text" id="comment-content-168616832" style="">
+                Since adding this mod and no other my backpack mod that i have install no longer works&nbsp;
+            </div>
+
+            
+            <ul class="comment-inline clearfix">
+                            </ul>
+
+                    </div>
+    
+            <ol class="comment-kids">
+                            <li class="comment comment-author" id="comment-168617633">
+    <a name="comment-168617633" ><!-- anchor --></a>
+
+            <div class="comment-head clearfix">
+            <a class="comment-user" href="https://next.nexusmods.com/profile/UberMorgott">
+                <img src="https://avatars.nexusmods.com/6541781/100" title="UberMorgott" alt="UberMorgott" width="55" height="55" />
+            </a>
+            <div class="comment-details">
+                <span class="comment-name">
+                    <a href="https://next.nexusmods.com/profile/UberMorgott">
+                        UberMorgott
+                    </a>
+                </span>
+
+                <ul class="clearfix">
+                    <li>
+                        <span class="status-user">
+                            member
+                        </span>
+                    </li>
+                    <li>1 kudos</li>
+                                    </ul>
+            </div>
+            <a name="reply-to-168617633"><!-- anchor --></a>
+            <div class="comment-actions">
+                <ul class="actions clearfix">
+                    
+                    
+                    
+                    
+                    
+                                    </ul>
+            </div>
+        </div>
+
+        <div class="comment-content">
+            <div id="locked-comment-label-168617633" class="locked" style="display:none;">
+                Locked
+            </div>
+            <div id="sticky-comment-label-168617633" class="sticky" style="display:none;">
+                Sticky
+            </div>
+            <time class="dst-date-adjust" data-date="1776870689" data-date-format="d M Y, g:iA">22 Apr 2026, 3:11PM</time>
+            
+            <div class="comment-content-text" id="comment-content-168617633" style="">
+                Thanks for the report - confirmed issue, and I appreciate you flagging it.<br><br>&nbsp; ShareShip is packaged as an IoStore container with a wide mount scope, which can shadow legacy-pak mods that override .json configs (like BackPacks10x). Not intentional - I didn't<br>&nbsp; &nbsp;have a conflicting mod installed during testing, so I missed it.<br>&nbsp;&nbsp;&nbsp; Workaround for now: if you need the backpack mod working, temporarily remove ShareShip (delete the 3 files in R5/Content/Paks/~mods/ShareShip/).<br>&nbsp;&nbsp; &nbsp;Fix planned for v1.2: I'll repackage with a narrower mount scope so other mods' overrides aren't affected. Should land within a few days. Will ping here when it's up.
+            </div>
+
+            
+            <ul class="comment-inline clearfix">
+                            </ul>
+
+                    </div>
+    
+    </li>
+
+                    </ol>
+    </li>
+                                                </ol>
+            <div class="comment-nav clearfix bottom-nav">
+                                    <script>$( function(){Filters_Pagination.Load(
+    {
+        RequestHelper: window.RH_CommentContainer,
+        id: "page",
+                pages: [
+                    {id: '1', text: '1'},
+                    {id: '2', text: '2'},
+             ]
+    }
+);});</script>
+
+<div class="pagination clearfix">
+    <div class="navlabel">
+        Pages
+    </div>
+
+    <ul class="clearfix">
+                    <li class="prev">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_CommentContainer.Send('page', '1');"
+            >
+                <svg title="" class="icon-arrow-thin"><use xlink:href="https://www.nexusmods.com/assets/images/icons/icons.svg#icon-arrow-thin"></use></svg>            </a>
+        </li>
+        <li class="extra">
+            <a class="mfp-prevent-close " href="javascript:;"
+               onclick="return window.RH_CommentContainer.Send('page', 1 );"
+            >
+                1
+            </a>
+        </li>
+            
+        <!-- this is our ACTIVE page, we always display it -->
+        <li>
+            <a class="page-selected mfp-prevent-close">
+                2            </a>
+        </li>
+
+                </ul>
+
+                <select
+            id="page_b"
+            class="select-jump-page select-custom page_jump-to-page "
+    >
+    >
+        <option value="0" selected="selected">Jump</option>
+    </select>
+            </div>
+                                    </div>
+            <script>
+            
+            function loadWYSIBBFor(action, post_id) {
+
+                $(`#${action}-comment-form-${post_id}`).toggle();
+
+                $(`#${action}-comment-post-${post_id}`).wysibb({
+                    buttons: "bold,italic,underline,strike,code,quote,|,img,video,link,|,bullist,numlist,|,fontcolor,fontsize,fontfamily,|,justifyleft,justifycenter,justifyright,|,removeFormat",
+                    traceTextarea: true,
+                    resize_maxheight: 'auto'
+                });
+
+                $('html, body').animate({
+                    scrollTop: $(`#${action}-comment-form-${post_id}`).offset().top - 70
+                }, 200);
+            }
+
+                        </script>
+        </div>
+        
