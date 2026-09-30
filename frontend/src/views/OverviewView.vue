@@ -241,9 +241,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
                 <RouterLink
                   :to="{ name: 'issues', query: { unread: '1' } }"
                   class="more"
-                >
-                  {{ t('overview.allUnread') }}
-                </RouterLink>
+                ><template v-if="hasComments"><i class="pi pi-inbox" /> {{ t('nav.issues') }}</template><template v-else>{{ t('overview.allUnread') }}</template></RouterLink>
                 <RouterLink
                   v-if="hasComments"
                   :to="{ name: 'comments', query: { unread: '1' } }"
@@ -408,6 +406,7 @@ const activityKey: Record<string, string> = { 'item.new': 'overview.activity.iss
 .more-links {
   display: inline-flex;
   gap: 14px;
+  white-space: nowrap;
 }
 
 .grid {
