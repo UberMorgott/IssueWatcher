@@ -59,14 +59,17 @@ function setTime(which: 'from' | 'to', v: string) {
   <template v-if="n">
     <SettingsPanel :title="t('settings.notif.title')">
       <template #actions>
-        <Button
-          :label="t('settings.notif.test')"
-          icon="pi pi-send"
-          size="small"
-          severity="secondary"
-          :loading="testing"
-          @click="test"
-        />
+        <span v-tooltip.top="off ? t('settings.notif.testOff') : undefined">
+          <Button
+            :label="t('settings.notif.test')"
+            icon="pi pi-send"
+            size="small"
+            severity="secondary"
+            :loading="testing"
+            :disabled="off"
+            @click="test"
+          />
+        </span>
       </template>
       <SettingRow
         :title="t('settings.notif.enabled')"

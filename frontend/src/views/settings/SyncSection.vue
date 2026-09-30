@@ -85,7 +85,7 @@ function setField(key: keyof ProviderSync, v: number | null) {
       </SettingRow>
     </SettingsPanel>
 
-    <SettingsPanel title="GitHub">
+    <SettingsPanel :title="t('settings.sync.intervals')">
       <SettingRow
         v-for="f in FIELDS"
         :key="f.key"
