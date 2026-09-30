@@ -12,7 +12,7 @@ import (
 // A persistent session secret keeps a browser signed in across app restarts
 // (a new server, a new bearer token), and the cookie outlives the browser session.
 func TestPersistentSessionSurvivesRestart(t *testing.T) {
-	const secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	secret := strings.Repeat("0123456789abcdef", 4) // dummy fixture, not a real secret
 	start := func() *Server {
 		s, err := New(t.Context(), Options{
 			Assets: fstest.MapFS{"index.html": {Data: []byte(indexHTML)}},
