@@ -40,7 +40,10 @@ type Caller interface {
 
 // Options configures the provider.
 type Options struct {
+	// Bridge is the old engine (the MCP server); Native the built-in one
+	// (wins when both are set).
 	Bridge Caller
+	Native *NativeOptions
 	// Author overrides the CFWidget author name whose projects are listed
 	// (default: the session's display name).
 	Author func() string
@@ -54,6 +57,9 @@ type Options struct {
 // Provider implements provider.Provider and provider.Poller.
 type Provider struct {
 	opts Options
+	b    backend
+	// writes serialized per thread.
+	threads sync.Map // item external id → *sync.Mutex
 
 	mu      sync.Mutex
 	account string            // display name = comment author name
@@ -75,7 +81,13 @@ func New(opts Options) *Provider {
 	if opts.ReadBackWaits == nil {
 		opts.ReadBackWaits = []time.Duration{5 * time.Second, 10 * time.Second}
 	}
-	return &Provider{opts: opts, urls: map[string]string{}, codes: map[string]string{}}
+	p := &Provider{opts: opts, urls: map[string]string{}, codes: map[string]string{}}
+	if opts.Native != nil {
+		p.b = newNative(*opts.Native, opts.Log, opts.Now)
+	} else {
+		p.b = &mcpBackend{bridge: opts.Bridge, now: opts.Now}
+	}
+	return p
 }
 
 // Platform implements provider.Provider.
@@ -90,19 +102,7 @@ func (p *Provider) Capabilities() provider.Capabilities {
 }
 
 // Scheduling implements provider.Poller: a browser-backed site, polled gently.
-func (p *Provider) Scheduling() provider.Scheduling {
-	return provider.Scheduling{PollMinInterval: 15 * time.Minute, RateBudget: 60}
-}
-
-// call runs a read and maps session problems: not_logged_in / cloudflare →
-// ErrRelogin (an error state, never "no new comments").
-func (p *Provider) call(ctx context.Context, tool string, args map[string]any, out any) error {
-	err := p.opts.Bridge.Call(ctx, tool, args, out, true)
-	if mcpbridge.IsCode(err, mcpbridge.CodeNotLoggedIn) || mcpbridge.IsCode(err, mcpbridge.CodeCloudflare) {
-		return fmt.Errorf("%w: %w", ErrRelogin, err)
-	}
-	return mcpbridge.ProviderError(err, p.opts.Now())
-}
+func (p *Provider) Scheduling() provider.Scheduling { return p.b.scheduling() }
 
 type sessionResult struct {
 	LoggedIn      bool   `json:"loggedIn"`
@@ -123,8 +123,7 @@ type sessionResult struct {
 // comments show as author). No cookies → signed out; stored cookies refused →
 // ErrRelogin; server missing → signed out (unavailable).
 func (p *Provider) Account(ctx context.Context) (string, error) {
-	var s sessionResult
-	err := p.call(ctx, "cf_session_status", nil, &s)
+	s, err := p.b.status(ctx)
 	switch {
 	case errors.Is(err, mcpbridge.ErrUnavailable):
 		return "", fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
@@ -157,32 +156,21 @@ func (s sessionResult) name() string {
 	return ""
 }
 
-// Login implements provider.Loginer: cf_auto_extract_cookies keeps a browser's
-// session only when it is signed in, else opens the server's sign-in window
-// (captured by the server itself).
+// Login implements provider.Loginer: the MCP server imports a browser's
+// session or opens its window; the native engine checks the stored session,
+// our signed-in profile, else opens the sign-in window.
 func (p *Provider) Login(ctx context.Context) (provider.Login, error) {
-	var r struct {
-		Result       string  `json:"result"`
-		LoggedIn     bool    `json:"loggedIn"`
-		InProgress   bool    `json:"loginInProgress"`
-		WindowOpened bool    `json:"loginWindowOpened"`
-		Via          *string `json:"loginVia"`
-		ViaBrowser   *string `json:"loginBrowser"`
+	l, err := p.b.login(ctx)
+	if err == nil && l.LoggedIn && l.Account != "" {
+		p.mu.Lock()
+		p.account = l.Account
+		p.mu.Unlock()
 	}
-	if err := p.opts.Bridge.Call(ctx, "cf_auto_extract_cookies", nil, &r, true); err != nil {
-		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
-	}
-	if r.LoggedIn {
-		return p.LoginStatus(ctx)
-	}
-	return provider.Login{InProgress: r.InProgress || r.WindowOpened, Window: r.WindowOpened, Detail: r.Result,
-		Via: deref(r.Via), ViaBrowser: deref(r.ViaBrowser)}, nil
+	return l, err
 }
 
-// CancelLogin implements provider.LoginCanceller (cf_login_cancel).
-func (p *Provider) CancelLogin(ctx context.Context) error {
-	return mcpbridge.ProviderError(p.opts.Bridge.Call(ctx, "cf_login_cancel", nil, nil, false), p.opts.Now())
-}
+// CancelLogin implements provider.LoginCanceller.
+func (p *Provider) CancelLogin(ctx context.Context) error { return p.b.cancelLogin(ctx) }
 
 func deref(s *string) string {
 	if s == nil {
@@ -191,19 +179,13 @@ func deref(s *string) string {
 	return *s
 }
 
-// LoginStatus implements provider.Loginer (cf_session_status).
+// LoginStatus implements provider.Loginer.
 func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
-	var s sessionResult
-	if err := p.opts.Bridge.Call(ctx, "cf_session_status", nil, &s, true); err != nil {
-		return provider.Login{}, mcpbridge.ProviderError(err, p.opts.Now())
-	}
-	l := provider.Login{LoggedIn: s.LoggedIn && s.name() != "", InProgress: s.InProgress, Detail: s.Detail}
-	if !l.LoggedIn && s.InProgress {
-		l.Via, l.ViaBrowser = deref(s.Via), deref(s.ViaBrowser)
+	l, err := p.b.loginStatus(ctx)
+	if err != nil {
+		return provider.Login{}, err
 	}
 	if l.LoggedIn {
-		l.Account = s.name()
-		l.Source, l.Browser = deref(s.Source), deref(s.Browser)
 		p.mu.Lock()
 		p.account = l.Account
 		p.mu.Unlock()
@@ -211,18 +193,16 @@ func (p *Provider) LoginStatus(ctx context.Context) (provider.Login, error) {
 	return l, nil
 }
 
-// Logout implements provider.Logouter: cf_logout drops the stored session
-// (the server stops importing browser cookies until the next sign-in).
+// Logout implements provider.Logouter: the stored session is dropped.
 func (p *Provider) Logout(ctx context.Context) error {
-	if err := p.opts.Bridge.Call(ctx, "cf_logout", nil, nil, false); err != nil {
-		return mcpbridge.ProviderError(err, p.opts.Now())
+	if err := p.b.logout(ctx); err != nil {
+		return err
 	}
 	p.mu.Lock()
 	p.account = ""
 	p.mu.Unlock()
 	return nil
 }
-
 func (p *Provider) self(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	a := p.account
@@ -243,13 +223,8 @@ func (p *Provider) ListProjects(ctx context.Context) ([]provider.Project, error)
 		}
 		author = a
 	}
-	var r struct {
-		Projects []struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
-		} `json:"projects"`
-	}
-	if err := p.call(ctx, "search_author", map[string]any{"username": author}, &r); err != nil {
+	r, err := p.b.author(ctx, author)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]provider.Project, 0, len(r.Projects))
@@ -274,12 +249,8 @@ func (p *Provider) projectURL(ctx context.Context, id int) string {
 	if ok {
 		return u
 	}
-	var r struct {
-		URL     *string `json:"url"`
-		Summary string  `json:"summary"`
-	}
 	u = "https://www.curseforge.com/projects/" + key
-	if err := p.call(ctx, "get_project", map[string]any{"project": key}, &r); err == nil && r.URL != nil && *r.URL != "" {
+	if r, err := p.b.project(ctx, id); err == nil && r.URL != nil && *r.URL != "" {
 		u = modkit.HTTPS(*r.URL, u) // CFWidget data: never a javascript: href
 		p.mu.Lock()
 		p.urls[key] = u
@@ -324,9 +295,7 @@ func modID(project string) (int, error) {
 }
 
 func (p *Provider) page(ctx context.Context, mod, page int) (commentsResult, error) {
-	var r commentsResult
-	err := p.call(ctx, "get_comments", map[string]any{"mod_id": mod, "page": page}, &r)
-	return r, err
+	return p.b.page(ctx, mod, page)
 }
 
 // SyncItems implements provider.Provider: every root thread, all pages (a new
@@ -384,8 +353,6 @@ func threadItem(project provider.Project, mod int, t thread) provider.Item {
 
 // ── change check ─────────────────────────────────────────────────
 
-const sigKey = "curseforge:page1"
-
 // DetectChanges implements provider.Poller: page 1 ids + the entry total (a
 // reply on an old thread should raise the total) against the last
 // fingerprint; no fingerprint yet or FullEvery elapsed also reconciles.
@@ -404,9 +371,17 @@ func (p *Provider) DetectChanges(ctx context.Context, project provider.Project, 
 		parts = append(parts, strconv.Itoa(*r.Total))
 	}
 	for _, t := range r.Comments {
-		parts = append(parts, t.ID+":"+strconv.Itoa(len(t.Replies)))
+		var part strings.Builder
+		part.WriteString(t.ID + ":" + strconv.Itoa(len(t.Replies)))
+		if p.b.v2() { // an edit changes the modification time only
+			part.WriteString(":" + modkit.Latest(modkit.Time(t.CreatedAt), modkit.Time(t.UpdatedAt)).Format(time.RFC3339))
+			for _, r := range t.Replies {
+				part.WriteString("," + modkit.Latest(modkit.Time(r.CreatedAt), modkit.Time(r.UpdatedAt)).Format(time.RFC3339))
+			}
+		}
+		parts = append(parts, part.String())
 	}
-	ch.Overflow = modkit.PageChanged(st, sigKey, modkit.Signature(parts...), p.opts.Now(), FullEvery)
+	ch.Overflow = modkit.PageChanged(st, p.b.sigKey(), modkit.Signature(parts...), p.opts.Now(), FullEvery)
 	return ch, nil
 }
 
@@ -460,6 +435,10 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if err != nil {
 		return provider.Comment{}, err
 	}
+	lock, _ := p.threads.LoadOrStore(itemExternalID, &sync.Mutex{})
+	mu, _ := lock.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
 	// The replies already there: an older reply with the same text is never
 	// taken for this one. A failed read sends nothing.
 	before := map[string]bool{}
@@ -467,20 +446,14 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 		return provider.Comment{}, fmt.Errorf("curseforge: read thread before reply: %w", err)
 	}
 	sent := p.opts.Now()
-	var r struct {
-		Posted bool    `json:"posted"`
-		ID     *string `json:"id"`
-	}
-	err = p.opts.Bridge.Call(ctx, "post_comment", map[string]any{"mod_id": mod, "comment_text": htmlBody(body), "reply_to_id": modkit.Number(root)}, &r, false)
+	r, err := p.b.post(ctx, mod, htmlBody(body), modkit.Number(root))
 	switch {
 	case err == nil && r.Posted && r.ID != nil && *r.ID != "":
 		return p.posted(*r.ID, account, body), nil
 	case err == nil && !r.Posted:
 		return provider.Comment{}, errors.New("curseforge: post_comment: not posted")
-	case mcpbridge.IsCode(err, mcpbridge.CodeNotLoggedIn), mcpbridge.IsCode(err, mcpbridge.CodeCloudflare):
-		return provider.Comment{}, fmt.Errorf("%w: %w", provider.ErrNotSignedIn, err)
-	case err != nil && !mcpbridge.WriteUnsure(err):
-		return provider.Comment{}, mcpbridge.ProviderError(err, p.opts.Now())
+	case err != nil && !errors.Is(err, errWriteUnsure):
+		return provider.Comment{}, err
 	}
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readBackTimeout)
 	defer cancel()

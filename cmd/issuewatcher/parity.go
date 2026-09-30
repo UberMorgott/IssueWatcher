@@ -14,6 +14,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/browser"
 	"github.com/UberMorgott/issuewatcher/internal/parity"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 )
 
@@ -102,5 +103,9 @@ func init() {
 		br := browser.New(browser.Options{Dir: filepath.Join(work, "browser"), Origins: nexus.Origins})
 		p := nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br}, Author: func() string { return account }})
 		return p, br.Close, nil
+	}
+	nativeForParity[curseforge.Platform] = func(_, account string) (provider.Provider, func(), error) {
+		p := curseforge.New(curseforge.Options{Native: &curseforge.NativeOptions{}, Author: func() string { return account }})
+		return p, func() {}, nil
 	}
 }
