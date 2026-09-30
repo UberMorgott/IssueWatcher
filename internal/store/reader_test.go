@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -45,19 +46,20 @@ func TestReadsDoNotWaitForAWrite(t *testing.T) {
 	if _, err := tx.ExecContext(ctx, `UPDATE items SET title = 'being written'`); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
-	chunk, err := s.Issues(ctx, IssueFilter{})
+	// A read that queued behind the writer would wait until the transaction ends
+	// (never, here): the deadline turns that into a failure. No wall-clock bound
+	// on the reads themselves, which vary with -race and machine load.
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	chunk, err := s.Issues(rctx, IssueFilter{})
 	if err != nil || len(chunk.Items) != 1 || chunk.Items[0].Title != "title a" {
 		t.Fatalf("issues during a write: %+v %v", chunk, err)
 	}
-	if _, err := s.ReposChunk(ctx, RepoQuery{}); err != nil {
+	if _, err := s.ReposChunk(rctx, RepoQuery{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Stats(ctx, 0, 4, t0); err != nil {
+	if _, err := s.Stats(rctx, 0, 4, t0); err != nil {
 		t.Fatal(err)
-	}
-	if d := time.Since(start); d > 50*time.Millisecond {
-		t.Fatalf("reads took %v during a write transaction", d)
 	}
 	if _, err := rd.ExecContext(ctx, `UPDATE items SET title = 'x'`); err == nil {
 		t.Fatal("the reader pool accepts writes")
