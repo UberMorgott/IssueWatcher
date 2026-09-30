@@ -18,6 +18,7 @@ import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
 import { jobOutcome, jobRef } from './lib/jobs'
+import { jobFailReason } from './lib/failReason'
 import { itemRef, jobPlatform, repoPlatform } from './lib/platforms'
 import { api } from './api/client'
 import type { UpdateStatus } from './api/types'
@@ -118,7 +119,7 @@ function onLive(name: LiveEventName, data: unknown) {
         const outcome = jobOutcome(done)
         const label = outcome ? t('jobs.outcome.' + outcome) : t('jobs.state.' + done.state)
         const code = done.result.errorCode ?? ''
-        const reason = code && te('app.failReason.' + code) ? t('app.failReason.' + code) : (done.error ?? '').split('\n')[0]
+        const reason = jobFailReason(code, done.error ?? '', (k) => (te(k) ? t(k) : undefined))
         toast.add({
           group: 'live',
           severity: failed || outcome === 'failed' ? 'error' : 'info',
@@ -340,7 +341,11 @@ const shortcuts = computed(() => [
             <div class="live-title">
               {{ message.summary }}
             </div>
-            <div class="live-detail">
+            <div
+              class="live-detail"
+              :class="{ 'live-detail-error': message.severity === 'error' }"
+              :title="message.detail"
+            >
               <PlatformIcon
                 v-if="toastPlatform(message)"
                 :platform="toastPlatform(message)"
@@ -567,6 +572,13 @@ const shortcuts = computed(() => [
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* An error's reason must be readable: the ref takes the first line, so two
+   lines left «Запуск агента…» of it. The full text stays in the tooltip. */
+.live-detail-error {
+  -webkit-line-clamp: 6;
+  overflow-wrap: anywhere;
 }
 
 .live-mark {
