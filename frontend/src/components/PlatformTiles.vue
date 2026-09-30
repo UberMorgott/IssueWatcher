@@ -34,7 +34,7 @@ const tiles = computed(() =>
       v-for="p in tiles"
       :key="p.id"
       :to="p.on ? { name: 'issues', query: { source: p.id } } : '/settings/connections'"
-      class="tile panel"
+      class="p-tile panel"
       :class="{ off: !p.on }"
     >
       <PlatformIcon
@@ -76,7 +76,7 @@ const tiles = computed(() =>
   gap: 16px;
 }
 
-.tile {
+.p-tile {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -84,12 +84,12 @@ const tiles = computed(() =>
   color: var(--iw-text);
 }
 
-.tile:hover {
+.p-tile:hover {
   border-color: var(--iw-border-strong);
   color: var(--iw-text);
 }
 
-.tile.off {
+.p-tile.off {
   opacity: 0.8;
 }
 
