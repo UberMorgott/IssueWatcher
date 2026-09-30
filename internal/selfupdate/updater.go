@@ -108,7 +108,13 @@ func New(opts Options) *Updater {
 	if opts.FirstCheck <= 0 {
 		opts.FirstCheck = time.Minute
 	}
-	return &Updater{opts: opts, state: StateIdle}
+	u := &Updater{opts: opts, state: StateIdle}
+	if opts.Prefs != nil {
+		if c, ok := loadCheck(opts.DataDir, opts.Prefs().Channel); ok {
+			u.rel, u.checkedAt = c.Release, c.CheckedAt
+		}
+	}
+	return u
 }
 
 // Status is the current state.
@@ -179,6 +185,11 @@ func (u *Updater) Check(ctx context.Context) (Status, error) {
 		return u.Status(), err
 	}
 	st := u.Status()
+	if st.CheckedAt != nil {
+		if err := saveCheck(u.opts.DataDir, lastCheck{Channel: channel, CheckedAt: *st.CheckedAt, Release: rel}); err != nil {
+			u.opts.Log.Warn("update: save last check", "err", err)
+		}
+	}
 	u.opts.Log.Info("update: checked", "channel", channel, "current", u.opts.Current,
 		"latest", func() string {
 			if rel == nil {

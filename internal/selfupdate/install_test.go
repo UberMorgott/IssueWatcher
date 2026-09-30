@@ -173,6 +173,38 @@ func TestUpdaterCheckAndGuards(t *testing.T) {
 	}
 }
 
+// The last check survives a restart (also the restart into the new version),
+// and a check of another channel is not reused.
+func TestUpdaterLastCheckPersists(t *testing.T) {
+	e := setup(t)
+	e.fake.Set(updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(e.priv, "v0.1.1", []byte("x"), nil)})
+	dir := t.TempDir()
+	channel := "stable"
+	newUpdater := func(current string) *selfupdate.Updater {
+		return selfupdate.New(selfupdate.Options{
+			Current: current, Exe: e.exe, DataDir: dir, Source: e.src, PublicKey: e.pub,
+			Prefs: func() selfupdate.Prefs { return selfupdate.Prefs{Channel: channel} },
+			Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+	}
+	if st := newUpdater("v0.1.0").Status(); st.CheckedAt != nil {
+		t.Fatalf("fresh status has checkedAt %v", st.CheckedAt)
+	}
+	checked, err := newUpdater("v0.1.0").Check(t.Context())
+	if err != nil || checked.CheckedAt == nil {
+		t.Fatalf("check = %+v, %v", checked, err)
+	}
+	st := newUpdater("v0.1.1").Status()
+	if st.CheckedAt == nil || !st.CheckedAt.Equal(*checked.CheckedAt) || st.Available == nil ||
+		st.Available.Version != "v0.1.1" || st.UpdateAvailable {
+		t.Fatalf("after restart = %+v", st)
+	}
+	channel = "preview"
+	if st := newUpdater("v0.1.1").Status(); st.CheckedAt != nil || st.Available != nil {
+		t.Fatalf("other channel reused the check: %+v", st)
+	}
+}
+
 // Concurrent Checks: exactly one reaches GitHub, the rest get ErrBusy (the
 // idle check and the switch to checking are one step). The race window is
 // short, so many rounds.

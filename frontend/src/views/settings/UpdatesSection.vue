@@ -39,6 +39,12 @@ const percent = computed(() => {
 const mb = (n?: number) => ((n ?? 0) / 1048576).toFixed(1)
 const errorText = computed(() => updates.error || st.value?.error || '')
 const canInstall = computed(() => !!st.value?.updateAvailable && !st.value.devBuild)
+// The outcome of the last update is news only for a few days.
+const RESULT_TTL = 3 * 24 * 3600 * 1000
+const lastResult = computed(() => {
+  const r = st.value?.lastResult
+  return r && Date.now() - Date.parse(r.at) < RESULT_TTL ? r : undefined
+})
 
 async function setChannel(v: UpdateChannel) {
   await save({ updates: { channel: v } })
@@ -51,43 +57,30 @@ onMounted(() => void updates.load())
 <template>
   <SettingsPanel :title="t('settings.sections.updates')">
     <SettingRow :title="t('settings.version')">
-      <span class="mono value">{{ st?.current || app.version || 'dev' }}</span>
-      <Tag
-        v-if="st?.devBuild"
-        severity="secondary"
-        :value="t('settings.updates.devBuild')"
-        class="tag"
-      />
-    </SettingRow>
-
-    <SettingRow :title="t('settings.updates.available')">
       <template #text>
-        <span v-if="st?.checkedAt">{{ t('settings.updates.checked', { when: relTime(st.checkedAt) }) }}</span>
-        <span v-else>{{ t('settings.updates.neverChecked') }}</span>
+        <span class="status">
+          <span class="mono current">{{ st?.current || app.version || 'dev' }}</span>
+          <Tag
+            v-if="st?.devBuild"
+            severity="secondary"
+            :value="t('settings.updates.devBuild')"
+          />
+          <template v-if="st?.updateAvailable && st.available">
+            <span class="mono next">→ {{ st.available.version }}</span>
+            <Tag
+              v-if="st.available.prerelease"
+              severity="warn"
+              :value="t('settings.updates.preview')"
+            />
+          </template>
+          <span v-else-if="st?.available">· {{ t('settings.updates.upToDate') }}</span>
+          <span v-else-if="st?.checkedAt">· {{ t('settings.updates.noReleases') }}</span>
+          <span
+            v-if="st?.checkedAt"
+            v-tooltip.top="absTime(st.checkedAt)"
+          >· {{ t('settings.updates.checked', { when: relTime(st.checkedAt) }) }}</span>
+        </span>
       </template>
-      <span
-        v-if="st?.available"
-        class="avail"
-      >
-        <span class="mono value">{{ st.available.version }}</span>
-        <Tag
-          v-if="st.available.prerelease"
-          severity="warn"
-          :value="t('settings.updates.preview')"
-          class="tag"
-        />
-        <span
-          v-if="!st.updateAvailable"
-          class="muted"
-        >{{ t('settings.updates.upToDate') }}</span>
-      </span>
-      <span
-        v-else-if="st?.checkedAt"
-        class="muted"
-      >{{ t('settings.updates.noReleases') }}</span>
-    </SettingRow>
-
-    <div class="actions">
       <Button
         :label="t('settings.updates.checkNow')"
         icon="pi pi-refresh"
@@ -110,7 +103,7 @@ onMounted(() => void updates.load())
         v-if="st?.devBuild && st.updateAvailable"
         class="muted"
       >{{ t('settings.updates.devBuildText') }}</span>
-    </div>
+    </SettingRow>
 
     <div
       v-if="st?.state === 'downloading'"
@@ -139,16 +132,16 @@ onMounted(() => void updates.load())
       <i class="pi pi-exclamation-triangle" /> {{ errorText }}
     </p>
     <p
-      v-if="st?.lastResult"
+      v-if="lastResult"
       class="result"
-      :class="{ error: !st.lastResult.ok }"
+      :class="{ error: !lastResult.ok }"
     >
-      <i :class="st.lastResult.ok ? 'pi pi-check-circle' : 'pi pi-undo'" />
-      <template v-if="st.lastResult.ok">
-        {{ t('settings.updates.updated', { from: st.lastResult.from || '?', to: st.lastResult.to, when: absTime(st.lastResult.at) }) }}
+      <i :class="lastResult.ok ? 'pi pi-check-circle' : 'pi pi-undo'" />
+      <template v-if="lastResult.ok">
+        {{ t('settings.updates.updated', { from: lastResult.from || '?', to: lastResult.to, when: absTime(lastResult.at) }) }}
       </template>
       <template v-else>
-        {{ t('settings.updates.rolledBack', { to: st.lastResult.to, error: st.lastResult.error }) }}
+        {{ t('settings.updates.rolledBack', { to: lastResult.to, error: lastResult.error }) }}
       </template>
     </p>
 
@@ -213,26 +206,16 @@ onMounted(() => void updates.load())
 </template>
 
 <style scoped>
-.value {
-  color: var(--iw-muted);
-}
-
-.tag {
-  margin-left: 8px;
-}
-
-.avail {
+.status {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.actions {
-  display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 6px;
+}
+
+.current,
+.next {
+  color: var(--iw-text);
 }
 
 .progress {
