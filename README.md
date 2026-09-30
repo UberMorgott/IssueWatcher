@@ -14,11 +14,12 @@ SQLite storage.
 - Dashboard at `http://127.0.0.1:<port>`: overview charts, an issue list with
   filters and keyboard navigation, threads with replies, projects mapped to
   local clones.
-- Mod platforms (Nexus Mods, CurseForge, Steam Workshop) with one «Подключить»
-  button each: Steam signs in by a QR code scanned in the Steam app, Nexus and
-  CurseForge by their own sign-in window (or your browser's session); accounts
-  are detected, expired sessions raise a «войдите снова» card, mod pages link
-  themselves to the GitHub repo of the same name.
+- Mod platforms (Nexus Mods, CurseForge, Factorio Mod Portal, Steam Workshop)
+  with one «Подключить» button each: Steam signs in by a QR code scanned in the
+  Steam app, the others in a sign-in window of your installed browser (or its
+  session); accounts are detected, expired sessions raise a «войдите снова»
+  card, mod pages link themselves to the GitHub repo of the same name. All
+  built in: no Node.js or external MCP servers at runtime.
 - Tray icon with an unread badge and own popup cards for new issues, comments
   and closed issues (quiet hours, per-project mute, grouping).
 - Settings for language (Russian / English), palettes and fonts, sync intervals,
@@ -105,7 +106,7 @@ through pipes, where it works as is.
 
 ## Build
 
-Needs Go 1.27+ and Node.js (npm).
+Needs Go 1.27+ and Node.js (npm) to build the frontend; the built app needs neither.
 
 ```powershell
 pwsh -File build.ps1          # frontend + go build → build\bin\issuewatcher.exe
