@@ -33,5 +33,5 @@ func dpapi(b []byte, encrypt bool) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _, _ = windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data))) }() //nolint:gosec // G103: DPAPI-owned buffer
-	return append([]byte(nil), unsafe.Slice(out.Data, out.Size)...), nil //nolint:gosec // G103: copy out of the DPAPI buffer
+	return append([]byte(nil), unsafe.Slice(out.Data, out.Size)...), nil                  //nolint:gosec // G103: copy out of the DPAPI buffer
 }

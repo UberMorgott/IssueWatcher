@@ -42,6 +42,7 @@ func BenchmarkApplyItemsNoop(b *testing.B) {
 		}
 	}
 }
+
 // Re-applying an unchanged batch writes no item or comment row (only the
 // project's sync stamp) and reports nothing; a real edit is still written.
 func TestApplyItemsNoopWritesNothing(t *testing.T) {

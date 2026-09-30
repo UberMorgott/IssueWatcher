@@ -75,7 +75,7 @@ type AgentPrompts struct {
 	FixDir string `json:"fixDirect"` // fix flow, direct mode
 	Reply  string `json:"reply"`
 	Review string `json:"review"`
-	Label  string `json:"label"` // label flow: pick labels from the repo's list
+	Label  string `json:"label"`  // label flow: pick labels from the repo's list
 	Triage string `json:"triage"` // project triage: rank the open issues
 }
 

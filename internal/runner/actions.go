@@ -219,7 +219,7 @@ func (r *Runner) Retry(ctx context.Context, id int64) (store.Job, error) {
 	if j, err = r.claim(ctx, id, from, "retry"); err != nil {
 		return j, err
 	}
-	ctx = context.WithoutCancel(ctx) // claimed: a closed tab must not leave the job locked
+	ctx = context.WithoutCancel(ctx)                // claimed: a closed tab must not leave the job locked
 	release := func(err error) (store.Job, error) { // back to the state before the claim
 		if nj, uerr := r.opts.Store.UpdateJob(ctx, id, []string{store.JobRunning}, store.JobChange{State: &state, Phase: &phase}); uerr == nil {
 			r.opts.OnJob(nj)

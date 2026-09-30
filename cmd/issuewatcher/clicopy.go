@@ -83,7 +83,7 @@ func refreshCLI(log *slog.Logger, exe string) {
 func writeCLI(dst string, b []byte) error {
 	dir, base := filepath.Split(dst)
 	old := filepath.Join(dir, "."+base+".old")
-	_ = os.Remove(old) // leftover of an earlier refresh
+	_ = os.Remove(old)                                                   // leftover of an earlier refresh
 	if cur, err := os.ReadFile(dst); err == nil && bytes.Equal(cur, b) { //nolint:gosec // G304: next to our own exe
 		return nil
 	}

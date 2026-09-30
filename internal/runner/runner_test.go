@@ -61,7 +61,7 @@ type env struct {
 	steps int
 	cards []store.Job
 	reply []string
-	clock time.Time // automation clock (Options.Now)
+	clock time.Time       // automation clock (Options.Now)
 	onJob func(store.Job) // test hook on every Options.OnJob
 }
 

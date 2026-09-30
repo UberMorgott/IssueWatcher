@@ -32,7 +32,7 @@ func (s *Store) PollTargets(ctx context.Context, sourceID int64) ([]PollTarget, 
 	var out []PollTarget
 	for rows.Next() {
 		var (
-			t                       PollTarget
+			t                                PollTarget
 			cursor, state, checked, activity string
 		)
 		if err := rows.Scan(&t.ID, &t.ExternalID, &t.Name, &t.URL, &cursor, &state, &checked, &activity); err != nil {

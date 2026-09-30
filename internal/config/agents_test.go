@@ -192,7 +192,7 @@ func TestAutomationValidation(t *testing.T) {
 		return `{"agents": {"automation": {"rules": [{"id": "r", "project": "github:o/r", "event": "new_issue", "flow": "label"` + fields + `}]}}}`
 	}
 	cases := map[string][2]string{
-		`{"agents": {"automation": {"maxPerDay": 0}}}`:   {"agents.automation.maxPerDay", "range"},
+		`{"agents": {"automation": {"maxPerDay": 0}}}`:    {"agents.automation.maxPerDay", "range"},
 		`{"agents": {"automation": {"maxAttempts": 11}}}`: {"agents.automation.maxAttempts", "range"},
 		rule(`, "id": "Bad Id"`):                          {"agents.automation.rules.0.id", "id"},
 		rule(`, "project": "noslash"`):                    {"agents.automation.rules.0.project", "project"},
@@ -204,7 +204,7 @@ func TestAutomationValidation(t *testing.T) {
 		rule(`, "labelsAny": [""]`):                       {"agents.automation.rules.0.labelsAny", "required"},
 		`{"agents": {"automation": {"rules": [{"id": "r", "project": "github:o/r", "event": "new_issue", "flow": "fix"},
 			{"id": "r", "project": "github:o/r", "event": "new_comment", "flow": "reply"}]}}}`: {"agents.automation.rules.1.id", "duplicate"},
-		`{"agents": {"projects": {"github:o/r": {"automation": {"maxPerDay": 0}}}}}`:   {"agents.projects.github:o/r.automation.maxPerDay", "range"},
+		`{"agents": {"projects": {"github:o/r": {"automation": {"maxPerDay": 0}}}}}`:    {"agents.projects.github:o/r.automation.maxPerDay", "range"},
 		`{"agents": {"projects": {"github:o/r": {"automation": {"maxAttempts": 99}}}}}`: {"agents.projects.github:o/r.automation.maxAttempts", "range"},
 	}
 	for patch, want := range cases {

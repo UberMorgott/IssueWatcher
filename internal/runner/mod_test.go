@@ -144,7 +144,9 @@ func TestModFixRunsInCodeFolder(t *testing.T) {
 		t.Fatal("pushed while off")
 	}
 	// The mod page's override allows it: the commit reaches the code repo.
-	e.set(func(s *config.Settings) { s.Agents.Projects["nexus:skyrim/7"] = config.ProjectAgent{Mode: config.ModeDirect, ModPush: new(true)} })
+	e.set(func(s *config.Settings) {
+		s.Agents.Projects["nexus:skyrim/7"] = config.ProjectAgent{Mode: config.ModeDirect, ModPush: new(true)}
+	})
 	if j, err = e.r.Push(ctx, j.ID); err != nil || j.State != store.JobDone {
 		t.Fatalf("allowed push: %+v %v", j, err)
 	}
