@@ -23,8 +23,8 @@ type Providers struct {
 type ModPlatform struct {
 	Enabled bool      `json:"enabled"`
 	MCP     MCPServer `json:"mcp"`
-	// Engine picks the implementation: EngineMCP (default until the owner-data
-	// switch) or EngineNative.
+	// Engine picks the implementation: EngineNative (default since the
+	// owner-data switch) or EngineMCP (old, removed in Phase 6 step 14).
 	Engine string `json:"engine"`
 	// Author is whose projects are listed: Nexus = the exact uploader account
 	// name or member id (required; not the mod's free-text author field, which
@@ -50,8 +50,8 @@ type MCPServer struct {
 // Default server locations: the owner's repos, as in their .mcp.json.
 func defaultProviders() Providers {
 	return Providers{
-		Nexus:      ModPlatform{MCP: MCPServer{Command: "node", Args: []string{`E:\DEV\nexusmods-mcp-server\build\index.js`}}, Engine: EngineMCP},
-		CurseForge: ModPlatform{MCP: MCPServer{Command: "node", Args: []string{`E:\DEV\curseforge\build\index.js`}}, Engine: EngineMCP},
+		Nexus:      ModPlatform{MCP: MCPServer{Command: "node", Args: []string{`E:\DEV\nexusmods-mcp-server\build\index.js`}}, Engine: EngineNative},
+		CurseForge: ModPlatform{MCP: MCPServer{Command: "node", Args: []string{`E:\DEV\curseforge\build\index.js`}}, Engine: EngineNative},
 	}
 }
 

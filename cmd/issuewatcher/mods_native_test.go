@@ -203,7 +203,7 @@ func TestEngineSwitchLive(t *testing.T) {
 	}
 	m.apply(on)
 	if m.isNative(nexus.Platform) {
-		t.Fatal("default engine is mcp until the owner-data switch")
+		t.Fatal("engine mcp set by newTestPlatforms")
 	}
 	nat, err := cfgs.Patch(on.Revision, []byte(`{"providers":{"nexus":{"engine":"native"}}}`), nil)
 	if err != nil {
@@ -215,6 +215,34 @@ func TestEngineSwitchLive(t *testing.T) {
 	}
 	if p := platformState(t, m, factorio.Platform); p.Enabled || p.State != api.PlatformDisabled || p.Name != "Factorio Mod Portal" || p.Capabilities.Reply {
 		t.Fatalf("factorio card %+v", p)
+	}
+}
+
+// Owner-data switch: a native platform switched on without an author adopts
+// the account of its stored source (synced by the MCP engine), so a signed-out
+// start keeps reading keylessly as that account; an author already set wins.
+func TestNativeAdoptsStoredSourceAccount(t *testing.T) {
+	m, cfgs, _, dir := newTestPlatforms(t, nil)
+	withNative(t, m, dir)
+	for platform, account := range map[string]string{nexus.Platform: "UberMorgott", curseforge.Platform: "Morgott", factorio.Platform: "Morgott"} {
+		if _, err := m.st.UpsertSource(t.Context(), platform, account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	on, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"enabled":true,"engine":"native","author":""},`+
+		`"curseforge":{"enabled":true,"engine":"native","author":""},"factorio":{"enabled":true,"author":"Other"}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.apply(on)
+	got := cfgs.Get().Providers
+	if got.Nexus.Author != "UberMorgott" || got.CurseForge.Author != "Morgott" || got.Factorio.Author != "Other" {
+		t.Fatalf("authors: nexus %q, curseforge %q, factorio %q", got.Nexus.Author, got.CurseForge.Author, got.Factorio.Author)
+	}
+	for id, want := range map[string]string{nexus.Platform: "UberMorgott", curseforge.Platform: "Morgott"} {
+		if p, err := m.Check(t.Context(), id); err != nil || p.State != api.PlatformConnected || p.Account != want || p.Session != api.SessionNone {
+			t.Fatalf("%s signed out: %+v %v", id, p, err)
+		}
 	}
 }
 

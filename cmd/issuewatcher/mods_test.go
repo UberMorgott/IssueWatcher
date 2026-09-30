@@ -42,6 +42,11 @@ func newTestPlatforms(t *testing.T, fakes map[string]*mcptest.Server) (*modPlatf
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The MCP engine tests keep the engine they test (native is the default
+	// since the owner-data switch; the MCP engine goes in Phase 6 step 14).
+	if _, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"nexus":{"engine":"mcp"},"curseforge":{"engine":"mcp"}}}`), nil); err != nil {
+		t.Fatal(err)
+	}
 	db, err := store.Open(t.Context(), filepath.Join(dir, "t.db"))
 	if err != nil {
 		t.Fatal(err)

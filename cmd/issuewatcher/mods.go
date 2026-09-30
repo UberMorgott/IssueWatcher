@@ -186,7 +186,11 @@ func (m *modPlatforms) buildNative(id string, author func() string) (provider.Pr
 func (m *modPlatforms) apply(cfg config.Settings) {
 	var closing, stopping []*mcpbridge.Client
 	var cancelling []*signin.Manager
+	var adopt []string // native platforms started without an author
 	defer func() {
+		for _, id := range adopt { // m.mu released: the settings patch re-enters apply
+			m.adoptSourceAccount(context.Background(), id)
+		}
 		for _, b := range closing {
 			b.Close()
 		}
@@ -210,6 +214,9 @@ func (m *modPlatforms) apply(cfg config.Settings) {
 	for _, id := range modIDs {
 		want := modConfig(cfg.Providers, id)
 		cur := m.live[id]
+		if want.Enabled && want.Author == "" && nativeEngine(id, want) && (cur == nil || !cur.native()) {
+			adopt = append(adopt, id)
+		}
 		switch {
 		case want.Enabled && cur == nil:
 			p := m.start(id, cfg)
@@ -480,7 +487,7 @@ func (m *modPlatforms) Login(ctx context.Context, id string) (api.LoginStatus, e
 	default:
 		return api.LoginStatus{}, api.ErrUnknownPlatform
 	}
-	if err := m.enable(id); err != nil {
+	if err := m.enable(id); err != nil { //nolint:contextcheck // a settings change outlives the request that asked for it
 		return api.LoginStatus{}, err
 	}
 	l, err := m.loginer(id)
@@ -732,7 +739,7 @@ func (m *modPlatforms) Logout(ctx context.Context, id string, forget bool) (api.
 			return api.PlatformStatus{}, err
 		}
 		if forget {
-			if err := m.forget(id); err != nil {
+			if err := m.forget(id); err != nil { //nolint:contextcheck // a settings change outlives the request that asked for it
 				return api.PlatformStatus{}, err
 			}
 		}
@@ -877,6 +884,22 @@ func (mp *modPlatform) provOK() (*nexus.Provider, bool) {
 	}
 	np, ok := mp.prov.(*nexus.Provider)
 	return np, ok
+}
+
+// adoptSourceAccount fills the empty providers.<id>.author of a native
+// platform with the account of its stored source (owner data synced by the MCP
+// engine, which found the account through its own session). Native reads are
+// keyless by that account, so the resumed source keeps syncing before any
+// «Подключить». Unknown config keys are kept (a settings patch).
+func (m *modPlatforms) adoptSourceAccount(ctx context.Context, id string) {
+	src, ok, err := m.st.LastSource(ctx, id, "")
+	if err != nil {
+		m.log.Error("stored platform account", "platform", id, "err", err)
+		return
+	}
+	if ok && src.Account != "" {
+		m.setAuthor(id, src.Account) // no-op once an author is set
+	}
 }
 
 func (m *modPlatforms) setAuthor(id, author string) {
