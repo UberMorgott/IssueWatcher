@@ -45,6 +45,9 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
                       don't register it globally. --item: only that issue's read tools (agent jobs);
                       --project: only that project's issue read tools (triage jobs)
 
+  parity --db COPY --platform nexus|curseforge|factorio [--project EXT]
+                      dev: native read vs the rows of a database copy (read-only, no events)
+
   status
   projects
   items [--project ID] [--state open|closed] [--label L] [--q TEXT] [--unread] [--limit N] [--cursor C]
@@ -80,6 +83,9 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return fail(exitAPI, err)
+	}
+	if args[0] == "parity" {
+		return runParity(args[1:], stdout, stderr)
 	}
 	if args[0] == "mcp" {
 		fs := flag.NewFlagSet("mcp", flag.ContinueOnError)

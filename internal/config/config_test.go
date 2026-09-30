@@ -189,3 +189,33 @@ func TestMutedProjectsQualified(t *testing.T) {
 		t.Fatal("nil muted list")
 	}
 }
+
+// Phase 6: providers.<id>.engine defaults to mcp, native is kept, a bad value
+// is refused, unknown nested keys survive, factorio is added.
+func TestProvidersEngine(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, `{"schemaVersion": 6, "providers": {"nexus": {"enabled": true, "future": 7, "mcp": {"command": "node", "args": []}}, "curseforge": {"engine": "native"}}}`)
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := s.Get()
+	if got.Providers.Nexus.Engine != EngineMCP || got.Providers.CurseForge.Engine != EngineNative || got.Providers.Factorio.Enabled {
+		t.Fatalf("engines: %+v", got.Providers)
+	}
+	got, err = s.Patch(got.Revision, json.RawMessage(`{"providers": {"nexus": {"engine": "native"}, "factorio": {"enabled": true, "author": " Morgott "}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Providers.Nexus.Engine != EngineNative || !got.Providers.Factorio.Enabled || got.Providers.Factorio.Author != "Morgott" {
+		t.Fatalf("patched: %+v", got.Providers)
+	}
+	raw := read(t, dir)
+	nx, _ := raw["providers"].(map[string]any)["nexus"].(map[string]any)
+	if nx["future"] != float64(7) || nx["engine"] != EngineNative {
+		t.Fatalf("nexus on disk: %v", nx)
+	}
+	if _, err := s.Patch(got.Revision, json.RawMessage(`{"providers": {"nexus": {"engine": "chrome"}}}`), nil); err == nil {
+		t.Fatal("bad engine accepted")
+	}
+}
