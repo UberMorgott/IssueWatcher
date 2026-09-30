@@ -33,26 +33,36 @@ const active = (match: string[]) => match.includes(String(route.name))
     <div class="brand">
       <RouterLink
         to="/"
-        class="brand-home"
+        class="logo"
+        tabindex="-1"
+        aria-hidden="true"
         @click="emit('navigate')"
       >
-        <span class="logo"><i class="pi pi-eye" /></span>
-        <span class="brand-text">IssueWatcher</span>
+        <i class="pi pi-eye" />
       </RouterLink>
-      <RouterLink
-        v-if="app.version"
-        to="/settings/updates"
-        class="version mono"
-        :title="`${app.version} · ${t('nav.versionTip')}`"
-        @click="emit('navigate')"
-      >
-        <span class="version-text">{{ app.version }}</span>
-        <span
-          v-if="app.updateAvailable"
-          class="update-dot"
-          :aria-label="t('nav.updateAvailable')"
-        />
-      </RouterLink>
+      <div class="brand-titles">
+        <RouterLink
+          to="/"
+          class="brand-text"
+          @click="emit('navigate')"
+        >
+          IssueWatcher
+        </RouterLink>
+        <RouterLink
+          v-if="app.version"
+          to="/settings/updates"
+          class="version mono"
+          :title="`${app.version} · ${t('nav.versionTip')}`"
+          @click="emit('navigate')"
+        >
+          <span class="version-text">{{ app.version }}</span>
+          <span
+            v-if="app.updateAvailable"
+            class="update-dot"
+            :aria-label="t('nav.updateAvailable')"
+          />
+        </RouterLink>
+      </div>
       <button
         v-if="!mobile"
         v-tooltip.right="app.sidebarCollapsed ? t('nav.expandTip') : t('nav.collapseTip')"
@@ -117,21 +127,26 @@ const active = (match: string[]) => match.includes(String(route.name))
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-height: 40px;
   padding: 0 0 0 6px;
   margin-bottom: 12px;
 }
 
-.brand-home {
+/* Name and version stacked next to the logo, so the full version fits on its own line. */
+.brand-titles {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.brand-text {
   color: var(--iw-text);
   font-weight: 650;
   font-size: calc(16px * var(--iw-fs, 1));
+  line-height: 1.2;
   letter-spacing: -0.01em;
   white-space: nowrap;
 }
@@ -152,11 +167,10 @@ const active = (match: string[]) => match.includes(String(route.name))
   display: flex;
   align-items: center;
   gap: 5px;
-  align-self: center;
-  flex: 0 1 auto;
-  min-width: 0; /* a long dev version shrinks (ellipsis) instead of overlapping the name */
-  margin-top: 3px;
+  max-width: 100%; /* only an extreme version shrinks (ellipsis, full text in the tooltip) */
+  min-width: 0;
   font-size: calc(11px * var(--iw-fs, 1));
+  line-height: 1.3;
   color: var(--iw-dimmed);
   white-space: nowrap;
 }
