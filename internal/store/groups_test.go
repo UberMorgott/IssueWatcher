@@ -93,7 +93,7 @@ func TestProjectGroups(t *testing.T) {
 			t.Errorf("issues %+v: %d %v, want %d", tc.f, len(c.Items), err, tc.want)
 		}
 	}
-	if st, err := s.Stats(ctx, app, 4, t0); err != nil || st.Open != 5 || st.Closed != 1 {
+	if st, err := s.Stats(ctx, app, 4, t0); err != nil || st.Open != 4 || st.Closed != 1 || st.OpenComments != 1 { // comment threads counted apart
 		t.Fatalf("stats: %+v %v", st, err)
 	}
 

@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 )
@@ -22,8 +24,8 @@ func TestOpenAppliesMigrationsIdempotently(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 14 {
-		t.Fatalf("user_version = %d, want 14", version)
+	if version != 15 {
+		t.Fatalf("user_version = %d, want 15", version)
 	}
 	for _, table := range []string{"sources", "projects", "items", "comments", "jobs", "automation_log"} {
 		var n int
@@ -67,7 +69,7 @@ func TestMigration006FreshJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid := projects[0].ID
-	if _, err := s.ApplyItems(ctx, src, pid, []provider.Item{item("a", 1, true, t0)}, "me"); err != nil {
+	if _, err := seedItems(ctx, db, src, pid, []provider.Item{item("a", 1, true, t0)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (id, item_id, project_id, flow) SELECT 10, id, project_id, 'fix' FROM items`); err != nil {
@@ -134,7 +136,7 @@ func TestMigration012ClosedRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ApplyItems(ctx, src, projects[0].ID, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}, "me"); err != nil {
+	if _, err := seedItems(ctx, db, src, projects[0].ID, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE items SET unread = 1`); err != nil { // the old rule left closed items unread
@@ -180,7 +182,7 @@ func TestMigration008TriageJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid := projects[0].ID
-	if _, err := s.ApplyItems(ctx, src, pid, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}, "me"); err != nil {
+	if _, err := seedItems(ctx, db, src, pid, []provider.Item{item("a", 1, true, t0), item("b", 2, false, t0)}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO jobs (id, item_id, project_id, flow) SELECT 20, id, project_id, 'fix' FROM items WHERE external_id = 'a'`); err != nil {
@@ -293,6 +295,36 @@ func seedProjects(ctx context.Context, db *sql.DB, sourceID int64, list []provid
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// seedItems stores a project's first sync (a silent baseline) with the columns
+// every schema version has (ApplyItems writes columns of the latest migration).
+func seedItems(ctx context.Context, db *sql.DB, sourceID, projectID int64, items []provider.Item) ([]Event, error) {
+	for _, it := range items {
+		status := "closed"
+		if it.Open {
+			status = "open"
+		}
+		labels, err := json.Marshal(it.Labels)
+		if err != nil {
+			return nil, err
+		}
+		var id int64
+		if err := db.QueryRowContext(ctx, `INSERT INTO items (source_id, project_id, external_id, kind, number, title, body, url, author,
+			status, raw_status, labels, created_at, updated_at, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			sourceID, projectID, it.ExternalID, it.Kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
+			string(labels), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt)).Scan(&id); err != nil {
+			return nil, err
+		}
+		for _, c := range it.Comments {
+			if _, err := db.ExecContext(ctx, `INSERT INTO comments (item_id, external_id, author, body, url, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`, id, c.ExternalID, c.Author, c.Body, c.URL, ts(c.CreatedAt), ts(c.UpdatedAt)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	_, err := db.ExecContext(ctx, `UPDATE projects SET synced_at = ? WHERE id = ?`, ts(time.Now()), projectID)
+	return nil, err
 }
 
 // Migration 013 adds sources.reconciled_at, backfilled from the newest project

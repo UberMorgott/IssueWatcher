@@ -209,7 +209,7 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 	}
 	baseline := syncedAt == ""
 
-	stored, err := loadStored(ctx, tx, sourceID, items)
+	stored, err := loadStored(ctx, tx, sourceID, items, self)
 	if err != nil {
 		return nil, err
 	}
@@ -282,15 +282,20 @@ type projectRef struct{ name, key string }
 // storedItem is an item's stored row and comments, loaded once per batch.
 type storedItem struct {
 	id              int64
-	fields          [13]any // as the UPDATE binds them
+	fields          [15]any // as the UPDATE binds them
 	status, updated string
 	unread          bool
+	resolved        bool
 	comments        map[string][4]string // external id → author, body, url, updated_at
+	// last is the newest stored comment (author, created_at); others: a stored
+	// comment by someone other than self exists.
+	lastAuthor, lastAt string
+	others             bool
 }
 
 // loadStored reads the stored rows of a batch's items and their comments in
 // two queries, so an unchanged item costs no statement at all.
-func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provider.Item) (map[string]*storedItem, error) {
+func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provider.Item, self string) (map[string]*storedItem, error) {
 	out := make(map[string]*storedItem, len(items))
 	if len(items) == 0 {
 		return out, nil
@@ -304,7 +309,8 @@ func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provide
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id, external_id, project_id, kind, number, title, body, url, author, status, raw_status,
-		labels, created_at, updated_at, closed_at, unread FROM items WHERE source_id = ? AND external_id IN (SELECT value FROM json_each(?))`,
+		labels, created_at, updated_at, closed_at, unread, hidden, resolved FROM items
+		WHERE source_id = ? AND external_id IN (SELECT value FROM json_each(?))`,
 		sourceID, string(idsJSON))
 	if err != nil {
 		return nil, fmt.Errorf("store: lookup items: %w", err)
@@ -318,12 +324,13 @@ func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provide
 			ext, kind, title, body, url, author, raw, labels, created, closed string
 			project                                                           int64
 			number                                                            int
+			hidden                                                            bool
 		)
 		if err := rows.Scan(&st.id, &ext, &project, &kind, &number, &title, &body, &url, &author, &st.status, &raw,
-			&labels, &created, &st.updated, &closed, &st.unread); err != nil {
+			&labels, &created, &st.updated, &closed, &st.unread, &hidden, &st.resolved); err != nil {
 			return nil, fmt.Errorf("store: lookup items: %w", err)
 		}
-		st.fields = [13]any{project, kind, number, title, body, url, author, st.status, raw, labels, created, st.updated, closed}
+		st.fields = [15]any{project, kind, number, title, body, url, author, st.status, raw, labels, created, st.updated, closed, hidden, st.resolved}
 		st.comments = map[string][4]string{}
 		out[ext], byID[st.id] = &st, &st
 		keys = append(keys, st.id)
@@ -339,32 +346,78 @@ func loadStored(ctx context.Context, tx *sql.Tx, sourceID int64, items []provide
 	if err != nil {
 		return nil, err
 	}
-	crows, err := tx.QueryContext(ctx, `SELECT item_id, external_id, author, body, url, updated_at FROM comments
-		WHERE item_id IN (SELECT value FROM json_each(?))`, string(keysJSON))
+	crows, err := tx.QueryContext(ctx, `SELECT item_id, external_id, author, body, url, updated_at, created_at FROM comments
+		WHERE item_id IN (SELECT value FROM json_each(?)) ORDER BY item_id, created_at, id`, string(keysJSON))
 	if err != nil {
 		return nil, fmt.Errorf("store: lookup comments: %w", err)
 	}
 	defer func() { _ = crows.Close() }()
 	for crows.Next() {
 		var (
-			item int64
-			ext  string
-			c    [4]string
+			item    int64
+			ext     string
+			created string
+			c       [4]string
 		)
-		if err := crows.Scan(&item, &ext, &c[0], &c[1], &c[2], &c[3]); err != nil {
+		if err := crows.Scan(&item, &ext, &c[0], &c[1], &c[2], &c[3], &created); err != nil {
 			return nil, fmt.Errorf("store: lookup comments: %w", err)
 		}
-		byID[item].comments[ext] = c
+		st := byID[item]
+		st.comments[ext] = c
+		st.lastAuthor, st.lastAt = c[0], created // oldest first: the last row wins
+		st.others = st.others || !isSelf(c[0], self)
 	}
 	return out, crows.Err()
+}
+
+// isSelf reports whether author is the source's own account (never for an
+// unknown account).
+func isSelf(author, self string) bool { return self != "" && author == self }
+
+// threadState is a comment thread's stored state after a sync batch: hidden
+// (only the owner wrote in it), answered (the newest message is the owner's)
+// and resolved (the local «Решено» flag, cleared by a new message from
+// someone else).
+func threadState(it *provider.Item, st *storedItem, self string) (hidden, answered, resolved bool) {
+	lastAuthor, lastAt, others := it.Author, "", !isSelf(it.Author, self)
+	if st != nil {
+		resolved, others = st.resolved, others || st.others
+		if st.lastAt != "" {
+			lastAuthor, lastAt = st.lastAuthor, st.lastAt
+		}
+	}
+	for _, c := range it.Comments {
+		if at := ts(c.CreatedAt); at >= lastAt {
+			lastAuthor, lastAt = c.Author, at
+		}
+		if !isSelf(c.Author, self) {
+			others = true
+			if _, known := st.comment(c.ExternalID); !known && st != nil {
+				resolved = false // someone wrote again: waiting for an answer
+			}
+		}
+	}
+	return !others, isSelf(lastAuthor, self), resolved
 }
 
 func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr projectRef,
 	it *provider.Item, st *storedItem, self string, baseline bool,
 ) (events []Event, changed bool, err error) {
+	kind := it.Kind
+	if kind == "" {
+		kind = KindIssue
+	}
 	status := "closed"
 	if it.Open {
 		status = "open"
+	}
+	var hidden, resolved bool
+	if kind == KindComment { // open = waiting for the owner's answer
+		var answered bool
+		hidden, answered, resolved = threadState(it, st, self)
+		if hidden || answered || resolved {
+			status = "closed"
+		}
 	}
 	labels := it.Labels
 	if labels == nil {
@@ -385,12 +438,8 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		id, oldStatus, oldUpdated = st.id, st.status, st.updated
 	}
 	changed = !existed || oldStatus != status || oldUpdated != ts(it.UpdatedAt)
-	kind := it.Kind
-	if kind == "" {
-		kind = KindIssue
-	}
-	fields := [13]any{projectID, kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
-		string(lj), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt)}
+	fields := [15]any{projectID, kind, it.Number, it.Title, it.Body, it.URL, it.Author, status, it.RawStatus,
+		string(lj), ts(it.CreatedAt), ts(it.UpdatedAt), ts(it.ClosedAt), hidden, resolved}
 	args := fields[:]
 	switch {
 	case existed && fields == st.fields:
@@ -398,12 +447,12 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		// on each reconcile).
 	case existed:
 		_, err = tx.ExecContext(ctx, `UPDATE items SET project_id = ?, kind = ?, number = ?, title = ?, body = ?,
-			url = ?, author = ?, status = ?, raw_status = ?, labels = ?, created_at = ?, updated_at = ?, closed_at = ?
-			WHERE id = ?`, append(args, id)...)
+			url = ?, author = ?, status = ?, raw_status = ?, labels = ?, created_at = ?, updated_at = ?, closed_at = ?,
+			hidden = ?, resolved = ? WHERE id = ?`, append(args, id)...)
 	default:
 		err = tx.QueryRowContext(ctx, `INSERT INTO items (project_id, kind, number, title, body, url, author,
-			status, raw_status, labels, created_at, updated_at, closed_at, source_id, external_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+			status, raw_status, labels, created_at, updated_at, closed_at, hidden, resolved, source_id, external_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 			append(args, sourceID, it.ExternalID)...).Scan(&id)
 	}
 	if err != nil {
@@ -419,7 +468,7 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		}
 		events = append(events, e)
 	}
-	if !baseline && existed && oldStatus == "open" && status == "closed" {
+	if !baseline && existed && oldStatus == "open" && status == "closed" && kind != KindComment { // an answered thread is not closed on the platform
 		e := base
 		e.Kind = EventClosed
 		events = append(events, e)
@@ -519,8 +568,13 @@ func (s *Store) AddComment(ctx context.Context, itemID int64, c provider.Comment
 	if _, err := saveComment(ctx, s.db, itemID, c); err != nil {
 		return Comment{}, err
 	}
+	// The owner's reply answers a comment thread: it stops waiting (and is read).
+	if _, err := s.db.ExecContext(ctx, `UPDATE items SET status = 'closed', unread = 0
+		WHERE id = ? AND kind = 'comment' AND status = 'open' AND `+answeredSQL, itemID); err != nil {
+		return Comment{}, fmt.Errorf("store: mark answered: %w", err)
+	}
 	return Comment{
-		ExternalID: c.ExternalID, Author: c.Author, Body: c.Body, URL: c.URL,
+		ExternalID: c.ExternalID, Author: c.Author, Mine: true, Body: c.Body, URL: c.URL,
 		CreatedAt: ts(c.CreatedAt), UpdatedAt: ts(c.UpdatedAt),
 	}, nil
 }
@@ -548,6 +602,58 @@ func (s *Store) MarkRead(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetRead sets the unread flag of items ids (read = clear it) and returns how
+// many really changed. Only an open item can be unread (a closed one is never).
+func (s *Store) SetRead(ctx context.Context, ids []int64, read bool) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return 0, err
+	}
+	q := `UPDATE items SET unread = 0 WHERE unread = 1 AND id IN (SELECT value FROM json_each(?))`
+	if !read {
+		q = `UPDATE items SET unread = 1 WHERE unread = 0 AND status = 'open' AND id IN (SELECT value FROM json_each(?))`
+	}
+	res, err := s.db.ExecContext(ctx, q, string(b))
+	if err != nil {
+		return 0, fmt.Errorf("store: set read: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// answeredSQL: the newest message of comment thread items (the item itself
+// when it has no reply) is by its source's account.
+const answeredSQL = `coalesce((SELECT c.author FROM comments c WHERE c.item_id = items.id ORDER BY c.created_at DESC, c.id DESC LIMIT 1), items.author)
+	= (SELECT nullif(account, '') FROM sources WHERE id = items.source_id)`
+
+// SetResolved sets the local «Решено» flag of comment threads ids (other kinds
+// are left alone) and returns how many changed. Resolved threads are closed
+// and read; reopening one makes it wait again unless the owner answered last.
+func (s *Store) SetResolved(ctx context.Context, ids []int64, resolved bool) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	b, err := json.Marshal(ids)
+	if err != nil {
+		return 0, err
+	}
+	q := `UPDATE items SET resolved = 1, status = 'closed', unread = 0
+		WHERE kind = 'comment' AND resolved = 0 AND id IN (SELECT value FROM json_each(?))`
+	if !resolved {
+		q = `UPDATE items SET resolved = 0, status = CASE WHEN hidden = 1 OR ` + answeredSQL + ` THEN 'closed' ELSE 'open' END
+			WHERE kind = 'comment' AND resolved = 1 AND id IN (SELECT value FROM json_each(?))`
+	}
+	res, err := s.db.ExecContext(ctx, q, string(b))
+	if err != nil {
+		return 0, fmt.Errorf("store: set resolved: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // UnreadCount is the tray badge: items with unseen activity.

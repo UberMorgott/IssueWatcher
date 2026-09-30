@@ -200,7 +200,7 @@ func TestSyncStoresCommentsAndBugs(t *testing.T) {
 	got := e.items(t)
 	want := map[string]string{
 		"comment:windrose/147/103": "comment|Crash on load|open||0",
-		"comment:windrose/147/102": "comment|Works great|open||1",
+		"comment:windrose/147/102": "comment|Works great|closed||1", // the owner answered: not waiting
 		"comment:windrose/147/101": "comment|First!|open||0",
 		"bug:900":                  "bug|Ship UI missing|open|new|1",
 	}

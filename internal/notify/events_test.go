@@ -46,6 +46,27 @@ func TestCards(t *testing.T) {
 	}
 }
 
+// Mod page threads name the mod page (no internal number); a group of only
+// thread cards opens the Comments page, a mixed group Overview.
+func TestThreadCards(t *testing.T) {
+	now := time.Now()
+	c := Cards([]store.Event{
+		{Kind: store.EventNewItem, ItemKind: store.KindComment, ItemID: 1, Repo: "Mod", Number: 293770217, Title: "hi", Actor: "bob"},
+		{Kind: store.EventNewIssue, ItemKind: store.KindIssue, ItemID: 2, Repo: "o/app", Number: 3, Title: "crash"},
+	}, now)
+	if c[0].Ref != "Mod" || !c[0].Thread || c[1].Ref != "o/app#3" || c[1].Thread {
+		t.Fatalf("cards %+v", c)
+	}
+	for _, tc := range []struct {
+		cards []Card
+		want  string
+	}{{c[:1], UnreadCommentsPath}, {c[1:], UnreadPath}, {c, OverviewPath}} {
+		if got := groupCard(tc.cards, now).Target(); got != tc.want {
+			t.Errorf("group %+v → %q, want %q", tc.cards, got, tc.want)
+		}
+	}
+}
+
 func TestTarget(t *testing.T) {
 	for _, tc := range []struct {
 		c    Card

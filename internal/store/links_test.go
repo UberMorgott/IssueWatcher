@@ -44,7 +44,7 @@ func TestMigration009ProjectLinks(t *testing.T) {
 	}
 	c := item("comment:9", 1, true, t0)
 	c.Kind = KindComment
-	if _, err := s.ApplyItems(ctx, nx, mods[0].ID, []provider.Item{c}, "me"); err != nil {
+	if _, err := seedItems(ctx, db, nx, mods[0].ID, []provider.Item{c}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

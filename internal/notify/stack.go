@@ -135,8 +135,9 @@ func (s *stack) close(id uint64) bool {
 // click closes card id and returns the dashboard route it opens.
 func (s *stack) click(id uint64) (string, bool) {
 	if id != 0 && id == s.group.id {
+		path := s.group.card.Target()
 		s.clearGroup()
-		return UnreadPath, true
+		return path, true
 	}
 	for _, e := range s.cards {
 		if e.id == id {

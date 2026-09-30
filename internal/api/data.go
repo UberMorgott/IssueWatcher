@@ -21,20 +21,28 @@ import (
 //	     (group=1: one row per project, linked mod pages folded into integrations)
 //	POST /api/projects/{id}/sync         sync the project + its linked mod pages now
 //	GET  /api/items?source=&kind=&project=&state=&label=&q=&unread=1&cursor=|after=|ids=&limit=
+//	GET  /api/items/labels?kind=         distinct labels of the items (label filter)
 //	GET  /api/items/{id}                 item + body
 //	GET  /api/items/{id}/comments?cursor=&limit=  comments, oldest first, in chunks
 //	POST /api/items/{id}/read            clear unread (tray badge)
+//	POST /api/items/{id}/unread          set unread again (open items only)
+//	POST /api/items/read {ids, unread}   bulk read (unread=true: mark unread) → {changed}
+//	POST /api/items/resolve {ids, resolved}  local «Решено» flag of comment threads → {changed}
 //	POST /api/items/{id}/comments {body} reply on the platform
-//	GET  /api/stats?project=&weeks=      totals + weekly opened/closed; per-project totals when project omitted
+//	GET  /api/stats?project=&weeks=      totals + weekly series (issues and bug reports; comment threads apart); per-project totals when project omitted
 //	GET  /api/sync   POST /api/sync       poller status / sync now
 //
 // Legacy query alias: repo= (= project=).
 func (s *Server) registerData(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects", s.handleRepos)
 	mux.HandleFunc("GET /api/items", s.handleIssues)
+	mux.HandleFunc("GET /api/items/labels", s.handleItemLabels)
 	mux.HandleFunc("GET /api/items/{id}", s.handleIssue)
 	mux.HandleFunc("GET /api/items/{id}/comments", s.handleComments)
 	mux.HandleFunc("POST /api/items/{id}/read", s.handleRead)
+	mux.HandleFunc("POST /api/items/{id}/unread", s.handleUnread)
+	mux.HandleFunc("POST /api/items/read", s.handleReadMany)
+	mux.HandleFunc("POST /api/items/resolve", s.handleResolve)
 	mux.HandleFunc("POST /api/items/{id}/comments", s.handleReply)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/sync", s.handleSyncStatus)
@@ -149,23 +157,17 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	f.RepoID, f.Limit = repo, int(min(limit, 1000))
 	switch st := q.Get("state"); st {
 	case "", "all":
-	case "open", "closed":
+	case "open", "closed", "resolved":
 		f.State = st
 	default:
 		errJSON(w, http.StatusBadRequest, "bad state")
 		return
 	}
-	if v := q.Get("kind"); v != "" { // one kind or a comma list (issue,bug)
-		for k := range strings.SplitSeq(v, ",") {
-			switch k {
-			case store.KindIssue, store.KindComment, store.KindBug:
-				f.Kinds = append(f.Kinds, k)
-			default:
-				errJSON(w, http.StatusBadRequest, "bad kind")
-				return
-			}
-		}
+	kinds, ok := queryKinds(w, r)
+	if !ok {
+		return
 	}
+	f.Kinds = kinds
 	if v := q.Get("ids"); v != "" {
 		for part := range strings.SplitSeq(v, ",") {
 			id, err := strconv.ParseInt(part, 10, 64)
@@ -188,6 +190,39 @@ func (s *Server) handleIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, chunk)
+}
+
+// queryKinds reads kind= (one kind or a comma list: issue,bug); false after a 400.
+func queryKinds(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	v := r.URL.Query().Get("kind")
+	if v == "" {
+		return nil, true
+	}
+	var kinds []string
+	for k := range strings.SplitSeq(v, ",") {
+		switch k {
+		case store.KindIssue, store.KindComment, store.KindBug:
+			kinds = append(kinds, k)
+		default:
+			errJSON(w, http.StatusBadRequest, "bad kind")
+			return nil, false
+		}
+	}
+	return kinds, true
+}
+
+// handleItemLabels lists the distinct labels of the items of kind= (label filter).
+func (s *Server) handleItemLabels(w http.ResponseWriter, r *http.Request) {
+	kinds, ok := queryKinds(w, r)
+	if !ok {
+		return
+	}
+	labels, err := s.opts.Store.ItemLabels(r.Context(), kinds)
+	if err != nil {
+		s.internalError(w, "item labels", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, labels)
 }
 
 func (s *Server) handleComments(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +283,92 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	s.dataChanged("read", id)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUnread sets item id unread again (a closed item stays read) → 204.
+func (s *Server) handleUnread(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.opts.Store.SetRead(r.Context(), []int64{id}, false); err != nil {
+		s.internalError(w, "mark unread", err)
+		return
+	}
+	s.unreadChanged("unread", []int64{id})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// itemIDs reads a bulk action body {ids: [...], <flag>: bool}.
+func itemIDs(w http.ResponseWriter, r *http.Request, flag string) ([]int64, bool, bool) {
+	var req map[string]json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return nil, false, false
+	}
+	var (
+		ids []int64
+		on  bool
+	)
+	if err := json.Unmarshal(req["ids"], &ids); err != nil || len(ids) == 0 || len(ids) > store.MaxIDs {
+		errJSON(w, http.StatusBadRequest, "bad ids")
+		return nil, false, false
+	}
+	if v, ok := req[flag]; ok {
+		if err := json.Unmarshal(v, &on); err != nil {
+			errJSON(w, http.StatusBadRequest, "bad "+flag)
+			return nil, false, false
+		}
+	}
+	return ids, on, true
+}
+
+// handleReadMany marks items read ({ids}) or unread ({ids, unread: true}) →
+// {changed}: the items whose flag really changed.
+func (s *Server) handleReadMany(w http.ResponseWriter, r *http.Request) {
+	ids, unread, ok := itemIDs(w, r, "unread")
+	if !ok {
+		return
+	}
+	n, err := s.opts.Store.SetRead(r.Context(), ids, !unread)
+	if err != nil {
+		s.internalError(w, "mark read", err)
+		return
+	}
+	if n > 0 {
+		s.unreadChanged("read", ids)
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"changed": n})
+}
+
+// handleResolve sets ({ids, resolved: true}) or clears the local «Решено» flag
+// of comment threads → {changed}. Nothing is sent to the platform.
+func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
+	ids, resolved, ok := itemIDs(w, r, "resolved")
+	if !ok {
+		return
+	}
+	n, err := s.opts.Store.SetResolved(r.Context(), ids, resolved)
+	if err != nil {
+		s.internalError(w, "resolve", err)
+		return
+	}
+	if n > 0 {
+		s.unreadChanged("resolve", ids)
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"changed": n})
+}
+
+// unreadChanged refreshes the tray badge and tells open pages which items changed.
+func (s *Server) unreadChanged(reason string, ids []int64) {
+	if s.opts.OnUnreadChange != nil {
+		s.opts.OnUnreadChange()
+	}
+	if len(ids) == 1 {
+		s.dataChanged(reason, ids[0])
+		return
+	}
+	s.dataChanged(reason, 0)
 }
 
 // maxCommentBytes bounds a reply (GitHub caps comment bodies at 65536 characters).

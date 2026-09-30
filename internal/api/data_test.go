@@ -76,7 +76,11 @@ func TestReposIssuesAndDetail(t *testing.T) {
 			}
 		}
 	}
-	for _, bad := range []string{"/api/items?state=weird", "/api/items?limit=-1", "/api/items?repo=x", "/api/items?cursor=zz", "/api/items?ids=1,x", "/api/projects?limit=5&sort=bogus"} {
+	var labels []string
+	if code := e.call(t, http.MethodGet, "/api/items/labels?kind=issue", "", &labels); code != http.StatusOK || len(labels) == 0 {
+		t.Errorf("labels: %d %v", code, labels)
+	}
+	for _, bad := range []string{"/api/items/labels?kind=x", "/api/items?state=weird", "/api/items?limit=-1", "/api/items?repo=x", "/api/items?cursor=zz", "/api/items?ids=1,x", "/api/projects?limit=5&sort=bogus"} {
 		if code := e.call(t, http.MethodGet, bad, "", nil); code != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400", bad, code)
 		}
@@ -106,6 +110,25 @@ func TestReposIssuesAndDetail(t *testing.T) {
 	e.call(t, http.MethodGet, "/api/items/"+id, "", &d)
 	if d.Unread {
 		t.Fatal("still unread")
+	}
+
+	// Bulk: unread again, read (only the rows that changed count), resolve (comment threads only).
+	var res struct{ Changed int }
+	if code := e.call(t, http.MethodPost, "/api/items/read", `{"ids":[`+id+`],"unread":true}`, &res); code != http.StatusOK || res.Changed != 1 {
+		t.Fatalf("bulk unread: %d %+v", code, res)
+	}
+	<-e.unread
+	if code := e.call(t, http.MethodPost, "/api/items/read", `{"ids":[`+id+`,9999]}`, &res); code != http.StatusOK || res.Changed != 1 {
+		t.Fatalf("bulk read: %d %+v", code, res)
+	}
+	<-e.unread
+	if code := e.call(t, http.MethodPost, "/api/items/resolve", `{"ids":[`+id+`],"resolved":true}`, &res); code != http.StatusOK || res.Changed != 0 {
+		t.Fatalf("resolve an issue: %d %+v", code, res)
+	}
+	for _, bad := range []string{`{}`, `{"ids":[]}`, `{"ids":[1],"unread":"x"}`, `nope`} {
+		if code := e.call(t, http.MethodPost, "/api/items/read", bad, nil); code != http.StatusBadRequest {
+			t.Errorf("bulk read %s: %d, want 400", bad, code)
+		}
 	}
 }
 

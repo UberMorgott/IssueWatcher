@@ -22,8 +22,10 @@ type Repo struct {
 	Closed   int    `json:"closed"`
 	Unread   int    `json:"unread"`
 	// UnreadComments / OpenComments: the unread / open items of kind comment (mod page threads); the rest are issues and bug reports.
-	UnreadComments int    `json:"unreadComments"`
-	OpenComments   int    `json:"openComments"`
+	UnreadComments int `json:"unreadComments"`
+	OpenComments   int `json:"openComments"`
+	// ClosedComments: comment threads answered or resolved (flat list only; 0 in the grouped list).
+	ClosedComments int    `json:"closedComments"`
 	LocalPath      string `json:"localPath"` // mapped local folder, "" = none
 	LastSync       string `json:"lastSync"`
 	SyncedAt       string `json:"syncedAt"` // legacy alias of lastSync
@@ -83,9 +85,10 @@ const reposSelect = `SELECT p.id, p.name, p.url, s.platform, s.platform || ':' |
 		count(i.id) FILTER (WHERE i.status = 'closed'),
 		count(i.id) FILTER (WHERE i.unread = 1),
 		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment'),
-		count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment')
+		count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment'),
+		count(i.id) FILTER (WHERE i.status = 'closed' AND i.kind = 'comment')
 		FROM projects p JOIN sources s ON s.id = p.source_id
-		LEFT JOIN items i ON i.project_id = p.id
+		LEFT JOIN items i ON i.project_id = p.id AND i.hidden = 0
 		WHERE `
 
 func (s *Store) repos(ctx context.Context, where string, args ...any) ([]Repo, error) {
@@ -101,7 +104,7 @@ func (s *Store) repos(ctx context.Context, where string, args ...any) ([]Repo, e
 			r     Repo
 			links string
 		)
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread, &r.UnreadComments, &r.OpenComments); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Platform, &r.Key, &r.LocalPath, &r.LastSync, &r.LinkedTo, &links, &r.Open, &r.Closed, &r.Unread, &r.UnreadComments, &r.OpenComments, &r.ClosedComments); err != nil {
 			return nil, fmt.Errorf("store: scan repo: %w", err)
 		}
 		r.Links = parseIDs(links)
@@ -167,7 +170,7 @@ func (s *Store) ReposChunk(ctx context.Context, q RepoQuery) (RepoChunk, error) 
 		count(i.id) FILTER (WHERE i.unread = 1 AND i.kind = 'comment') AS unread_comments,
 	count(i.id) FILTER (WHERE i.status = 'open' AND i.kind = 'comment') AS open_comments
 		FROM projects p JOIN sources s ON s.id = p.source_id
-		LEFT JOIN items i ON i.project_id = p.id
+		LEFT JOIN items i ON i.project_id = p.id AND i.hidden = 0
 		WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\') GROUP BY p.id`
 	count := `SELECT count(*) FROM projects p WHERE p.active = 1 AND (?1 = '' OR p.name LIKE ?1 ESCAPE '\')`
 	if q.Group {
@@ -235,9 +238,9 @@ type IssueFilter struct {
 	Platform string   // source platform (github, ...), "" = all
 	Kinds    []string // item kinds (issue | comment | bug), empty = all
 	RepoID   int64    // 0 = all; a code project includes its linked mod pages' items
-	State    string   // open | closed | "" (all)
+	State    string   // open | closed | resolved | "" (all); a comment thread is open while it waits for an answer
 	Label    string   // exact label name
-	Text     string   // substring of title/body, or #number
+	Text     string   // substring of title/body/replies; a number (#12) also matches the item number
 	Unread   bool
 	IDs      []int64 // only these items, still matching the filter (live patching; max 500)
 	Cursor   string  // rows after this one (older): the next chunk
@@ -256,7 +259,9 @@ type Issue struct {
 	Title     string    `json:"title"`
 	URL       string    `json:"url"`
 	Author    string    `json:"author"`
-	State     string    `json:"state"`
+	Mine      bool      `json:"mine"`  // written by the synced account (the owner)
+	State     string    `json:"state"` // comment threads: open = waiting for an answer, closed = answered or resolved
+	Resolved  bool      `json:"resolved"`
 	RawStatus string    `json:"rawStatus"`
 	Labels    []string  `json:"labels"`
 	Comments  int       `json:"comments"`
@@ -282,16 +287,18 @@ type IssueChunk struct {
 
 // IssueCounts are the header counters of a filtered issue list.
 type IssueCounts struct {
-	Open   int `json:"open"`
-	Closed int `json:"closed"`
-	Unread int `json:"unread"`
+	Open     int `json:"open"`
+	Closed   int `json:"closed"`
+	Unread   int `json:"unread"`
+	Resolved int `json:"resolved"` // comment threads marked «Решено» (part of closed)
 }
 
 // MaxIDs bounds IssueFilter.IDs.
 const MaxIDs = 500
 const issueColumns = `i.id, i.project_id, p.name, i.number, i.title, i.url, i.author, i.status, i.raw_status,
 	i.labels, (SELECT count(*) FROM comments c WHERE c.item_id = i.id), i.unread, i.created_at, i.updated_at, i.closed_at,
-	i.kind, (SELECT platform FROM sources WHERE id = p.source_id)`
+	i.kind, (SELECT platform FROM sources WHERE id = p.source_id), i.resolved,
+	i.author = (SELECT nullif(account, '') FROM sources WHERE id = i.source_id) IS 1`
 
 func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 	var (
@@ -299,7 +306,8 @@ func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 		labels string
 	)
 	err := sc.Scan(&is.ID, &is.RepoID, &is.Repo, &is.Number, &is.Title, &is.URL, &is.Author, &is.State,
-		&is.RawStatus, &labels, &is.Comments, &is.Unread, &is.CreatedAt, &is.UpdatedAt, &is.ClosedAt, &is.Kind, &is.Platform)
+		&is.RawStatus, &labels, &is.Comments, &is.Unread, &is.CreatedAt, &is.UpdatedAt, &is.ClosedAt, &is.Kind, &is.Platform,
+		&is.Resolved, &is.Mine)
 	if err != nil {
 		return is, err
 	}
@@ -312,7 +320,7 @@ func scanIssue(sc interface{ Scan(...any) error }) (Issue, error) {
 // Issues returns a chunk of the filtered list, most recently updated first.
 func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	limit := clampLimit(f.Limit)
-	where := []string{"p.active = 1"}
+	where := []string{"p.active = 1", "i.hidden = 0"}
 	var args []any
 	if f.RepoID != 0 {
 		where, args = append(where, scopeItemQ), append(args, f.RepoID, f.RepoID)
@@ -330,25 +338,34 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 		where, args = append(where, "EXISTS (SELECT 1 FROM json_each(i.labels) WHERE value = ?)"), append(args, f.Label)
 	}
 	if t := strings.TrimSpace(f.Text); t != "" {
+		// Text matches the title, the body and the replies; "12" or "#12" also the item number.
+		like := "%" + likeEscape(t) + "%"
+		text := `(i.title LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM comments c WHERE c.item_id = i.id AND c.body LIKE ? ESCAPE '\'))`
 		if n, err := strconv.Atoi(strings.TrimPrefix(t, "#")); err == nil {
-			where, args = append(where, "i.number = ?"), append(args, n)
+			if strings.HasPrefix(t, "#") {
+				where, args = append(where, "i.number = ?"), append(args, n)
+			} else {
+				where, args = append(where, "(i.number = ? OR "+text+")"), append(args, n, like, like, like)
+			}
 		} else {
-			like := "%" + likeEscape(t) + "%"
-			where = append(where, `(i.title LIKE ? ESCAPE '\' OR i.body LIKE ? ESCAPE '\')`)
-			args = append(args, like, like)
+			where, args = append(where, text), append(args, like, like, like)
 		}
 	}
 	chunk := IssueChunk{Items: []Issue{}}
 	if len(f.IDs) == 0 && f.Cursor == "" { // header counters (first chunk, head refresh): every filter but state and unread
 		var n IssueCounts
-		if err := s.rd.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1)"+
-			" FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).Scan(&n.Open, &n.Closed, &n.Unread); err != nil {
+		if err := s.rd.QueryRowContext(ctx, "SELECT count(*) FILTER (WHERE i.status = 'open'), count(*) FILTER (WHERE i.status = 'closed'), count(*) FILTER (WHERE i.unread = 1),"+
+			" count(*) FILTER (WHERE i.resolved = 1) FROM items i JOIN projects p ON p.id = i.project_id WHERE "+strings.Join(where, " AND "), args...).
+			Scan(&n.Open, &n.Closed, &n.Unread, &n.Resolved); err != nil {
 			return chunk, fmt.Errorf("store: count issues: %w", err)
 		}
 		chunk.Counts = &n
 	}
-	if f.State == "open" || f.State == "closed" {
+	switch f.State {
+	case "open", "closed":
 		where, args = append(where, "i.status = ?"), append(args, f.State)
+	case "resolved":
+		where = append(where, "i.resolved = 1")
 	}
 	if f.Unread {
 		where = append(where, "i.unread = 1")
@@ -419,10 +436,40 @@ func (s *Store) Issues(ctx context.Context, f IssueFilter) (IssueChunk, error) {
 	return chunk, nil
 }
 
+// ItemLabels lists the distinct labels of active projects' items of kinds
+// (empty = all), by name: the list's label filter offers every label, not only
+// those of the loaded rows.
+func (s *Store) ItemLabels(ctx context.Context, kinds []string) ([]string, error) {
+	q := `SELECT DISTINCT l.value FROM items i JOIN projects p ON p.id = i.project_id, json_each(i.labels) l
+		WHERE p.active = 1 AND i.hidden = 0`
+	args := make([]any, 0, len(kinds))
+	if len(kinds) > 0 {
+		q += " AND i.kind IN (?" + strings.Repeat(", ?", len(kinds)-1) + ")"
+		for _, k := range kinds {
+			args = append(args, k)
+		}
+	}
+	rows, err := s.rd.QueryContext(ctx, q+" ORDER BY l.value COLLATE NOCASE", args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: item labels: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []string{}
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			return nil, fmt.Errorf("store: item labels: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // Comment is a stored comment (API shape).
 type Comment struct {
 	ExternalID string `json:"id"`
 	Author     string `json:"author"`
+	Mine       bool   `json:"mine"` // written by the synced account (the owner)
 	Body       string `json:"body"`
 	URL        string `json:"url"`
 	CreatedAt  string `json:"createdAt"`
@@ -488,7 +535,8 @@ type CommentChunk struct {
 func (s *Store) Comments(ctx context.Context, id int64, cursor string, limit int) (CommentChunk, error) {
 	limit = clampLimit(limit)
 	chunk := CommentChunk{Items: []Comment{}}
-	q := `SELECT id, external_id, author, body, url, created_at, updated_at FROM comments WHERE item_id = ?`
+	q := `SELECT id, external_id, author, author = (SELECT nullif(s.account, '') FROM items it JOIN sources s ON s.id = it.source_id WHERE it.id = ?1) IS 1,
+		body, url, created_at, updated_at FROM comments WHERE item_id = ?1`
 	args := []any{id}
 	if cursor != "" {
 		k, err := decodeCursor(cursor)
@@ -506,7 +554,7 @@ func (s *Store) Comments(ctx context.Context, id int64, cursor string, limit int
 	var lastID int64
 	for rows.Next() {
 		var c Comment
-		if err := rows.Scan(&lastID, &c.ExternalID, &c.Author, &c.Body, &c.URL, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&lastID, &c.ExternalID, &c.Author, &c.Mine, &c.Body, &c.URL, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return chunk, fmt.Errorf("store: scan comment: %w", err)
 		}
 		if len(chunk.Items) == limit {
@@ -529,18 +577,24 @@ type scanFunc func(dst ...any) error
 
 func (f scanFunc) Scan(dst ...any) error { return f(dst...) }
 
-// Week is one bucket of the weekly chart (weeks start Monday, UTC).
+// Week is one bucket of the weekly chart (weeks start Monday, UTC): issues
+// and bug reports opened / closed, and new comment threads (their own series).
 type Week struct {
-	Start  string `json:"start"` // YYYY-MM-DD
-	Opened int    `json:"opened"`
-	Closed int    `json:"closed"`
+	Start    string `json:"start"` // YYYY-MM-DD
+	Opened   int    `json:"opened"`
+	Closed   int    `json:"closed"`
+	Comments int    `json:"comments"`
 }
 
-// Stats are totals plus a weekly opened/closed series.
+// Stats are totals plus a weekly series. Open / Closed count issues and bug
+// reports only; comment threads are counted apart (OpenComments = waiting for
+// an answer, Comments = all).
 type Stats struct {
-	Open   int    `json:"open"`
-	Closed int    `json:"closed"`
-	Weekly []Week `json:"weekly"`
+	Open         int    `json:"open"`
+	Closed       int    `json:"closed"`
+	OpenComments int    `json:"openComments"`
+	Comments     int    `json:"comments"`
+	Weekly       []Week `json:"weekly"`
 }
 
 // Stats for one repo (repoID != 0) or all active repos, over the last weeks
@@ -548,10 +602,12 @@ type Stats struct {
 func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Time) (Stats, error) {
 	weeks = min(max(weeks, 1), 520)
 	st := Stats{}
-	err := s.rd.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE i.status = 'open'),
-		count(*) FILTER (WHERE i.status = 'closed')
+	err := s.rd.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE i.status = 'open' AND i.kind <> 'comment'),
+		count(*) FILTER (WHERE i.status = 'closed' AND i.kind <> 'comment'),
+		count(*) FILTER (WHERE i.status = 'open' AND i.kind = 'comment'),
+		count(*) FILTER (WHERE i.kind = 'comment')
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`)`, repoID).Scan(&st.Open, &st.Closed)
+		WHERE p.active = 1 AND i.hidden = 0 AND (?1 = 0 OR `+scopeItem1+`)`, repoID).Scan(&st.Open, &st.Closed, &st.OpenComments, &st.Comments)
 	if err != nil {
 		return st, fmt.Errorf("store: stats totals: %w", err)
 	}
@@ -568,14 +624,14 @@ func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Tim
 	}
 
 	// date(x, '-6 days', 'weekday 1') = Monday on or before x.
-	rows, err := s.rd.QueryContext(ctx, `SELECT wk, sum(opened), sum(closed) FROM (
-		SELECT date(i.created_at, '-6 days', 'weekday 1') AS wk, 1 AS opened, 0 AS closed
+	rows, err := s.rd.QueryContext(ctx, `SELECT wk, sum(opened), sum(closed), sum(comments) FROM (
+		SELECT date(i.created_at, '-6 days', 'weekday 1') AS wk, i.kind <> 'comment' AS opened, 0 AS closed, i.kind = 'comment' AS comments
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`) AND i.created_at >= ?2
+		WHERE p.active = 1 AND i.hidden = 0 AND (?1 = 0 OR `+scopeItem1+`) AND i.created_at >= ?2
 		UNION ALL
-		SELECT date(i.closed_at, '-6 days', 'weekday 1'), 0, 1
+		SELECT date(i.closed_at, '-6 days', 'weekday 1'), 0, 1, 0
 		FROM items i JOIN projects p ON p.id = i.project_id
-		WHERE p.active = 1 AND (?1 = 0 OR `+scopeItem1+`) AND i.closed_at >= ?2
+		WHERE p.active = 1 AND i.kind <> 'comment' AND (?1 = 0 OR `+scopeItem1+`) AND i.closed_at >= ?2
 	) GROUP BY wk`, repoID, first.Format(timeFormat))
 	if err != nil {
 		return st, fmt.Errorf("store: stats weekly: %w", err)
@@ -583,14 +639,14 @@ func (s *Store) Stats(ctx context.Context, repoID int64, weeks int, now time.Tim
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
-			wk             string
-			opened, closed int
+			wk                       string
+			opened, closed, comments int
 		)
-		if err := rows.Scan(&wk, &opened, &closed); err != nil {
+		if err := rows.Scan(&wk, &opened, &closed, &comments); err != nil {
 			return st, fmt.Errorf("store: scan week: %w", err)
 		}
 		if w, ok := idx[wk]; ok {
-			st.Weekly[w].Opened, st.Weekly[w].Closed = opened, closed
+			st.Weekly[w].Opened, st.Weekly[w].Closed, st.Weekly[w].Comments = opened, closed, comments
 		}
 	}
 	if err := rows.Err(); err != nil {
