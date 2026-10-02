@@ -48,6 +48,8 @@ type Capabilities struct {
 	Markdown bool `json:"markdown,omitempty"`
 	// Publish: the provider is a Publisher (new mod file versions from the app).
 	Publish bool `json:"publish,omitempty"`
+	// EditPage: the provider is a PageEditor (mod page name, summary, description, version).
+	EditPage bool `json:"editPage,omitempty"`
 }
 
 // DefaultMaxReply is the reply limit of a platform without its own

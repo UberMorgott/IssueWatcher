@@ -81,6 +81,9 @@ type Options struct {
 	// Publishers returns the provider that publishes new versions for a
 	// platform, nil when none (/api/projects/{id}/publish, needs Store); nil disables them.
 	Publishers func(platform string) provider.Publisher
+	// PageEditors returns the provider that edits mod pages for a platform,
+	// nil when none (/api/projects/{id}/page, needs Store); nil disables them.
+	PageEditors func(platform string) provider.PageEditor
 	// Platforms reports and checks the platform accounts (/api/platforms); nil disables them.
 	Platforms Platforms
 }
@@ -176,6 +179,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Publishers != nil && opts.Store != nil {
 		s.registerPublish(mux)
+	}
+	if opts.PageEditors != nil && opts.Store != nil {
+		s.registerModPage(mux)
 	}
 	if opts.Platforms != nil {
 		s.registerPlatforms(mux)

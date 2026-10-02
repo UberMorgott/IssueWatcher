@@ -818,6 +818,8 @@ export interface Capabilities {
   maxReply?: number
   /** The provider publishes new mod file versions from the app (Nexus with the API key store). */
   publish?: boolean
+  /** The provider edits mod pages (name, summary, description, version) from the app. */
+  editPage?: boolean
 }
 
 export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'error'
@@ -988,6 +990,37 @@ export interface PublishTask {
   errorCode?: 'no_api_key' | 'bad_api_key' | 'upload_failed' | 'publish_failed' | 'cancelled'
   startedAt: string
   finishedAt?: string
+}
+
+/** GET /api/projects/{id}/page: the mod editor's General tab (internal/provider/modpage.go). */
+export interface ModPage {
+  name: string
+  /** Plain text, line breaks as \n. */
+  summary: string
+  /** BBCode. */
+  description: string
+  version: string
+  category?: string
+  author?: string
+  tags: string[]
+  url: string
+  maxSummary?: number
+}
+
+/** PUT /api/projects/{id}/page; an omitted field stays as loaded. */
+export interface ModPageEdit {
+  name?: string
+  summary?: string
+  description?: string
+  version?: string
+  dryRun?: boolean
+}
+
+export interface ModPageSave {
+  dryRun?: boolean
+  changed: string[]
+  request: PublishStep
+  saved?: boolean
 }
 
 /** A Nexus mod page the publish / page dialogs act on (ProjectsView row menu). */

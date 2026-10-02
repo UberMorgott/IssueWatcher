@@ -805,6 +805,19 @@ func (m *modPlatforms) Publisher(platform string) provider.Publisher {
 	return p
 }
 
+// PageEditor is the running provider of platform that edits mod pages
+// (api.Options.PageEditors); nil when it is off or cannot.
+func (m *modPlatforms) PageEditor(platform string) provider.PageEditor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mp := m.live[platform]
+	if mp == nil || !mp.prov.Capabilities().EditPage {
+		return nil
+	}
+	p, _ := mp.prov.(provider.PageEditor)
+	return p
+}
+
 func (mp *modPlatform) provOK() (*nexus.Provider, bool) {
 	if mp == nil {
 		return nil, false

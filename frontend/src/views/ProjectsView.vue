@@ -14,6 +14,7 @@ import PlatformIcon from '../components/PlatformIcon.vue'
 import FolderDialog from '../components/FolderDialog.vue'
 import LinkDialog from '../components/LinkDialog.vue'
 import PublishDialog from '../components/PublishDialog.vue'
+import ModPageDialog from '../components/ModPageDialog.vue'
 import Menu from 'primevue/menu'
 import type { MenuItem } from 'primevue/menuitem'
 import { isModPlatform, platformName } from '../lib/platforms'
@@ -261,18 +262,36 @@ function nexusPages(r: Repo): PublishTarget[] {
     .filter((c) => c.platform === 'nexus')
     .map((c) => ({ projectId: c.id, name: c.name, url: c.url, folder }))
 }
-const canPublish = (r: Repo) => !!app.caps('nexus').publish && nexusPages(r).length > 0
+const canPublish = (r: Repo) => (!!app.caps('nexus').publish || !!app.caps('nexus').editPage) && nexusPages(r).length > 0
+// «Изменить страницу мода»: the mod editor's General tab (ModPageDialog).
+const pageOpen = ref(false)
+const pageTarget = ref<PublishTarget | null>(null)
 function openNexusMenu(e: Event, r: Repo) {
   const pages = nexusPages(r)
-  const named = pages.length > 1
-  nexusItems.value = pages.map((p) => ({
-    label: named ? `${t('publish.action')} · ${p.name}` : t('publish.action'),
-    icon: 'pi pi-upload',
-    command: () => {
-      publishTarget.value = p
-      publishOpen.value = true
-    },
-  }))
+  const named = (label: string, p: PublishTarget) => (pages.length > 1 ? `${label} · ${p.name}` : label)
+  const caps = app.caps('nexus')
+  nexusItems.value = pages.flatMap((p) => [
+    ...(caps.publish
+      ? [{
+          label: named(t('publish.action'), p),
+          icon: 'pi pi-upload',
+          command: () => {
+            publishTarget.value = p
+            publishOpen.value = true
+          },
+        }]
+      : []),
+    ...(caps.editPage
+      ? [{
+          label: named(t('modPage.action'), p),
+          icon: 'pi pi-pencil',
+          command: () => {
+            pageTarget.value = p
+            pageOpen.value = true
+          },
+        }]
+      : []),
+  ])
   nexusMenu.value?.toggle(e)
 }
 
@@ -327,6 +346,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
         <PublishDialog
           v-model:visible="publishOpen"
           :target="publishTarget"
+        />
+        <ModPageDialog
+          v-model:visible="pageOpen"
+          :target="pageTarget"
         />
         <Menu
           ref="nexusMenu"

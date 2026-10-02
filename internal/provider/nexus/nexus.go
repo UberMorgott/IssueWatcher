@@ -105,9 +105,11 @@ func (p *Provider) Platform() string { return Platform }
 
 // Capabilities implements provider.Provider.
 func (p *Provider) Capabilities() provider.Capabilities {
+	_, site := p.b.(*native) // the mod page editor goes through the site (modpage.go)
 	return provider.Capabilities{
 		ListProjects: true, SyncItems: true, ListComments: true, Reply: canReply,
 		Auth: provider.AuthCookieSession, Kinds: []string{store.KindComment, store.KindBug}, ReplyThreaded: true, Publish: p.v3 != nil,
+		EditPage: site,
 	}
 }
 

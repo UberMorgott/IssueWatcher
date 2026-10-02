@@ -33,6 +33,9 @@ import type {
   SteamUpdate,
   ProjectLinks,
   NexusKeyStatus,
+  ModPage,
+  ModPageEdit,
+  ModPageSave,
   PublishRequest,
   PublishResult,
   PublishTargets,
@@ -278,6 +281,9 @@ export const api = {
   publish: (id: number, req: PublishRequest) => call<PublishTask>('POST', `/api/projects/${id}/publish`, { ...req, dryRun: false }),
   publishTask: (taskId: string) => call<PublishTask>('GET', `/api/publish/${encodeURIComponent(taskId)}`),
   cancelPublish: (taskId: string) => call<PublishTask | undefined>('DELETE', `/api/publish/${encodeURIComponent(taskId)}`),
+  /** Mod page editor (Nexus): read as the site's editor loads it; save (dryRun = the request only). */
+  modPage: (id: number) => call<ModPage>('GET', `/api/projects/${id}/page`),
+  saveModPage: (id: number, edit: ModPageEdit) => call<ModPageSave>('PUT', `/api/projects/${id}/page`, edit),
   /** Native file dialog (desktop only; 409 {code: unavailable|busy}); initial: a folder or a file. */
   pickFile: (body: { title?: string; initial?: string }) => call<{ path: string; cancelled: boolean }>('POST', '/api/dialog/file', body),
   links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),
