@@ -75,6 +75,8 @@ type Options struct {
 	Picker FolderPicker
 	// Steam is the Steam provider's account settings (/api/providers/steam); nil disables them.
 	Steam SteamSettings
+	// NexusKey is the Nexus API key store (/api/providers/nexus); nil disables it.
+	NexusKey NexusKeys
 	// Platforms reports and checks the platform accounts (/api/platforms); nil disables them.
 	Platforms Platforms
 }
@@ -163,6 +165,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Steam != nil {
 		s.registerSteam(mux)
+	}
+	if opts.NexusKey != nil {
+		s.registerNexus(mux)
 	}
 	if opts.Platforms != nil {
 		s.registerPlatforms(mux)
