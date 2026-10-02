@@ -156,6 +156,46 @@ func TestPublishDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// A new file: POST /mod-files with exactly CreateModFileRequest's fields
+// (mod uid from GET mod; no archive / previous-version fields), sent once.
+func TestPublishNewFileExactBody(t *testing.T) {
+	f := newFakeNexus(t)
+	path, _ := writeArchive(t, 1200)
+	req := provider.PublishRequest{NewFile: true, Path: path, Name: "Wartales MP tools", Version: "0.3.0", Category: "optional",
+		Description: "Server tools", PrimaryModManagerDownload: new(false), AllowModManagerDownload: new(true),
+		ShowRequirementsPopUp: new(true), UpdateModVersion: false}
+	res, err := f.provider().Publish(t.Context(), mod202, req, nil)
+	if err != nil || res.FileID != "file-new" || res.FileName != "Wartales MP tools" || res.UploadID != fakeUploadID || res.VersionID != "" {
+		t.Fatalf("new file %+v %v", res, err)
+	}
+	f.mu.Lock()
+	body := string(f.bodies["POST /mod-files"])
+	f.mu.Unlock()
+	want := `{"upload_id":"` + fakeUploadID + `","mod_id":"mod-uid-202","name":"Wartales MP tools","version":"0.3.0",` +
+		`"description":"Server tools","file_category":"optional","primary_mod_manager_download":false,` +
+		`"allow_mod_manager_download":true,"show_requirements_pop_up":true,"update_mod_version":false}`
+	if body != want {
+		t.Fatalf("POST /mod-files body\n%s\nwant\n%s", body, want)
+	}
+	if n := f.count("POST /mod-files"); n != 1 {
+		t.Fatalf("POST /mod-files sent %d times", n)
+	}
+	if n := f.count("POST /mod-files/file-main/versions"); n != 0 {
+		t.Fatal("a new file also posted a version")
+	}
+
+	// The dry run plans the same body with the upload id placeholder.
+	req.DryRun = true
+	plan, err := f.provider().Publish(t.Context(), mod202, req, nil)
+	if err != nil || len(plan.Plan) != 6 || !strings.HasSuffix(plan.Plan[5].URL, "/v3/mod-files") {
+		t.Fatalf("plan %+v %v", plan.Plan, err)
+	}
+	b, _ := json.Marshal(plan.Plan[5].Body)
+	if string(b) != strings.Replace(want, fakeUploadID, planUploadID, 1) {
+		t.Fatalf("planned body %s", b)
+	}
+}
+
 func TestCheckPublish(t *testing.T) {
 	f := newFakeNexus(t)
 	p := f.provider()
@@ -174,6 +214,15 @@ func TestCheckPublish(t *testing.T) {
 		"path+upload":    func(r *provider.PublishRequest) { r.UploadID = fakeUploadID },
 		"no archive":     func(r *provider.PublishRequest) { r.Path = "" },
 		"no target file": func(r *provider.PublishRequest) { r.FileID = "" },
+		"file+new file":  func(r *provider.PublishRequest) { r.NewFile = true },
+		"new file archive": func(r *provider.PublishRequest) {
+			r.FileID, r.NewFile, r.ArchivePrevious = "", true, true
+		},
+	}
+	nf := ok
+	nf.FileID, nf.NewFile = "", true
+	if err := p.CheckPublish(mod202, nf); err != nil {
+		t.Fatalf("new file: %v", err)
 	}
 	for name, mut := range bad {
 		r := ok

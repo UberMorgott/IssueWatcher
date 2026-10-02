@@ -98,9 +98,11 @@ func (p *Provider) CheckPublish(project provider.Project, req provider.PublishRe
 		return badPublish("%v", err)
 	}
 	switch {
-	case req.NewFile:
-		return badPublish("a new file is not supported yet")
-	case req.FileID == "":
+	case req.NewFile && req.FileID != "":
+		return badPublish("pass fileId or newFile, not both")
+	case req.NewFile && (req.ArchivePrevious || req.PreviousVersionID != ""):
+		return badPublish("archivePrevious and previousVersionId apply to a new version, not a new file")
+	case !req.NewFile && req.FileID == "":
 		return badPublish("fileId: pick the file to add the version to")
 	}
 	if req.Path == "" && req.UploadID == "" {
@@ -150,6 +152,19 @@ func versionBody(req provider.PublishRequest, uploadID string) v3VersionBody {
 	return b
 }
 
+// fileBody is the exact POST /mod-files body of req (CreateModFileRequest).
+func fileBody(req provider.PublishRequest, modUID, uploadID string) v3FileBody {
+	b := v3FileBody{
+		UploadID: uploadID, ModID: modUID, Name: req.Name, Version: req.Version, FileCategory: cmpName(req.Category, "main"),
+		PrimaryModManagerDownload: req.PrimaryModManagerDownload, AllowModManagerDownload: req.AllowModManagerDownload,
+		ShowRequirementsPopUp: req.ShowRequirementsPopUp, UpdateModVersion: req.UpdateModVersion,
+	}
+	if d := strings.TrimSpace(req.Description); d != "" {
+		b.Description = &d
+	}
+	return b
+}
+
 // planUploadID stands in for the upload id in a dry run's bodies.
 const planUploadID = "{upload_id}"
 
@@ -172,7 +187,7 @@ func (p *Provider) Publish(ctx context.Context, project provider.Project, req pr
 	}
 
 	modUID := ""
-	if req.Changelog != "" || req.DryRun {
+	if req.Changelog != "" || req.DryRun || req.NewFile {
 		progress(provider.PublishProgress{Stage: provider.StageResolve})
 		m, err := c.mod(ctx, game, mod)
 		if err != nil {
@@ -209,11 +224,19 @@ func (p *Provider) Publish(ctx context.Context, project provider.Project, req pr
 	// publish, and a second POST would publish twice. A failure keeps the
 	// upload id for a retry.
 	progress(provider.PublishProgress{Stage: provider.StagePublish})
-	r, err := c.createVersion(context.WithoutCancel(ctx), req.FileID, versionBody(req, res.UploadID))
-	if err != nil {
-		return fail(provider.StagePublish, err)
+	if req.NewFile {
+		nf, err := c.createFile(context.WithoutCancel(ctx), fileBody(req, modUID, res.UploadID))
+		if err != nil {
+			return fail(provider.StagePublish, err)
+		}
+		res.FileID, res.FileName = nf.ID, nf.Name
+	} else {
+		r, err := c.createVersion(context.WithoutCancel(ctx), req.FileID, versionBody(req, res.UploadID))
+		if err != nil {
+			return fail(provider.StagePublish, err)
+		}
+		res.FileID, res.FileName, res.VersionID = r.File.ID, r.File.Name, r.Version.ID
 	}
-	res.FileID, res.FileName, res.VersionID = r.File.ID, r.File.Name, r.Version.ID
 
 	if req.Changelog != "" {
 		progress(provider.PublishProgress{Stage: provider.StageChangelog})
@@ -243,8 +266,13 @@ func (p *Provider) plan(c *v3, req provider.PublishRequest, res provider.Publish
 			provider.PublishStep{Method: http.MethodGet, URL: base + "/uploads/" + uploadID, Note: "until state is available"},
 		)
 	}
-	steps = append(steps, provider.PublishStep{Method: http.MethodPost, URL: base + "/mod-files/" + url.PathEscape(req.FileID) + "/versions",
-		Body: versionBody(req, uploadID), Note: "sent once"})
+	if req.NewFile {
+		steps = append(steps, provider.PublishStep{Method: http.MethodPost, URL: base + "/mod-files",
+			Body: fileBody(req, modUID, uploadID), Note: "sent once"})
+	} else {
+		steps = append(steps, provider.PublishStep{Method: http.MethodPost, URL: base + "/mod-files/" + url.PathEscape(req.FileID) + "/versions",
+			Body: versionBody(req, uploadID), Note: "sent once"})
+	}
 	if req.Changelog != "" {
 		steps = append(steps, provider.PublishStep{Method: http.MethodPost, URL: base + "/mods/" + url.PathEscape(modUID) + "/changelogs",
 			Body: map[string]string{"version": req.Version, "changelog": req.Changelog}})
