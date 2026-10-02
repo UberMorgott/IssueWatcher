@@ -1,5 +1,6 @@
 // Package picker shows the native Windows folder dialog (IFileOpenDialog with
-// FOS_PICKFOLDERS) for the dashboard's «Обзор…» button (POST /api/dialog/folder).
+// FOS_PICKFOLDERS) for the dashboard's «Обзор…» button (POST /api/dialog/folder),
+// and the same dialog for one existing file (POST /api/dialog/file: the archive to publish).
 package picker
 
 import (
@@ -47,6 +48,7 @@ const (
 	fosPickFolders     = 0x20
 	fosForceFileSystem = 0x40
 	fosPathMustExist   = 0x800
+	fosFileMustExist   = 0x1000
 	sigdnFileSysPath   = 0x80058000
 	hrCancelled        = 0x800704C7 // HRESULT_FROM_WIN32(ERROR_CANCELLED)
 	sFalse             = syscall.Errno(1)
@@ -61,6 +63,7 @@ const (
 const (
 	vRelease        = 2
 	vShow           = 3
+	vSetFileTypes   = 4
 	vSetOptions     = 9
 	vGetOptions     = 10
 	vSetFolder      = 12
@@ -177,12 +180,22 @@ func (p *Picker) takeCoinit() time.Duration {
 // initial ("" or a network path = the shell's default). ok is false when the
 // user cancelled. A cancelled ctx closes the dialog.
 func (p *Picker) PickFolder(ctx context.Context, title, initial string) (path string, ok bool, err error) {
+	return p.pick(ctx, title, initial, true)
+}
+
+// PickFile is PickFolder for one existing file (archives first in the type
+// list); initial is a folder or a file whose folder the dialog opens in.
+func (p *Picker) PickFile(ctx context.Context, title, initial string) (path string, ok bool, err error) {
+	return p.pick(ctx, title, initial, false)
+}
+
+func (p *Picker) pick(ctx context.Context, title, initial string, folders bool) (path string, ok bool, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	res := make(chan result, 1)
 	t0 := time.Now()
 	go p.run(func() {
-		path, ok, err := p.show(t0, title, initial)
+		path, ok, err := p.show(t0, title, initial, folders)
 		res <- result{path, ok, err}
 	})
 	var r result
@@ -192,7 +205,7 @@ func (p *Picker) PickFolder(ctx context.Context, title, initial string) (path st
 		r = p.closeDialog(res)
 	}
 	l := p.last // res was sent after show wrote it
-	p.log.Debug("folder picker", "coinit_ms", ms(l.coinit), "create_ms", ms(l.create), "folder_ms", ms(l.folder),
+	p.log.Debug("folder picker", "folders", folders, "coinit_ms", ms(l.coinit), "create_ms", ms(l.create), "folder_ms", ms(l.folder),
 		"visible_ms", ms(l.visible), "front_ms", ms(l.front), "show_ms", ms(l.show), "total_ms", ms(time.Since(t0)),
 		"skipped_initial", l.skipped, "picked", r.ok, "err", r.err)
 	return r.path, r.ok, r.err
@@ -231,7 +244,7 @@ func createDialog() (*comObj, error) {
 }
 
 // show runs on the STA thread; t0 is when PickFolder was called.
-func (p *Picker) show(t0 time.Time, title, initial string) (string, bool, error) {
+func (p *Picker) show(t0 time.Time, title, initial string, folders bool) (string, bool, error) {
 	p.last = phases{coinit: p.takeCoinit()}
 	mark := time.Now()
 	dlg, err := createDialog()
@@ -245,7 +258,14 @@ func (p *Picker) show(t0 time.Time, title, initial string) (string, bool, error)
 	if hr := dlg.call(vGetOptions, uintptr(unsafe.Pointer(&opts))); hr != 0 {
 		return "", false, fmt.Errorf("GetOptions: 0x%08X", hr)
 	}
-	if hr := dlg.call(vSetOptions, uintptr(opts|fosPickFolders|fosForceFileSystem|fosPathMustExist|fosNoChangeDir)); hr != 0 {
+	opts |= fosForceFileSystem | fosPathMustExist | fosNoChangeDir
+	if folders {
+		opts |= fosPickFolders
+	} else {
+		opts |= fosFileMustExist
+		setArchiveTypes(dlg)
+	}
+	if hr := dlg.call(vSetOptions, uintptr(opts)); hr != 0 {
 		return "", false, fmt.Errorf("SetOptions: 0x%08X", hr)
 	}
 	if title != "" {
@@ -294,6 +314,24 @@ func (p *Picker) show(t0 time.Time, title, initial string) (string, bool, error)
 	}
 	defer windows.CoTaskMemFree(unsafe.Pointer(s))
 	return windows.UTF16PtrToString(s), true, nil
+}
+
+// filterSpec is COMDLG_FILTERSPEC.
+type filterSpec struct{ name, spec *uint16 }
+
+// archiveTypes is the file type list of PickFile (kept alive: the dialog
+// reads it until Show returns).
+var archiveTypes = func() []filterSpec {
+	mk := func(name, spec string) filterSpec {
+		n, _ := windows.UTF16PtrFromString(name)
+		s, _ := windows.UTF16PtrFromString(spec)
+		return filterSpec{n, s}
+	}
+	return []filterSpec{mk("Archives (*.zip;*.7z;*.rar)", "*.zip;*.7z;*.rar"), mk("All files (*.*)", "*.*")}
+}()
+
+func setArchiveTypes(dlg *comObj) {
+	dlg.call(vSetFileTypes, uintptr(len(archiveTypes)), uintptr(unsafe.Pointer(&archiveTypes[0])))
 }
 
 // setFolder opens the dialog in dir (SetFolder beats the shell's last-used folder).

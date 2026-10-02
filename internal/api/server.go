@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -77,6 +78,9 @@ type Options struct {
 	Steam SteamSettings
 	// NexusKey is the Nexus API key store (/api/providers/nexus); nil disables it.
 	NexusKey NexusKeys
+	// Publishers returns the provider that publishes new versions for a
+	// platform, nil when none (/api/projects/{id}/publish, needs Store); nil disables them.
+	Publishers func(platform string) provider.Publisher
 	// Platforms reports and checks the platform accounts (/api/platforms); nil disables them.
 	Platforms Platforms
 }
@@ -94,13 +98,14 @@ type Server struct {
 	mu       sync.Mutex
 	launches map[string]launch
 
-	gh     *githubAuth  // nil without Options.GitHub
-	hub    *hub         // live events for open tabs (events.go)
-	pace   syncPacer    // sync.status / data.changed pacing per source (events.go)
-	opener opener       // OpenBrowser decisions and the pending new tab (open.go)
-	pickMu sync.Mutex   // one native folder dialog at a time (dialog.go)
-	labels labelRefresh // background label fetches (labels.go)
-	agents agentDetect  // cached agent CLI detection (detect.go)
+	gh        *githubAuth  // nil without Options.GitHub
+	hub       *hub         // live events for open tabs (events.go)
+	pace      syncPacer    // sync.status / data.changed pacing per source (events.go)
+	opener    opener       // OpenBrowser decisions and the pending new tab (open.go)
+	pickMu    sync.Mutex   // one native folder dialog at a time (dialog.go)
+	labels    labelRefresh // background label fetches (labels.go)
+	agents    agentDetect  // cached agent CLI detection (detect.go)
+	publishes publishTasks // running and finished publishes (publish.go)
 
 	bg     context.Context // background work of the server (label fetches), ended by Shutdown
 	stopBg context.CancelFunc
@@ -168,6 +173,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.NexusKey != nil {
 		s.registerNexus(mux)
+	}
+	if opts.Publishers != nil && opts.Store != nil {
+		s.registerPublish(mux)
 	}
 	if opts.Platforms != nil {
 		s.registerPlatforms(mux)

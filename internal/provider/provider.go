@@ -46,6 +46,8 @@ type Capabilities struct {
 	// reply shows as plain text (Steam's plain comments, CurseForge's escaped
 	// HTML), so ** or # would show literally.
 	Markdown bool `json:"markdown,omitempty"`
+	// Publish: the provider is a Publisher (new mod file versions from the app).
+	Publish bool `json:"publish,omitempty"`
 }
 
 // DefaultMaxReply is the reply limit of a platform without its own

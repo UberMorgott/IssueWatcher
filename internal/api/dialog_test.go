@@ -54,6 +54,32 @@ func pickerEnv(t *testing.T, p FolderPicker) *env {
 	})
 }
 
+// fakeFilePicker also picks files.
+type fakeFilePicker struct {
+	fakePicker
+}
+
+func (f *fakeFilePicker) PickFile(ctx context.Context, title, initial string) (string, bool, error) {
+	return f.PickFolder(ctx, title, initial)
+}
+
+// POST /api/dialog/file returns the full path; a file as initial opens its
+// folder; a folder-only picker answers unavailable.
+func TestFileDialogPicksArchive(t *testing.T) {
+	var res pickResult
+	if code := pickerEnv(t, &fakePicker{}).callAny(t, http.MethodPost, "/api/dialog/file", `{}`, &res); code != http.StatusConflict || res.Code != "unavailable" {
+		t.Fatalf("folder-only picker: %d %+v", code, res)
+	}
+	fp := &fakeFilePicker{fakePicker{path: `D:\builds\wartales-mp-0.3.0.zip`, ok: true}}
+	e := pickerEnv(t, fp)
+	dir := t.TempDir()
+	body, _ := json.Marshal(map[string]any{"title": "Archive", "initial": dir + `\old.zip`})
+	if code := e.call(t, http.MethodPost, "/api/dialog/file", string(body), &res); code != http.StatusOK ||
+		res.Path != `D:\builds\wartales-mp-0.3.0.zip` || res.Cancelled || fp.initial != dir || fp.title != "Archive" {
+		t.Fatalf("pick: %d %+v initial %q", code, res, fp.initial)
+	}
+}
+
 func TestFolderDialogUnavailableHeadless(t *testing.T) {
 	e := pickerEnv(t, nil)
 	var info struct{ Available bool }

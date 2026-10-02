@@ -195,7 +195,7 @@ func TestV3UploadMultipart(t *testing.T) {
 		if total != 2500 {
 			t.Errorf("total %d", total)
 		}
-	})
+	}, nil)
 	if err != nil || id != fakeUploadID {
 		t.Fatalf("upload: %q %v", id, err)
 	}
@@ -241,7 +241,7 @@ func TestV3UploadNotAvailableKeepsUploadID(t *testing.T) {
 	c.opts.PollTimeout = 30 * time.Millisecond
 	c.opts.PollWait = func(int) time.Duration { return 5 * time.Millisecond }
 	path, _ := writeArchive(t, 10)
-	_, err := c.upload(t.Context(), path, nil)
+	_, err := c.upload(t.Context(), path, nil, nil)
 	ue, ok := errors.AsType[*UploadError](err)
 	if !ok || ue.UploadID != fakeUploadID || !errors.Is(err, errNotAvailable) {
 		t.Fatalf("err %v", err)

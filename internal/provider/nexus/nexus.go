@@ -37,12 +37,19 @@ type Options struct {
 	// ReadBackWaits are the pauses before each further read-back of a reply
 	// whose id is unknown (default 5, 10, 15 s: new posts show up late).
 	ReadBackWaits []time.Duration
+	// Keys is the API key store; with it the provider publishes new versions
+	// over the v3 API (provider.Publisher, publish.go).
+	Keys *Keys
+	// V3 overrides the v3 client (tests: fake API and storage); its Key
+	// defaults to Keys.Key.
+	V3 *V3Options
 }
 
 // Provider implements provider.Provider and provider.Poller.
 type Provider struct {
 	opts Options
 	b    backend
+	v3   *v3 // nil: publishing off
 	// writes serialized per thread (one reply at a time on an item).
 	threads sync.Map // item external id → *sync.Mutex
 
@@ -77,6 +84,19 @@ func New(opts Options) *Provider {
 		no = *opts.Native
 	}
 	p.b = newNative(no, opts.Log, opts.Now)
+	if opts.Keys != nil || opts.V3 != nil {
+		var vo V3Options
+		if opts.V3 != nil {
+			vo = *opts.V3
+		}
+		if vo.Key == nil && opts.Keys != nil {
+			vo.Key = opts.Keys.Key
+		}
+		if vo.Version == "" && opts.Keys != nil {
+			vo.Version = opts.Keys.opts.Version
+		}
+		p.v3 = newV3(vo)
+	}
 	return p
 }
 
@@ -87,7 +107,7 @@ func (p *Provider) Platform() string { return Platform }
 func (p *Provider) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
 		ListProjects: true, SyncItems: true, ListComments: true, Reply: canReply,
-		Auth: provider.AuthCookieSession, Kinds: []string{store.KindComment, store.KindBug}, ReplyThreaded: true,
+		Auth: provider.AuthCookieSession, Kinds: []string{store.KindComment, store.KindBug}, ReplyThreaded: true, Publish: p.v3 != nil,
 	}
 }
 

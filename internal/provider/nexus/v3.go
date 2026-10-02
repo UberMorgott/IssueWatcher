@@ -345,10 +345,11 @@ type v3Multipart struct {
 }
 
 // upload sends the archive at path and returns the upload id once its state
-// is available. progress (may be nil) gets the bytes sent so far.
+// is available. progress (may be nil) gets the bytes sent so far; waiting
+// (may be nil) is called once the parts are in, before finalise and the poll.
 // CreateUploadRequest (multipart) has no md5 field (only the single-part
 // CreateSinglePartUploadRequest has one), so none is sent here.
-func (c *v3) upload(ctx context.Context, path string, progress func(sent, total int64)) (string, error) {
+func (c *v3) upload(ctx context.Context, path string, progress func(sent, total int64), waiting func()) (string, error) {
 	f, err := os.Open(path) //nolint:gosec // G304: the archive the user picked to publish
 	if err != nil {
 		return "", err
@@ -376,6 +377,9 @@ func (c *v3) upload(ctx context.Context, path string, progress func(sent, total 
 	}
 	if err := c.complete(ctx, mp.Complete, etags); err != nil {
 		return "", fmt.Errorf("nexus v3: upload %s: %w", mp.ID, err)
+	}
+	if waiting != nil {
+		waiting()
 	}
 	if err := c.call(ctx, http.MethodPost, "/uploads/"+url.PathEscape(mp.ID)+"/finalise", nil, nil); err != nil {
 		return "", err

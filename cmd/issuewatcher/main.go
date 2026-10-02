@@ -362,6 +362,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Picker:        picker,
 		Steam:         stm,
 		NexusKey:      mods.nexusKeys,
+		Publishers:    mods.Publisher,
 		Platforms:     mods,
 	})
 	if err != nil {

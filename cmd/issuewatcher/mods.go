@@ -153,7 +153,7 @@ func (m *modPlatforms) buildNative(id string, author func() string) (provider.Pr
 	switch id {
 	case nexus.Platform:
 		mgr := signin.New(nexus.SignInSpec(nil, m.log), jar, br)
-		return nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log}), mgr
+		return nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log, Keys: m.nexusKeys}), mgr
 	case factorio.Platform:
 		mgr := signin.New(factorio.SignInSpec(nil, m.log), jar, br)
 		return factorio.New(factorio.Options{Session: mgr, Author: author, Log: m.log}), mgr
@@ -790,6 +790,19 @@ func (m *modPlatforms) connected(ctx context.Context, id string) {
 			m.log.Error("platform check after sign-in", "platform", id, "err", err)
 		}
 	}()
+}
+
+// Publisher is the running provider of platform that publishes new versions
+// (api.Options.Publishers); nil when it is off or cannot publish.
+func (m *modPlatforms) Publisher(platform string) provider.Publisher {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mp := m.live[platform]
+	if mp == nil || !mp.prov.Capabilities().Publish {
+		return nil
+	}
+	p, _ := mp.prov.(provider.Publisher)
+	return p
 }
 
 func (mp *modPlatform) provOK() (*nexus.Provider, bool) {

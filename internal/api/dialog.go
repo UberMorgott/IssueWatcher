@@ -21,6 +21,11 @@ import (
 //
 // The chosen folder is not saved here: the UI maps it via PUT /api/projects/{id}/path,
 // which validates it (folders.Check).
+//
+// Native file dialog (the archive of a publish, PublishDialog):
+//
+//	POST /api/dialog/file {title?, initial?} (initial: a folder or a file)
+//	     → 200 {path, cancelled} (full path); 409 {error, code: unavailable|busy}
 
 // FolderPicker shows the desktop folder dialog (internal/picker) and blocks
 // until the user picks a folder (ok) or cancels.
@@ -28,11 +33,55 @@ type FolderPicker interface {
 	PickFolder(ctx context.Context, title, initial string) (path string, ok bool, err error)
 }
 
+// FilePicker is a FolderPicker that also picks one existing file.
+type FilePicker interface {
+	PickFile(ctx context.Context, title, initial string) (path string, ok bool, err error)
+}
+
 const maxDialogTitle = 200
 
 func (s *Server) registerDialog(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/dialog/folder", s.handleDialogInfo)
 	mux.HandleFunc("POST /api/dialog/folder", s.handlePickFolder)
+	mux.HandleFunc("POST /api/dialog/file", s.handlePickFile)
+}
+
+func (s *Server) handlePickFile(w http.ResponseWriter, r *http.Request) {
+	fp, ok := s.opts.Picker.(FilePicker)
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "file dialog unavailable", "code": "unavailable"})
+		return
+	}
+	var req struct {
+		Title   string `json:"title"`
+		Initial string `json:"initial"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if !s.pickMu.TryLock() {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a dialog is already open", "code": "busy"})
+		return
+	}
+	defer s.pickMu.Unlock()
+	title := strings.TrimSpace(req.Title)
+	if len([]rune(title)) > maxDialogTitle {
+		title = string([]rune(title)[:maxDialogTitle])
+	}
+	start := existingDir(req.Initial)
+	if start == "" && strings.TrimSpace(req.Initial) != "" {
+		start = existingDir(filepath.Dir(strings.TrimSpace(req.Initial))) // a file: its folder
+	}
+	path, picked, err := fp.PickFile(r.Context(), title, start)
+	if err != nil {
+		s.internalError(w, "file dialog", err)
+		return
+	}
+	if !picked {
+		path = ""
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path, "cancelled": !picked})
 }
 
 func (s *Server) handleDialogInfo(w http.ResponseWriter, _ *http.Request) {
