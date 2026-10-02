@@ -816,6 +816,8 @@ export interface Capabilities {
   replyThreaded: boolean
   /** Longest reply the platform accepts, in characters (Steam 999); absent = DEFAULT_MAX_REPLY. */
   maxReply?: number
+  /** The provider publishes new mod file versions from the app (Nexus with the API key store). */
+  publish?: boolean
 }
 
 export type PlatformState = 'disabled' | 'unknown' | 'connected' | 'signed_out' | 'relogin' | 'error'
@@ -881,6 +883,15 @@ export interface SteamUpdate {
   apiKey?: string
   steamLoginSecure?: string
   sessionid?: string
+}
+
+/** GET/PUT /api/providers/nexus: the Nexus API key for publishing (write-only; never returned). */
+export interface NexusKeyStatus {
+  hasApiKey: boolean
+  /** Account name v1 users/validate returned for the key. */
+  user?: string
+  userId?: number
+  checkedAt?: string
 }
 
 /** GET/PUT /api/projects/{id}/links. */

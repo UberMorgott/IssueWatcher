@@ -32,6 +32,7 @@ import type {
   LoginStatus,
   SteamUpdate,
   ProjectLinks,
+  NexusKeyStatus,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -263,6 +264,10 @@ export const api = {
     call<PlatformStatus>('POST', `/api/platforms/${encodeURIComponent(id)}/logout${forget ? '?forget=1' : ''}`),
   steam: () => call<SteamStatus>('GET', '/api/providers/steam'),
   saveSteam: (u: SteamUpdate) => call<SteamStatus>('PUT', '/api/providers/steam', u),
+  /** Nexus API key (publishing): status only; PUT stores after users/validate accepts it, "" removes it. */
+  nexusKey: () => call<NexusKeyStatus>('GET', '/api/providers/nexus'),
+  saveNexusKey: (apiKey: string) => call<NexusKeyStatus>('PUT', '/api/providers/nexus', { apiKey }),
+  checkNexusKey: () => call<NexusKeyStatus>('POST', '/api/providers/nexus/check'),
   links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),
   setLinks: (id: number, mods: number[]) => call<ProjectLinks>('PUT', `/api/projects/${id}/links`, { mods }),
   unlink: (id: number) => call<void>('DELETE', `/api/projects/${id}/links`),

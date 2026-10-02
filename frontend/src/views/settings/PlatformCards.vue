@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { encode } from 'uqr'
 import PlatformIcon from '../../components/PlatformIcon.vue'
 import { api, type Result } from '../../api/client'
-import type { LoginStatus, ModPlatform, NativePlatform, PlatformStatus, SteamStatus } from '../../api/types'
+import type { LoginStatus, ModPlatform, NativePlatform, NexusKeyStatus, PlatformStatus, SteamStatus } from '../../api/types'
 import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
 import { absTime, relTime } from '../../lib/format'
@@ -325,6 +325,66 @@ async function saveSteam(extra: Record<string, string> = {}) {
   if (r.data.configured) void check('steam')
   return true
 }
+// --- Nexus API key (publishing): write-only; the server validates it with
+// v1 users/validate before storing, so only an accepted key is ever saved.
+const nexusKey = ref<NexusKeyStatus | null>(null)
+const nexusKeyDraft = ref('')
+const nexusKeyBusy = ref<'' | 'save' | 'check' | 'remove'>('')
+const NEXUS_KEY_URL = 'https://www.nexusmods.com/users/myaccount?tab=api'
+async function loadNexusKey() {
+  const r = await api.nexusKey()
+  if (r.ok) nexusKey.value = r.data
+}
+onMounted(() => void loadNexusKey())
+/** Text of a failed key call: its own code first (bad_api_key differs from Steam's), else the card's. */
+function nexusKeyError(r: Extract<Result<unknown>, { ok: false }>) {
+  const code = (r.body as { code?: unknown } | undefined)?.code
+  if (typeof code === 'string' && te('platforms.nexusKey.errors.' + code)) return t('platforms.nexusKey.errors.' + code)
+  return callError(r)
+}
+async function saveNexusKey(remove = false) {
+  const key = remove ? '' : nexusKeyDraft.value.trim()
+  if (!remove && !key) return
+  nexusKeyBusy.value = remove ? 'remove' : 'save'
+  setError('nexusKey', '')
+  const r = await api.saveNexusKey(key)
+  nexusKeyBusy.value = ''
+  if (!r.ok) {
+    setError('nexusKey', nexusKeyError(r), r.error)
+    return
+  }
+  nexusKey.value = r.data
+  nexusKeyDraft.value = ''
+  toast.add({
+    severity: 'success',
+    summary: remove ? t('platforms.nexusKey.removed') : t('platforms.nexusKey.saved', { user: r.data.user ?? '' }),
+    life: 2500,
+  })
+}
+function removeNexusKey() {
+  confirm.require({
+    header: t('platforms.nexusKey.removeTitle'),
+    message: t('platforms.nexusKey.removeText'),
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: { label: t('common.cancel'), severity: 'secondary', outlined: true },
+    acceptProps: { label: t('platforms.nexusKey.remove'), severity: 'danger' },
+    accept: () => void saveNexusKey(true),
+  })
+}
+async function checkNexusKey() {
+  nexusKeyBusy.value = 'check'
+  setError('nexusKey', '')
+  const r = await api.checkNexusKey()
+  nexusKeyBusy.value = ''
+  if (!r.ok) {
+    setError('nexusKey', nexusKeyError(r), r.error)
+    if ((r.body as { code?: string } | undefined)?.code === 'no_api_key') nexusKey.value = { hasApiKey: false }
+    return
+  }
+  nexusKey.value = r.data
+  toast.add({ severity: 'success', summary: t('platforms.nexusKey.verified', { user: r.data.user ?? '' }), life: 2500 })
+}
+
 // «Выйти» drops the session (public reads go on); «Отключить» (forget) also
 // the detected and manual account, and the platform stops syncing («Не подключено»).
 function logout(id: CardId, forget: boolean) {
@@ -471,6 +531,84 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       v-if="c.id === 'factorio' && status('factorio')?.enabled && !status('factorio')?.capabilities.reply"
       class="muted"
     ><i class="pi pi-info-circle" /> {{ t('platforms.factorioReplyOff') }}</small>
+
+    <!-- Nexus: the API key for publishing (write-only; validated before it is stored) -->
+    <div
+      v-if="c.id === 'nexus'"
+      class="adv nexus-key"
+      role="group"
+      :aria-label="t('platforms.nexusKey.title')"
+    >
+      <div class="key-head">
+        <span class="label">{{ t('platforms.nexusKey.title') }}</span>
+        <span
+          v-if="nexusKey?.hasApiKey"
+          v-tooltip.top="nexusKey.checkedAt ? t('platforms.checked', { time: absTime(nexusKey.checkedAt) }) : undefined"
+          class="key-state ok"
+        ><i class="pi pi-check-circle" /> {{ nexusKey.user ? t('platforms.nexusKey.verifiedAs', { user: nexusKey.user }) : t('platforms.nexusKey.stored') }}</span>
+        <span
+          v-else
+          class="key-state muted"
+        ><i class="pi pi-key" /> {{ t('platforms.nexusKey.none') }}</span>
+      </div>
+      <small class="muted">{{ t('platforms.nexusKey.hint') }}
+        <a
+          :href="NEXUS_KEY_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+        >{{ t('platforms.nexusKey.getKey') }} <i class="pi pi-external-link" /></a>
+      </small>
+      <div class="key-row">
+        <InputText
+          v-model="nexusKeyDraft"
+          type="password"
+          autocomplete="off"
+          :placeholder="nexusKey?.hasApiKey ? t('platforms.savedSecret') : t('platforms.nexusKey.placeholder')"
+          :aria-label="t('platforms.nexusKey.title')"
+          fluid
+          @keydown.enter="saveNexusKey()"
+        />
+        <Button
+          :label="t('platforms.nexusKey.save')"
+          icon="pi pi-check"
+          :disabled="!nexusKeyDraft.trim() || !!nexusKeyBusy"
+          :loading="nexusKeyBusy === 'save'"
+          @click="saveNexusKey()"
+        />
+      </div>
+      <div
+        v-if="nexusKey?.hasApiKey"
+        class="key-actions"
+      >
+        <Button
+          :label="t('platforms.check')"
+          icon="pi pi-refresh"
+          size="small"
+          severity="secondary"
+          outlined
+          :disabled="!!nexusKeyBusy"
+          :loading="nexusKeyBusy === 'check'"
+          @click="checkNexusKey()"
+        />
+        <Button
+          :label="t('platforms.nexusKey.remove')"
+          icon="pi pi-trash"
+          size="small"
+          severity="secondary"
+          text
+          :disabled="!!nexusKeyBusy"
+          :loading="nexusKeyBusy === 'remove'"
+          @click="removeNexusKey()"
+        />
+      </div>
+      <p
+        v-if="errors.nexusKey"
+        v-tooltip.top="errorDetail.nexusKey || undefined"
+        class="err small"
+      >
+        <i class="pi pi-exclamation-triangle" /> {{ errors.nexusKey }}
+      </p>
+    </div>
 
     <!-- Nexus / CurseForge / Factorio: author, optional -->
     <template v-if="c.id !== 'steam' && cfg(c.id)">
@@ -791,6 +929,36 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
   border-radius: var(--iw-radius);
   background: var(--iw-bg);
   border: 1px solid var(--iw-border);
+}
+
+.key-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.key-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(12.5px * var(--iw-fs, 1));
+}
+
+.key-state.ok {
+  color: var(--iw-success);
+}
+
+.key-row {
+  display: flex;
+  gap: 8px;
+}
+
+.key-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .err {
