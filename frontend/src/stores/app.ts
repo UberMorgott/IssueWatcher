@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { api } from '../api/client'
-import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, Repo, SyncProgress, SyncStatus } from '../api/types'
+import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, PublishTask, Repo, SyncProgress, SyncStatus } from '../api/types'
 import { fallbackCaps } from '../lib/platforms'
 import { t } from '../i18n'
 import { theme, type Theme } from '../lib/appearance'
@@ -167,6 +167,11 @@ export const useAppStore = defineStore('app', () => {
     window.clearTimeout(refreshTimer)
     refreshTimer = window.setTimeout(() => void refreshAfterSync(), 400)
   }
+  /** The latest publish.progress task as it arrived (PublishDialog follows its own task id; watch with flush 'sync'). */
+  const lastPublish = shallowRef<PublishTask | null>(null)
+  function onPublishProgress(t: PublishTask | null) {
+    if (t?.id) lastPublish.value = t
+  }
   let refreshTimer: number | undefined
   async function refreshAfterSync() {
     void loadRepos() // unread badge, per-project last sync
@@ -271,6 +276,8 @@ export const useAppStore = defineStore('app', () => {
     background,
     onSyncStatus,
     lastProgress,
+    lastPublish,
+    onPublishProgress,
     repos,
     reposLoaded,
     reposAvailable,

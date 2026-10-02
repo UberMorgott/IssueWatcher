@@ -894,6 +894,112 @@ export interface NexusKeyStatus {
   checkedAt?: string
 }
 
+// --- Publishing a mod file version (Nexus, Phase 7): internal/provider/publish.go, internal/api/publish.go.
+
+/** One version of a mod file. */
+export interface PublishVersion {
+  id: string
+  name: string
+  version: string
+  /** main | optional | miscellaneous | archived | … */
+  category: string
+  uploadedAt: string
+  primary?: boolean
+}
+
+export interface PublishFile {
+  id: string
+  name: string
+  active: boolean
+  versionsCount: number
+  archivedCount: number
+  lastUploadedAt?: string
+  versions: PublishVersion[]
+}
+
+/** GET /api/projects/{id}/publish/targets. */
+export interface PublishTargets {
+  modUid: string
+  modName: string
+  filesUrl: string
+  files: PublishFile[]
+}
+
+export type PublishCategory = 'main' | 'optional' | 'miscellaneous'
+
+/** POST /api/projects/{id}/publish: fileId (new version) or newFile; path (upload) or uploadId (retry, no re-upload). */
+export interface PublishRequest {
+  fileId?: string
+  newFile?: boolean
+  path?: string
+  uploadId?: string
+  name: string
+  version: string
+  description?: string
+  category?: PublishCategory
+  archivePrevious?: boolean
+  previousVersionId?: string
+  updateModVersion?: boolean
+  primaryModManagerDownload?: boolean
+  allowModManagerDownload?: boolean
+  showRequirementsPopUp?: boolean
+  changelog?: string
+  dryRun?: boolean
+}
+
+/** One planned request of a dry run. */
+export interface PublishStep {
+  method: string
+  url: string
+  body?: unknown
+  note?: string
+}
+
+export interface PublishResult {
+  dryRun?: boolean
+  plan?: PublishStep[]
+  uploadId?: string
+  md5?: string
+  size?: number
+  fileId?: string
+  fileName?: string
+  versionId?: string
+  filesUrl?: string
+  /** "" none asked, "added", or "failed: <reason>" (the version is published regardless). */
+  changelog?: string
+}
+
+export type PublishStage = 'resolve' | 'hash' | 'upload' | 'wait' | 'publish' | 'changelog'
+export type PublishState = 'running' | 'done' | 'failed' | 'cancelled'
+
+/** A publish run (202 of POST …/publish, GET /api/publish/{id}, SSE publish.progress). */
+export interface PublishTask {
+  id: string
+  projectId: number
+  state: PublishState
+  stage?: PublishStage
+  sent?: number
+  total?: number
+  version: string
+  /** Set once the archive is uploaded: a failed publish retries with it (no re-upload). */
+  uploadId?: string
+  result?: PublishResult
+  error?: string
+  errorCode?: 'no_api_key' | 'bad_api_key' | 'upload_failed' | 'publish_failed' | 'cancelled'
+  startedAt: string
+  finishedAt?: string
+}
+
+/** A Nexus mod page the publish / page dialogs act on (ProjectsView row menu). */
+export interface PublishTarget {
+  /** The mod page project (platform nexus). */
+  projectId: number
+  name: string
+  url: string
+  /** The linked code project's folder: the file dialog starts there. */
+  folder?: string
+}
+
 /** GET/PUT /api/projects/{id}/links. */
 export interface ProjectLinks {
   linkedTo?: number

@@ -14,6 +14,7 @@ export const LIVE_EVENTS = [
   'update.status',
   'job.changed',
   'job.log',
+  'publish.progress',
 ] as const
 export type LiveEventName = (typeof LIVE_EVENTS)[number]
 

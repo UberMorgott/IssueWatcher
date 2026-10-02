@@ -12,7 +12,7 @@ import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
 import PlatformIcon from './components/PlatformIcon.vue'
 import { connectLive, type LiveEventName } from './api/live'
-import type { DataChange, LiveItemEvent, SettingsDoc, SyncProgress } from './api/types'
+import type { DataChange, LiveItemEvent, PublishTask, SettingsDoc, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
@@ -133,6 +133,9 @@ function onLive(name: LiveEventName, data: unknown) {
     }
     case 'job.log':
       jobs.emitLog(data)
+      return
+    case 'publish.progress':
+      app.onPublishProgress(data as PublishTask | null)
       return
     case 'item.new':
     case 'comment.new':

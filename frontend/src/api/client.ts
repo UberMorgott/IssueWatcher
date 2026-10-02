@@ -33,6 +33,10 @@ import type {
   SteamUpdate,
   ProjectLinks,
   NexusKeyStatus,
+  PublishRequest,
+  PublishResult,
+  PublishTargets,
+  PublishTask,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -268,6 +272,14 @@ export const api = {
   nexusKey: () => call<NexusKeyStatus>('GET', '/api/providers/nexus'),
   saveNexusKey: (apiKey: string) => call<NexusKeyStatus>('PUT', '/api/providers/nexus', { apiKey }),
   checkNexusKey: () => call<NexusKeyStatus>('POST', '/api/providers/nexus/check'),
+  // --- publishing (Nexus): targets, dry run (200 PublishResult) / start (202 PublishTask), task, cancel/forget
+  publishTargets: (id: number) => call<PublishTargets>('GET', `/api/projects/${id}/publish/targets`),
+  publishPlan: (id: number, req: PublishRequest) => call<PublishResult>('POST', `/api/projects/${id}/publish`, { ...req, dryRun: true }),
+  publish: (id: number, req: PublishRequest) => call<PublishTask>('POST', `/api/projects/${id}/publish`, { ...req, dryRun: false }),
+  publishTask: (taskId: string) => call<PublishTask>('GET', `/api/publish/${encodeURIComponent(taskId)}`),
+  cancelPublish: (taskId: string) => call<PublishTask | undefined>('DELETE', `/api/publish/${encodeURIComponent(taskId)}`),
+  /** Native file dialog (desktop only; 409 {code: unavailable|busy}); initial: a folder or a file. */
+  pickFile: (body: { title?: string; initial?: string }) => call<{ path: string; cancelled: boolean }>('POST', '/api/dialog/file', body),
   links: (id: number) => call<ProjectLinks>('GET', `/api/projects/${id}/links`),
   setLinks: (id: number, mods: number[]) => call<ProjectLinks>('PUT', `/api/projects/${id}/links`, { mods }),
   unlink: (id: number) => call<void>('DELETE', `/api/projects/${id}/links`),

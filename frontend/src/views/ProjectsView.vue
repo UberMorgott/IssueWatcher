@@ -13,9 +13,12 @@ import ConnectHero from '../components/ConnectHero.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import FolderDialog from '../components/FolderDialog.vue'
 import LinkDialog from '../components/LinkDialog.vue'
+import PublishDialog from '../components/PublishDialog.vue'
+import Menu from 'primevue/menu'
+import type { MenuItem } from 'primevue/menuitem'
 import { isModPlatform, platformName } from '../lib/platforms'
 import { api } from '../api/client'
-import type { Integration, Repo, Stats } from '../api/types'
+import type { Integration, PublishTarget, Repo, Stats } from '../api/types'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
 import { absTime, relTime, repoColor, repoOwner, shortDay, shortRepo } from '../lib/format'
@@ -245,6 +248,34 @@ async function acceptSuggestion(mod: Repo, code: Repo) {
   reload() // the mod page folds into its project's row
 }
 
+// Nexus row menu: «Опубликовать версию» per Nexus mod page of the row (the row
+// itself or a linked page), when the platform publishes (Capabilities.publish).
+const publishOpen = ref(false)
+const publishTarget = ref<PublishTarget | null>(null)
+const nexusMenu = ref<InstanceType<typeof Menu>>()
+const nexusItems = ref<MenuItem[]>([])
+/** The row's Nexus mod pages; the file dialog starts in the code project's folder. */
+function nexusPages(r: Repo): PublishTarget[] {
+  const folder = r.localPath || codeOf(r)?.localPath || undefined
+  return channels(r)
+    .filter((c) => c.platform === 'nexus')
+    .map((c) => ({ projectId: c.id, name: c.name, url: c.url, folder }))
+}
+const canPublish = (r: Repo) => !!app.caps('nexus').publish && nexusPages(r).length > 0
+function openNexusMenu(e: Event, r: Repo) {
+  const pages = nexusPages(r)
+  const named = pages.length > 1
+  nexusItems.value = pages.map((p) => ({
+    label: named ? `${t('publish.action')} · ${p.name}` : t('publish.action'),
+    icon: 'pi pi-upload',
+    command: () => {
+      publishTarget.value = p
+      publishOpen.value = true
+    },
+  }))
+  nexusMenu.value?.toggle(e)
+}
+
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
 </script>
 
@@ -292,6 +323,15 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
         <LinkDialog
           v-model:visible="linkOpen"
           :project="linkProject"
+        />
+        <PublishDialog
+          v-model:visible="publishOpen"
+          :target="publishTarget"
+        />
+        <Menu
+          ref="nexusMenu"
+          :model="nexusItems"
+          popup
         />
 
         <div class="panel table-panel">
@@ -478,6 +518,18 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   :aria-label="t('projects.sync')"
                   :loading="!!rowSyncing[data.id]"
                   @click.stop="syncProject(data)"
+                />
+                <Button
+                  v-if="canPublish(data)"
+                  v-tooltip.top="t('projects.nexusMenu')"
+                  icon="pi pi-upload"
+                  size="small"
+                  severity="secondary"
+                  text
+                  rounded
+                  aria-haspopup="menu"
+                  :aria-label="t('projects.nexusMenu')"
+                  @click.stop="openNexusMenu($event, data)"
                 />
                 <span
                   v-if="!isModPlatform(data.platform)"
