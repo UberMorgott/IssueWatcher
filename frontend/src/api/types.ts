@@ -516,7 +516,7 @@ export interface VerifyResult {
   timedOut?: boolean
 }
 
-export type JobErrorCode = 'no_folder' | 'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'agent_auth' | 'git' | 'interrupted' | 'mod_item' | 'reply_too_long'
+export type JobErrorCode = 'no_folder' | 'dirty_folder' |'no_profile' | 'no_cli' | 'timeout' | 'agent_failed' | 'agent_auth' | 'git' | 'interrupted' | 'mod_item' | 'reply_too_long'
 
 export interface LocalCommit {
   sha: string
@@ -704,8 +704,10 @@ export interface JobLogEvent {
 export interface QueuedJob {
   itemId: number
   job?: Job
-  /** "exists" (job = the unfinished one), "not_found" or a message. */
+  /** "exists" (job = the unfinished one), "not_found", "no_folder", "dirty_folder" or a message. */
   error?: string
+  /** dirty_folder: `git status --porcelain` lines of the folder the direct fix would commit in (no job). */
+  dirty?: string[]
 }
 
 /** GET /api/agents/detect row. */

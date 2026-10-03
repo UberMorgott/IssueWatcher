@@ -331,6 +331,9 @@ const en = {
   folder: {
     needed: 'Link a local project folder first',
     neededMod: 'Link the mod to a project with a folder',
+    dirty: 'The folder has uncommitted changes — commit or remove them, then run again',
+    dirtyFiles: 'Files ({n}):',
+    dirtySkipped: 'Skipped, the folder has uncommitted changes: {n}',
     linkMod: 'Link to a project',
     link: 'Link folder',
     title: 'Local folder · {name}',
@@ -584,6 +587,7 @@ const en = {
     cleanupError: 'Worktree cleanup failed: {error}',
     errorCode: {
       no_folder: 'The project has no local folder — map its clone first.',
+      dirty_folder: 'The folder has uncommitted changes — the agent did not run. Commit or remove them, then run again.',
       no_profile: 'No agent profile for this job — set the role in agent settings.',
       no_cli: 'The agent CLI was not found — set its path in agent settings.',
       timeout: 'The agent ran out of time (profile timeout).',

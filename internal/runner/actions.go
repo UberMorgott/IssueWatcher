@@ -31,6 +31,34 @@ type Queued struct {
 	// Hint with no_folder: "link_mod" = a mod page item whose page is not linked
 	// to a code project (link the mod to a project with a folder).
 	Hint string `json:"hint,omitempty"`
+	// Dirty with dirty_folder (CodeDirtyFolder): `git status --porcelain` lines
+	// of the folder a direct fix would commit in; no job.
+	Dirty []string `json:"dirty,omitempty"`
+}
+
+// enqueueDirty is the pre-flight of a fix of item id: the uncommitted changes
+// of its folder when the fix would run there in direct mode. A folder with a
+// job running in it is skipped (its agent's changes are in flight); runDirect
+// checks again when the job starts.
+func (r *Runner) enqueueDirty(ctx context.Context, cfg config.Agents, id int64) ([]string, error) {
+	in, err := r.opts.Store.JobInput(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	key := folderKey(in.LocalPath)
+	busy := false
+	r.mu.Lock()
+	for _, a := range r.running {
+		busy = busy || (key != "" && a.folder == key)
+	}
+	r.mu.Unlock()
+	if busy {
+		return nil, nil
+	}
+	return r.directDirty(ctx, cfg, in)
 }
 
 // HintLinkMod: link the mod page to a code project with a folder first.
@@ -73,7 +101,7 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 	}
 	out := make([]Queued, 0, len(itemIDs))
 	seen := map[int64]bool{}
-	noFolder, noLabels := 0, 0
+	noFolder, noLabels, nDirty := 0, 0, 0
 	for _, id := range itemIDs {
 		if seen[id] {
 			continue
@@ -99,6 +127,16 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 				}
 				noFolder++
 			}
+			if q.Error == "" && flow == flowFix {
+				dirty, err := r.enqueueDirty(ctx, cfg, id)
+				if err != nil {
+					return out, err
+				}
+				if len(dirty) > 0 {
+					q.Error, q.Dirty = CodeDirtyFolder, dirty
+					nDirty++
+				}
+			}
 			if q.Error != "" {
 				out = append(out, q)
 				continue
@@ -117,6 +155,9 @@ func (r *Runner) Enqueue(ctx context.Context, itemIDs []int64, flow, profileID s
 			return out, err
 		}
 		out = append(out, q)
+	}
+	if nDirty > 0 && nDirty+noFolder == len(out) {
+		return out, ErrDirtyFolder // nothing queued: a direct fix would mix with the folder's uncommitted changes
 	}
 	if noFolder > 0 && noFolder == len(out) {
 		return out, ErrNoFolder // nothing queued: every item lacks a usable folder

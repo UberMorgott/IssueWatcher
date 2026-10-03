@@ -64,9 +64,6 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 	e := setup(t, 1, func(s *config.Settings) {
 		s.Agents.Projects["github:octo/demo"] = config.ProjectAgent{Prompt: "Project note {localPath}."}
 	})
-	// The owner's work in progress: an edited and an untracked file.
-	writeFile(t, filepath.Join(e.local, "README.md"), "demo\nwip\n")
-	writeFile(t, filepath.Join(e.local, "wip.txt"), "draft\n")
 	start := run(t, e.local, "rev-parse", "HEAD")
 
 	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
@@ -82,9 +79,7 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 	if res.Agent == nil || res.Agent.Status != "fixed" || len(res.Agent.Commits) != 1 || res.Agent.Commits[0] != loc.HeadSHA {
 		t.Fatalf("agent claim: %+v", res.Agent)
 	}
-	joined := strings.Join(loc.DirtyBefore, "|")
-	if !strings.Contains(joined, "README.md") || !strings.Contains(joined, "wip.txt") ||
-		strings.Join(loc.DirtyAfter, "|") != joined {
+	if len(loc.DirtyBefore) != 0 || len(loc.DirtyAfter) != 0 {
 		t.Fatalf("dirty before %v after %v", loc.DirtyBefore, loc.DirtyAfter)
 	}
 	if msg := run(t, e.local, "log", "-1", "--format=%B"); !strings.Contains(msg, "Fixes #1") {
@@ -112,7 +107,7 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 		t.Fatalf("args %v stdin %q", rec.Args, rec.Stdin)
 	}
 	sys, _ := os.ReadFile(filepath.Join(jobDir(e.data, j.ID), "fix-direct.system.md"))
-	for _, want := range []string{"</untrusted-issue-content>", "[tag removed]", `"Fixes #1"`, "Do NOT push", "wip.txt", "Project note " + e.local} {
+	for _, want := range []string{"</untrusted-issue-content>", "[tag removed]", `"Fixes #1"`, "Do NOT push", "Project note " + e.local} {
 		if !strings.Contains(string(sys), want) {
 			t.Fatalf("appended prompt misses %q:\n%s", want, sys)
 		}
@@ -136,9 +131,6 @@ func TestDirectFixCommitPushClose(t *testing.T) {
 	}
 	if got := run(t, e.bare, "rev-parse", "main"); got != loc.HeadSHA {
 		t.Fatalf("remote main %s, want %s", got, loc.HeadSHA)
-	}
-	if !exists(filepath.Join(e.local, "wip.txt")) {
-		t.Fatal("push touched the working tree")
 	}
 	if _, err := e.r.Push(t.Context(), j.ID); !errors.Is(err, ErrNotAllowed) {
 		t.Fatalf("second push: %v", err)
@@ -189,6 +181,53 @@ func TestDirectNoFixesRefAndClose(t *testing.T) {
 	j, err := e.r.Push(t.Context(), j.ID)
 	if err != nil || j.State != store.JobDone || !result(t, j).Local.Pushed {
 		t.Fatalf("push after close: %+v %v", j, err)
+	}
+}
+
+// A direct fix never starts on top of uncommitted changes (a modified tracked
+// file, an untracked file): Enqueue refuses with dirty_folder and the file
+// list, no job; ignored files do not count; a reply (draft only, read-only
+// agent) still runs. A job whose folder got dirty after queueing fails at its
+// pre-flight before the agent runs.
+func TestDirectRefusesDirtyFolder(t *testing.T) {
+	mode(t, "ok")
+	e := setup(t, 1, nil)
+	refused := func(want string) {
+		t.Helper()
+		q, err := e.r.Enqueue(t.Context(), []int64{e.items[0]}, "fix", "")
+		if !errors.Is(err, ErrDirtyFolder) || ErrorCode(err) != CodeDirtyFolder || len(q) != 1 || q[0].Job != nil ||
+			q[0].Error != CodeDirtyFolder || !strings.Contains(strings.Join(q[0].Dirty, "|"), want) {
+			t.Fatalf("dirty %s: %+v %v", want, q, err)
+		}
+	}
+	writeFile(t, filepath.Join(e.local, "README.md"), "demo\nwip\n")
+	refused("README.md")
+	e.wait(e.enqueue("reply", e.items[0])[0].ID, store.JobNeedsReview)
+	run(t, e.local, "checkout", "--", "README.md")
+
+	writeFile(t, filepath.Join(e.local, "wip.py"), "draft\n")
+	refused("?? wip.py")
+	if err := os.Remove(filepath.Join(e.local, "wip.py")); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, filepath.Join(e.local, ".git", "info", "exclude"), "ignored.log\n")
+	writeFile(t, filepath.Join(e.local, "ignored.log"), "x\n")
+	j := e.wait(e.enqueue("fix", e.items[0])[0].ID, store.JobNeedsReview)
+	if loc := result(t, j).Local; loc == nil || len(loc.Commits) != 1 || len(loc.DirtyBefore) != 0 {
+		t.Fatalf("clean folder: %s", j.Result)
+	}
+
+	writeFile(t, filepath.Join(e.local, "wip.py"), "draft\n")
+	head := run(t, e.local, "rev-parse", "HEAD")
+	if _, err := e.r.Retry(t.Context(), j.ID); err != nil {
+		t.Fatal(err)
+	}
+	j = e.wait(j.ID, store.JobFailed)
+	res := result(t, j)
+	if res.ErrorCode != CodeDirtyFolder || res.Agent != nil || res.Local == nil || !strings.Contains(strings.Join(res.Local.DirtyBefore, "|"), "wip.py") ||
+		!strings.Contains(j.Error, "wip.py") || run(t, e.local, "rev-parse", "HEAD") != head {
+		t.Fatalf("pre-flight: %s %q %s", j.State, j.Error, j.Result)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/folders"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -80,7 +81,9 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 	loc.DirtyBefore = before
 	log.addf(StepInfo, "direct mode: working in %s (branch %s at %s)", dir, orDash(loc.Branch), shortSHA(loc.StartSHA))
 	if len(before) > 0 {
-		log.addf(StepInfo, "warning: the folder has %d uncommitted change(s); the agent is told to leave them alone", len(before))
+		// Pre-flight (Enqueue checks too; the tree may change while queued): the
+		// agent commits here, and its changes would mix with these.
+		return "", coded(CodeDirtyFolder, dirtyError(dir, before))
 	}
 	r.saveResult(ctx, j, *res)
 	if ctx.Err() != nil {
@@ -89,10 +92,6 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 
 	r.phase(ctx, j, "agent")
 	system, task := prompts(cfg, flowFixDirect, promptInput{in: in})
-	if len(before) > 0 {
-		task += "\n\nUncommitted changes that were already in the folder before you started (the maintainer's work in progress: do not commit, revert or reformat them):\n" +
-			strings.Join(before, "\n")
-	}
 	// Claude: our whole prompt is appended to the user's own system prompt; the
 	// user turn only starts the task. Codex gets both in its input.
 	kickoff := "Handle the IssueWatcher task described in the appended instructions: issue #" + strconv.Itoa(in.Number) + " of " + in.ProjectName + "."
@@ -174,6 +173,22 @@ func (r *Runner) saveResult(ctx context.Context, j *store.Job, res Result) {
 		*j = nj
 		r.opts.OnJob(nj)
 	}
+}
+
+// dirtyError says the run did not start: dir has the uncommitted changes lines.
+func dirtyError(dir string, lines []string) error {
+	return fmt.Errorf("%w (%s):\n%s", ErrDirtyFolder, dir, strings.Join(lines, "\n"))
+}
+
+// directDirty lists the uncommitted changes (tracked or untracked, not
+// ignored) of in's folder when a fix of it runs in direct mode, i.e. commits in
+// the folder itself; nil for worktree mode (a fresh worktree) and folder mode
+// (no git).
+func (r *Runner) directDirty(ctx context.Context, cfg config.Agents, in store.JobInput) ([]string, error) {
+	if folders.Check(in.LocalPath, in.ProjectURL) != folders.StatusOK || cfg.ModeFor(in.CodeKey) != config.ModeDirect {
+		return nil, nil
+	}
+	return r.status(ctx, in.LocalPath)
 }
 
 // status lists `git status --porcelain` lines of dir (clipped).

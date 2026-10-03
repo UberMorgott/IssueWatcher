@@ -40,6 +40,7 @@ const (
 	CodeGit          = "git"            // worktree / diff failed
 	CodeInterrupted  = "interrupted"    // app stopped while running
 	CodeReplyTooLong = "reply_too_long" // «Отправить»: the reply is longer than the platform accepts
+	CodeDirtyFolder  = "dirty_folder"   // direct fix refused: the folder has uncommitted changes (commit or remove them first)
 )
 
 // Publisher is the platform side of publishing a fix (GitHub: internal/provider/github).
@@ -129,6 +130,10 @@ var (
 	// ErrModItem: push / PR of a mod-page fix while agents.modPush is off for
 	// that mod page (CodeModItem); the commit stays in the linked code folder.
 	ErrModItem = errors.New("pushing fixes of mod-page items is off: the commit stays local (Settings › Agents › mod pages: allow push)")
+	// ErrDirtyFolder: a direct fix (commits in the mapped folder itself) was
+	// asked for a folder with uncommitted changes (CodeDirtyFolder); no job was
+	// created: the agent's work would mix with them.
+	ErrDirtyFolder = errors.New("the project folder has uncommitted changes: commit or remove them, then run again")
 )
 
 // New prepares a runner; Start runs it.
@@ -352,6 +357,8 @@ func ErrorCode(err error) string {
 		return CodeModItem
 	case errors.Is(err, ErrNoFolder):
 		return CodeNoFolder
+	case errors.Is(err, ErrDirtyFolder):
+		return CodeDirtyFolder
 	}
 	return ""
 }

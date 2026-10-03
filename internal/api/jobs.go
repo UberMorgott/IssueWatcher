@@ -125,6 +125,18 @@ func (s *Server) handleJobsCreate(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, http.StatusConflict, err.Error())
 		return
 	}
+	if errors.Is(err, runner.ErrDirtyFolder) { // direct fix in a folder with uncommitted changes: nothing was queued
+		dirty := []string{}
+		for _, q := range out {
+			for _, l := range q.Dirty {
+				if !slices.Contains(dirty, l) {
+					dirty = append(dirty, l)
+				}
+			}
+		}
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "code": runner.CodeDirtyFolder, "dirty": dirty, "jobs": out})
+		return
+	}
 	if errors.Is(err, runner.ErrNoFolder) { // fix for items without a usable folder: nothing was queued
 		body := map[string]any{"error": err.Error(), "code": runner.CodeNoFolder, "jobs": out}
 		if !slices.ContainsFunc(out, func(q runner.Queued) bool { return q.Hint != runner.HintLinkMod }) {

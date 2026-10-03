@@ -36,7 +36,7 @@ export function jobRef(j: Pick<Job, 'repo' | 'number' | 'itemId'>): string {
 }
 
 /** Error codes the UI has its own text for (runner Code* constants). */
-export const JOB_ERROR_CODES: JobErrorCode[] = ['no_folder', 'no_profile', 'no_cli', 'timeout', 'agent_failed', 'agent_auth', 'git', 'interrupted', 'mod_item', 'reply_too_long']
+export const JOB_ERROR_CODES: JobErrorCode[] = ['no_folder', 'dirty_folder','no_profile', 'no_cli', 'timeout', 'agent_failed', 'agent_auth', 'git', 'interrupted', 'mod_item', 'reply_too_long']
 
 /** The settings page that fixes an error code ('' = none). */
 export function errorCodeLink(code: string): string {
@@ -198,9 +198,16 @@ export function useDispatchToast() {
   const { t } = useI18n()
   return (res: { ok: true; data: { jobs: QueuedJob[] } } | { ok: false; error: string; body?: unknown }) => {
     if (!res.ok) {
-      const body = res.body as { code?: string; hint?: string } | undefined
+      const body = res.body as { code?: string; hint?: string; dirty?: string[] } | undefined
       const noFolder = body?.code === 'no_folder' // 409: nothing queued
-      const detail = noFolder ? (body?.hint === 'link_mod' ? t('folder.neededMod') : t('folder.needed')) : actionError(t, { status: 0, ...res })
+      const detail =
+        body?.code === 'dirty_folder' // 409: nothing queued, the folder has uncommitted changes
+          ? [t('folder.dirty'), ...(body.dirty ?? []).slice(0, 5)].join('\n')
+          : noFolder
+            ? body?.hint === 'link_mod'
+              ? t('folder.neededMod')
+              : t('folder.needed')
+            : actionError(t, { status: 0, ...res })
       toast.add({ severity: 'error', summary: t('jobs.dispatchFailed'), detail, life: 6000 })
       return
     }
@@ -217,7 +224,8 @@ export function useDispatchToast() {
       severity: failed.length && !queued.length ? 'error' : existing.length || failed.length ? 'warn' : 'success',
       summary: parts.join(' · '),
       detail: [
-        ...failed.filter((f) => f.error !== 'no_folder').map((f) => (f.error === 'not_found' ? t('jobs.itemMissing', { id: f.itemId }) : f.error)),
+        ...(failed.some((f) => f.error === 'dirty_folder') ? [t('folder.dirtySkipped', { n: failed.filter((f) => f.error === 'dirty_folder').length })] : []),
+        ...failed.filter((f) => f.error !== 'no_folder' && f.error !== 'dirty_folder').map((f) => (f.error === 'not_found' ? t('jobs.itemMissing', { id: f.itemId }) : f.error)),
         ...(failed.some((f) => f.error === 'no_folder') ? [t('folder.skipped', { n: failed.filter((f) => f.error === 'no_folder').length })] : []),
       ].join('; '),
       life: 8000,

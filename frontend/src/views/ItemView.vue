@@ -305,6 +305,8 @@ async function push(j: Job) {
 const jobsStore = useJobsStore()
 const report = useDispatchToast()
 const dispatching = ref(false)
+/** The last «Исправить агентом» was refused: the folder's uncommitted changes (null = not refused). */
+const dirtyFiles = ref<string[] | null>(null)
 async function dispatch(flow: JobFlow, profileId?: string) {
   const it = item.value
   if (!it || dispatching.value) return
@@ -312,6 +314,8 @@ async function dispatch(flow: JobFlow, profileId?: string) {
   const r = await jobsStore.dispatch([it.id], flow, profileId)
   dispatching.value = false
   report(r)
+  const body = r.ok ? undefined : (r.body as { code?: string; dirty?: string[] } | undefined)
+  if (flow === 'fix') dirtyFiles.value = body?.code === 'dirty_folder' ? (body.dirty ?? []) : null
   if (r.ok) void loadJobs()
   else if (r.status === 409 && (r.body as { code?: string } | undefined)?.code === 'no_folder') void load(true) // mapping changed meanwhile: fresh fixable
 }
@@ -778,6 +782,24 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
                   @click="folderOpen = true"
                 />
               </div>
+              <div
+                v-if="f === 'fix' && dirtyFiles"
+                class="folder-hint dirty-hint"
+                role="alert"
+              >
+                <span><i class="pi pi-exclamation-triangle" /> {{ t('folder.dirty') }}</span>
+                <template v-if="dirtyFiles.length">
+                  <span class="dirty-title">{{ t('folder.dirtyFiles', { n: dirtyFiles.length }) }}</span>
+                  <ul class="dirty-files">
+                    <li
+                      v-for="l in dirtyFiles"
+                      :key="l"
+                    >
+                      <code>{{ l }}</code>
+                    </li>
+                  </ul>
+                </template>
+              </div>
             </template>
             <FolderDialog
               v-model:visible="folderOpen"
@@ -1049,6 +1071,21 @@ dd {
   margin-top: -2px;
   font-size: calc(12.5px * var(--iw-fs, 1));
   color: var(--iw-warn);
+}
+.dirty-hint {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.dirty-files {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow: auto;
+  max-width: 100%;
+  color: var(--iw-text);
+}
+.dirty-files code {
+  white-space: pre;
 }
 
 .folder-link {
