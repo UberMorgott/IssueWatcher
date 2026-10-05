@@ -56,6 +56,7 @@ error, 2 usage, 3 app not running. `issuewatcher help` lists the flags.
 | `reply <itemId> (--body-file f \| -)` | post a comment on GitHub (`-` = stdin) |
 | `jobs create --flow fix\|reply\|label <itemId>...` | queue agent jobs |
 | `job cancel\|retry\|dismiss\|push\|pr <id>` · `job reply <id> (--body-file f \| -)` · `job labels <id> <name>...` | the job page buttons |
+| `publish <projectId> --path ARCHIVE --version V [--file-id ID \| --new-file] [--name N] [--changelog-file f] [--dry-run] [--wait]` · `publish targets <projectId>` · `publish status <taskId>` | upload an archive as a new mod version (Nexus, Factorio) with the app's stored credentials · the files/versions to publish to · a publish task |
 
 MCP server (stdio): **don't register it globally or per project** (`claude mcp add`,
 `~/.codex/config.toml`) — every other session in that folder would carry its
@@ -69,9 +70,14 @@ claude --mcp-config iw-mcp.json
 
 Tools: `list_projects, list_items, get_item, list_item_comments, list_jobs, get_job, get_job_log,
 sync_now, reply_item, start_jobs, cancel_job, retry_job, send_job_reply,
-apply_job_labels, push_job, create_pr` (local ids, pages ≤ 50; logs in
-`data\logs\mcp.log`). Publishing tools (comment, push, PR) have no extra gate:
-approve them in your MCP client.
+apply_job_labels, push_job, create_pr, list_publish_targets, publish_version,
+get_publish_task` (local ids, pages ≤ 50; logs in `data\logs\mcp.log`).
+Publishing tools (comment, push, PR, mod version) have no extra gate: approve
+them in your MCP client. `publish_version` takes a mod project id, an absolute
+archive path and the version; run it with `dry_run` first. Nexus uses the API
+key from Settings › Платформы; Factorio creates its upload API key once from
+the signed-in factorio.com session (`data\secrets\factorio-api.json`) and checks
+the archive's `info.json` name and version.
 
 Agent jobs: each agent run of a job gets `issuewatcher.exe mcp --item <id>`, a
 read-only server for that job's issue only (`get_item`, `list_item_comments`),

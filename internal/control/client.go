@@ -313,6 +313,68 @@ func (c *Client) JobLabels(ctx context.Context, id int64, labels []string) (json
 	return c.post(ctx, idPath("/api/jobs/%d/labels", id), map[string][]string{"labels": labels})
 }
 
+// PublishRequest is POST /api/projects/{id}/publish (provider.PublishRequest):
+// a new version of the project's mod from a local archive.
+type PublishRequest struct {
+	FileID      string `json:"fileId,omitempty"`
+	NewFile     bool   `json:"newFile,omitempty"`
+	Path        string `json:"path,omitempty"`
+	UploadID    string `json:"uploadId,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Changelog   string `json:"changelog,omitempty"`
+	DryRun      bool   `json:"dryRun,omitempty"`
+}
+
+// PublishTargets lists the project's publishable files and their versions.
+func (c *Client) PublishTargets(ctx context.Context, project int64) (json.RawMessage, error) {
+	return c.get(ctx, idPath("/api/projects/%d/publish/targets", project), nil)
+}
+
+// Publish starts a publish (a task) or, with DryRun, returns its plan.
+func (c *Client) Publish(ctx context.Context, project int64, req PublishRequest) (json.RawMessage, error) {
+	return c.post(ctx, idPath("/api/projects/%d/publish", project), req)
+}
+
+// PublishTask returns one publish task.
+func (c *Client) PublishTask(ctx context.Context, id string) (json.RawMessage, error) {
+	if id == "" {
+		return nil, errors.New("control: empty publish task id")
+	}
+	return c.get(ctx, "/api/publish/"+url.PathEscape(id), nil)
+}
+
+// publishPoll is how often PublishWait reads the task.
+var publishPoll = time.Second
+
+// PublishWait polls a publish task until it is no longer running (or ctx
+// ends: the publish keeps running in the app, read it with PublishTask).
+func (c *Client) PublishWait(ctx context.Context, task json.RawMessage) (json.RawMessage, error) {
+	var t struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+	}
+	for {
+		t.ID, t.State = "", ""
+		_ = json.Unmarshal(task, &t)
+		if t.ID == "" || t.State != "running" {
+			return task, nil // finished, or a dry-run plan: as is
+		}
+		select {
+		case <-ctx.Done():
+			return task, ctx.Err()
+		case <-time.After(publishPoll):
+		}
+		next, err := c.PublishTask(ctx, t.ID)
+		if err != nil {
+			return task, err
+		}
+		task = next
+	}
+}
+
 func set(q url.Values, k, v string) {
 	if v != "" {
 		q.Set(k, v)

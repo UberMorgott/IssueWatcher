@@ -29,7 +29,7 @@ func pageLimit(n int) int {
 
 // NewMCPServer exposes the control client as MCP domain tools (no raw HTTP):
 // every action goes through the same endpoint and checks as the UI.
-// Publishing tools (reply, push, PR) rely on the MCP client's own approval.
+// Publishing tools (reply, push, PR, publish_version) rely on the MCP client's own approval.
 func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "issuewatcher", Title: "IssueWatcher", Version: version},
 		&mcp.ServerOptions{
@@ -168,6 +168,45 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, in jobLabels) (json.RawMessage, error) {
 			return c.JobLabels(ctx, in.ID, in.Labels)
 		})
+
+	type projectID struct {
+		Project int64 `json:"project" jsonschema:"project id from list_projects (a mod platform project: nexus, factorio)"`
+	}
+	add(s, &mcp.Tool{Name: "list_publish_targets", Description: "List a mod project's publishable files and their versions on its platform " +
+		"(Nexus: the mod's files, pick file_id; Factorio: the mod itself with its releases).", Annotations: ro},
+		func(ctx context.Context, in projectID) (json.RawMessage, error) {
+			return c.PublishTargets(ctx, in.Project)
+		})
+
+	type publish struct {
+		Project     int64  `json:"project" jsonschema:"project id from list_projects (a mod platform project)"`
+		Path        string `json:"path" jsonschema:"absolute path of the local archive (.zip) to upload"`
+		Version     string `json:"version" jsonschema:"version to publish (Factorio: must equal the archive's info.json version)"`
+		FileID      string `json:"file_id,omitempty" jsonschema:"Nexus: the file to add the version to (list_publish_targets); Factorio: omit"`
+		NewFile     bool   `json:"new_file,omitempty" jsonschema:"Nexus only: create a new file instead of a version of file_id"`
+		Name        string `json:"name,omitempty" jsonschema:"Nexus: the file version's display name; Factorio: ignored"`
+		Description string `json:"description,omitempty" jsonschema:"Nexus: file description"`
+		Changelog   string `json:"changelog,omitempty" jsonschema:"Nexus: changelog for the version; Factorio: not accepted (the portal reads changelog.txt from the archive)"`
+		DryRun      bool   `json:"dry_run,omitempty" jsonschema:"plan only: return the requests that would be sent, upload nothing"`
+		Wait        bool   `json:"wait,omitempty" jsonschema:"wait until the publish finishes and return the final task (default: return the running task at once)"`
+	}
+	add(s, &mcp.Tool{Name: "publish_version", Description: "Upload an archive as a new version of a mod project on its platform (Nexus Mods, Factorio mod portal) " +
+		"through the app's stored credentials. Public unless dry_run: run dry_run first, then publish exactly once; " +
+		"never resend after an error without checking get_publish_task and the platform. Returns the publish task (or the dry-run plan)."},
+		func(ctx context.Context, in publish) (json.RawMessage, error) {
+			out, err := c.Publish(ctx, in.Project, PublishRequest{Path: in.Path, Version: in.Version, FileID: in.FileID, NewFile: in.NewFile,
+				Name: in.Name, Description: in.Description, Changelog: in.Changelog, DryRun: in.DryRun})
+			if err != nil || !in.Wait || in.DryRun {
+				return out, err
+			}
+			return c.PublishWait(ctx, out)
+		})
+
+	type taskID struct {
+		ID string `json:"id" jsonschema:"publish task id from publish_version"`
+	}
+	add(s, &mcp.Tool{Name: "get_publish_task", Description: "Get a publish task: state (running, done, failed, cancelled), stage, bytes sent, result or error.", Annotations: ro},
+		func(ctx context.Context, in taskID) (json.RawMessage, error) { return c.PublishTask(ctx, in.ID) })
 	return s
 }
 

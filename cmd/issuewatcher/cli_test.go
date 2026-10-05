@@ -133,16 +133,19 @@ func TestCLIMCPScopeFlags(t *testing.T) {
 
 func TestCLIActionCommands(t *testing.T) {
 	calls := fakeAPI(t, map[string]string{
-		"POST /api/sync":             `202 `,
-		"POST /api/items/4/comments": `201 {"id":10}`,
-		"POST /api/jobs":             `201 {"jobs":[]}`,
-		"POST /api/jobs/9/cancel":    `200 {"id":9}`,
-		"POST /api/jobs/9/retry":     `200 {"id":9}`,
-		"POST /api/jobs/9/dismiss":   `200 {"id":9}`,
-		"POST /api/jobs/9/push":      `200 {"id":9}`,
-		"POST /api/jobs/9/pr":        `200 {"id":9}`,
-		"POST /api/jobs/9/reply":     `200 {"id":9}`,
-		"POST /api/jobs/9/labels":    `200 {"id":9}`,
+		"POST /api/sync":                       `202 `,
+		"POST /api/items/4/comments":           `201 {"id":10}`,
+		"POST /api/jobs":                       `201 {"jobs":[]}`,
+		"POST /api/jobs/9/cancel":              `200 {"id":9}`,
+		"POST /api/jobs/9/retry":               `200 {"id":9}`,
+		"POST /api/jobs/9/dismiss":             `200 {"id":9}`,
+		"POST /api/jobs/9/push":                `200 {"id":9}`,
+		"POST /api/jobs/9/pr":                  `200 {"id":9}`,
+		"POST /api/jobs/9/reply":               `200 {"id":9}`,
+		"POST /api/jobs/9/labels":              `200 {"id":9}`,
+		"POST /api/projects/69/publish":        `200 {"dryRun":true}`,
+		"GET /api/projects/69/publish/targets": `200 {"files":[]}`,
+		"GET /api/publish/t1":                  `200 {"id":"t1","state":"done"}`,
 	})
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("from file"), 0o600); err != nil {
@@ -165,6 +168,10 @@ func TestCLIActionCommands(t *testing.T) {
 		{"", []string{"job", "pr", "9"}, apiCall{"POST", "/api/jobs/9/pr", "", ""}, `"id": 9`},
 		{"draft", []string{"job", "reply", "9", "-"}, apiCall{"POST", "/api/jobs/9/reply", "", `{"body":"draft"}`}, `"id": 9`},
 		{"", []string{"job", "labels", "9", "bug", "ui"}, apiCall{"POST", "/api/jobs/9/labels", "", `{"labels":["bug","ui"]}`}, `"id": 9`},
+		{"", []string{"publish", "69", "--path", `C:\m\mod_1.1.6.zip`, "--version", "1.1.6", "--dry-run"},
+			apiCall{"POST", "/api/projects/69/publish", "", `{"path":"C:\\m\\mod_1.1.6.zip","version":"1.1.6","dryRun":true}`}, `"dryRun": true`},
+		{"", []string{"publish", "targets", "69"}, apiCall{"GET", "/api/projects/69/publish/targets", "", ""}, `"files"`},
+		{"", []string{"publish", "status", "t1"}, apiCall{"GET", "/api/publish/t1", "", ""}, `"done"`},
 	} {
 		code, out, stderr := cliRun(tc.stdin, tc.args...)
 		if code != exitOK || !strings.Contains(out, tc.out) {
@@ -174,7 +181,7 @@ func TestCLIActionCommands(t *testing.T) {
 			t.Fatalf("%v: request %+v, want %+v", tc.args, got, tc.want)
 		}
 	}
-	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}} {
+	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}} {
 		if code, _, stderr := cliRun("", args...); code != exitUsage {
 			t.Fatalf("%v: %d %q", args, code, stderr)
 		}

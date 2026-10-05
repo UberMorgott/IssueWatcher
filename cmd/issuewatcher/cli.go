@@ -62,6 +62,12 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   job cancel|retry|dismiss|push|pr <id>
   job reply <id> (--body-file FILE | -)
   job labels <id> <name>...
+  publish targets <projectId>
+  publish <projectId> --path ARCHIVE --version V [--file-id ID | --new-file] [--name N]
+          [--description D] [--changelog-file FILE] [--dry-run] [--wait]
+                      upload an archive as a new mod version on the project's platform
+                      (nexus, factorio); public unless --dry-run; --wait polls to the end
+  publish status <taskId>
 `
 
 // isCLI reports whether args start with a subcommand (a word, not a flag):
@@ -224,6 +230,8 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.jobs(rest)
 	case "job":
 		return c.job(rest)
+	case "publish":
+		return c.publish(rest)
 	}
 	return nil, usagef("unknown command %q", cmd)
 }
@@ -398,6 +406,73 @@ func (c *cli) job(args []string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return c.c.Job(c.ctx, id)
+}
+
+func (c *cli) publish(args []string) (json.RawMessage, error) {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "targets":
+		pos, err := flags(flag.NewFlagSet("publish targets", flag.ContinueOnError), args[1:])
+		if err != nil {
+			return nil, err
+		}
+		id, err := oneID("publish targets", pos)
+		if err != nil {
+			return nil, err
+		}
+		return c.c.PublishTargets(c.ctx, id)
+	case "status":
+		pos, err := flags(flag.NewFlagSet("publish status", flag.ContinueOnError), args[1:])
+		if err != nil {
+			return nil, err
+		}
+		if len(pos) != 1 || pos[0] == "" {
+			return nil, usagef("publish status: want one task id")
+		}
+		return c.c.PublishTask(c.ctx, pos[0])
+	}
+	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
+	var req control.PublishRequest
+	fs.StringVar(&req.Path, "path", "", "absolute path of the archive")
+	fs.StringVar(&req.Version, "version", "", "version")
+	fs.StringVar(&req.FileID, "file-id", "", "file to add the version to (nexus)")
+	fs.BoolVar(&req.NewFile, "new-file", false, "create a new file (nexus)")
+	fs.StringVar(&req.Name, "name", "", "file version name (nexus)")
+	fs.StringVar(&req.Description, "description", "", "file description (nexus)")
+	changelog := fs.String("changelog-file", "", "file with the changelog (nexus)")
+	fs.BoolVar(&req.DryRun, "dry-run", false, "plan only")
+	wait := fs.Bool("wait", false, "wait until the publish finishes")
+	pos, err := flags(fs, args)
+	if err != nil {
+		return nil, err
+	}
+	id, err := oneID("publish", pos)
+	if err != nil {
+		return nil, err
+	}
+	if req.Path == "" || req.Version == "" {
+		return nil, usagef("publish: want --path and --version")
+	}
+	if abs, err := filepath.Abs(req.Path); err == nil {
+		req.Path = abs
+	}
+	if *changelog != "" {
+		b, err := os.ReadFile(*changelog)
+		if err != nil {
+			return nil, fmt.Errorf("read changelog: %w", err)
+		}
+		req.Changelog = string(b)
+	}
+	out, err := c.c.Publish(c.ctx, id, req)
+	if err != nil || !*wait || req.DryRun {
+		return out, err
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, control.PublishTimeout)
+	defer cancel()
+	return c.c.PublishWait(ctx, out)
 }
 
 // runMCP serves the MCP tools over stdio until the client disconnects. stdout

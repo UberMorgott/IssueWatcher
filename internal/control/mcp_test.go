@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -71,8 +72,8 @@ func TestMCPTools(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	slices.Sort(names)
-	want := []string{"apply_job_labels", "cancel_job", "create_pr", "get_item", "get_job", "get_job_log", "list_item_comments", "list_items",
-		"list_jobs", "list_projects", "push_job", "reply_item", "retry_job", "send_job_reply", "start_jobs", "sync_now"}
+	want := []string{"apply_job_labels", "cancel_job", "create_pr", "get_item", "get_job", "get_job_log", "get_publish_task", "list_item_comments", "list_items",
+		"list_jobs", "list_projects", "list_publish_targets", "publish_version", "push_job", "reply_item", "retry_job", "send_job_reply", "start_jobs", "sync_now"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
 	}
@@ -119,6 +120,67 @@ func TestMCPTools(t *testing.T) {
 	}
 	if r := call("start_jobs", map[string]any{"flow": "fix", "item_ids": []int64{}}); !r.IsError {
 		t.Fatal("start_jobs without ids succeeded")
+	}
+}
+
+// publish_version: the generic request body, dry run as is, wait polls the task.
+func TestMCPPublish(t *testing.T) {
+	publishPoll = time.Millisecond
+	var got []string
+	polls := 0
+	c, _ := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if !authed(w, r) {
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(b))
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/projects/69/publish":
+			if strings.Contains(string(b), `"dryRun":true`) {
+				_, _ = w.Write([]byte(`{"dryRun":true,"plan":[]}`))
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"t1","state":"running"}`))
+		case "GET /api/publish/t1":
+			polls++
+			if polls < 2 {
+				_, _ = w.Write([]byte(`{"id":"t1","state":"running","stage":"publish"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"id":"t1","state":"done","result":{"versionId":"1.1.6"}}`))
+		case "GET /api/projects/69/publish/targets":
+			_, _ = w.Write([]byte(`{"files":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	cs := mcpSession(t, NewMCPServer(c, "test", slog.New(slog.DiscardHandler)))
+	call := func(name string, args map[string]any) string {
+		t.Helper()
+		r, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil || r.IsError {
+			t.Fatalf("%s: %v %+v", name, err, r)
+		}
+		return text(t, r)
+	}
+	if out := call("publish_version", map[string]any{"project": 69, "path": `E:\m.zip`, "version": "1.1.6", "dry_run": true, "wait": true}); !strings.Contains(out, `"dryRun":true`) {
+		t.Fatalf("dry run: %s", out)
+	}
+	if got[0] != `POST /api/projects/69/publish {"path":"E:\\m.zip","version":"1.1.6","dryRun":true}` {
+		t.Fatalf("dry-run request %q", got[0])
+	}
+	if out := call("publish_version", map[string]any{"project": 69, "path": `E:\m.zip`, "version": "1.1.6", "wait": true}); !strings.Contains(out, `"done"`) {
+		t.Fatalf("wait: %s", out)
+	}
+	if n := strings.Count(strings.Join(got, "\n"), "POST /api/projects/69/publish"); n != 2 {
+		t.Fatalf("publish sent %d times: %v", n, got)
+	}
+	if out := call("get_publish_task", map[string]any{"id": "t1"}); !strings.Contains(out, `"t1"`) {
+		t.Fatalf("get_publish_task: %s", out)
+	}
+	if out := call("list_publish_targets", map[string]any{"project": 69}); !strings.Contains(out, "files") {
+		t.Fatalf("targets: %s", out)
 	}
 }
 
