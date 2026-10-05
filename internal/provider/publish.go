@@ -53,6 +53,9 @@ type PublishVersion struct {
 	Category   string `json:"category"`
 	UploadedAt string `json:"uploadedAt"`
 	Primary    bool   `json:"primary,omitempty"`
+	// SHA1 is the uploaded archive's SHA-1 when the platform reports it
+	// (Factorio mod portal), so a probe can tell the same file from another.
+	SHA1 string `json:"sha1,omitempty"`
 }
 
 // PublishRequest is what to publish.

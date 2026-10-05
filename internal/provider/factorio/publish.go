@@ -69,6 +69,7 @@ type portalMod struct {
 		Version    string `json:"version"`
 		ReleasedAt string `json:"released_at"`
 		FileName   string `json:"file_name"`
+		SHA1       string `json:"sha1"`
 	} `json:"releases"`
 }
 
@@ -104,7 +105,7 @@ func (p *Provider) PublishTargets(ctx context.Context, project provider.Project)
 	f := provider.PublishFile{ID: m.Name, Name: m.Title, Active: true, VersionsCount: len(m.Releases),
 		Versions: make([]provider.PublishVersion, 0, len(m.Releases))}
 	for _, r := range m.Releases {
-		f.Versions = append(f.Versions, provider.PublishVersion{ID: r.Version, Name: r.FileName, Version: r.Version, UploadedAt: r.ReleasedAt})
+		f.Versions = append(f.Versions, provider.PublishVersion{ID: r.Version, Name: r.FileName, Version: r.Version, UploadedAt: r.ReleasedAt, SHA1: r.SHA1})
 		f.LastUploadedAt = r.ReleasedAt
 	}
 	return provider.PublishTargets{ModUID: m.Name, ModName: m.Title, FilesURL: downloadsURL(m.Name), Files: []provider.PublishFile{f}}, nil

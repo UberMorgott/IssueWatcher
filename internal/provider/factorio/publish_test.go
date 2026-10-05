@@ -68,7 +68,7 @@ func (f *fakeUpload) serve(w http.ResponseWriter, r *http.Request) {
 	case "GET /api/mods/auto-build-and-deconstruct":
 		var rel []string
 		for _, v := range f.releases {
-			rel = append(rel, fmt.Sprintf(`{"version":%q,"released_at":"2026-09-28T21:08:10.000000Z","file_name":"auto-build-and-deconstruct_%s.zip"}`, v, v))
+			rel = append(rel, fmt.Sprintf(`{"version":%q,"released_at":"2026-09-28T21:08:10.000000Z","file_name":"auto-build-and-deconstruct_%s.zip","sha1":"sha1-of-%s"}`, v, v, v))
 		}
 		_, _ = fmt.Fprintf(w, `{"name":"auto-build-and-deconstruct","title":"Lazy Builder","owner":"Morgott","releases":[%s]}`, strings.Join(rel, ","))
 	case "POST " + initUploadPath:
@@ -280,7 +280,8 @@ func TestFactorioPublishTargets(t *testing.T) {
 	f := newFakeUpload(t)
 	p, _ := f.provider(t, false)
 	tg, err := p.PublishTargets(context.Background(), lazy)
-	if err != nil || len(tg.Files) != 1 || tg.Files[0].ID != "auto-build-and-deconstruct" || len(tg.Files[0].Versions) != 2 || tg.Files[0].Versions[1].Version != "1.1.5" {
+	if err != nil || len(tg.Files) != 1 || tg.Files[0].ID != "auto-build-and-deconstruct" || len(tg.Files[0].Versions) != 2 || tg.Files[0].Versions[1].Version != "1.1.5" ||
+		tg.Files[0].Versions[1].SHA1 != "sha1-of-1.1.5" {
 		t.Fatalf("targets = %+v, %v", tg, err)
 	}
 	if !p.Capabilities().Publish || New(Options{}).Capabilities().Publish {
