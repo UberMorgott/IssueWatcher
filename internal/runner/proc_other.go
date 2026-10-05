@@ -40,3 +40,7 @@ func (p *procTree) close() {}
 func processCreated(uint32) (int64, bool) { return 0, false }
 
 func killRecorded([]procRecord) int { return 0 }
+
+// InAgentJob reports whether process pid runs inside a live runner job (not
+// detectable without job objects: always false).
+func InAgentJob(uint32) bool { return false }

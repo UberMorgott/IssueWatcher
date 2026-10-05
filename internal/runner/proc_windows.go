@@ -65,7 +65,9 @@ func attach(cmd *exec.Cmd) (*procTree, error) {
 		_ = windows.CloseHandle(job)
 		return nil, err
 	}
-	return &procTree{job: job}, nil
+	p := &procTree{job: job}
+	registerTree(p)
+	return p, nil
 }
 
 // processSuspendResume is PROCESS_SUSPEND_RESUME (not in x/sys/windows).
@@ -171,6 +173,7 @@ func (p *procTree) close() {
 	if p == nil {
 		return
 	}
+	unregisterTree(p)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.job != 0 {
