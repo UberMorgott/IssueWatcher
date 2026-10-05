@@ -415,7 +415,7 @@ func (e *Engine) gate(ctx context.Context, c *rc) localResult {
 	}
 	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, filepath.Join(e.runDir(c.run.ID), "logs"))
 	if !ran {
-		return localResult{skip: "no verify gate configured (aegis or the project's verify command)"}
+		return localResult{skip: "no verify command"} // neither aegis nor the project's verify command
 	}
 	if !res.OK {
 		return localResult{hold: HeldGate, err: fmt.Errorf("%s: exit %d: %s", res.Command, res.ExitCode, tail(res.Output, 2000))}
@@ -858,14 +858,32 @@ func authState(err error) string {
 	return "error"
 }
 
-// available polls until the published version is listed (downloadable), up
-// to AvailableFor after the step started.
-func (e *Engine) available(ctx context.Context, c *rc, st store.Step) localResult {
-	start, err := time.Parse(time.RFC3339Nano, st.StartedAt)
-	if err != nil {
-		start = e.d.Now()
+// availableState is an available step's request_json: the wait's deadline,
+// persisted when the step first runs, so a restart does not extend it.
+type availableState struct {
+	Deadline time.Time `json:"deadline"`
+}
+
+func (e *Engine) availableDeadline(ctx context.Context, st store.Step) (time.Time, error) {
+	var as availableState
+	if json.Unmarshal(st.Request, &as) == nil && !as.Deadline.IsZero() {
+		return as.Deadline, nil
 	}
-	deadline := start.Add(e.d.AvailableFor)
+	as.Deadline = e.d.Now().UTC().Add(e.d.AvailableFor)
+	b, _ := json.Marshal(as)
+	if _, err := e.transition(ctx, st, store.StepSending, store.StepSending, store.StepUpdate{Request: b}); err != nil {
+		return time.Time{}, err
+	}
+	return as.Deadline, nil
+}
+
+// available polls until the published version is listed (downloadable), up
+// to AvailableFor after the step first ran (persisted deadline).
+func (e *Engine) available(ctx context.Context, c *rc, st store.Step) localResult {
+	deadline, err := e.availableDeadline(ctx, st)
+	if err != nil {
+		return localResult{err: err}
+	}
 	for {
 		pr, err := e.publishProbe(ctx, c, st.Target)
 		switch {

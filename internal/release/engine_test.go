@@ -40,6 +40,7 @@ type fakePub struct {
 	publishes int
 	probeErrs int   // the next n PublishTargets calls fail (HTTP 500)
 	checkErr  error // CheckPublish refuses
+	hideNew   bool  // published versions never get listed (stuck in moderation)
 }
 
 func (f *fakePub) PublishTargets(_ context.Context, _ provider.Project) (provider.PublishTargets, error) {
@@ -77,7 +78,9 @@ func (f *fakePub) Publish(_ context.Context, _ provider.Project, req provider.Pu
 		s := sha1.Sum(b) //nolint:gosec // portal hash
 		v.SHA1 = hex.EncodeToString(s[:])
 	}
-	f.versions = append(f.versions, v)
+	if !f.hideNew {
+		f.versions = append(f.versions, v)
+	}
 	return provider.PublishResult{VersionID: v.ID}, nil
 }
 
@@ -745,5 +748,70 @@ func TestReleaseOriginRules(t *testing.T) {
 	en.Wait()
 	if got := e.run(r.ID); got.State != store.RunDone || got.Origin != store.RunOriginManual {
 		t.Fatalf("manual run %+v", got)
+	}
+}
+
+// The 72 h availability wait is measured from the step's first run, persisted:
+// a restart does not start it over.
+func TestReleaseAvailabilityDeadlineSurvivesRestart(t *testing.T) {
+	e := newEnv(t)
+	var mu sync.Mutex
+	now := time.Now()
+	e.deps.Now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	e.factorio.hideNew = true
+	ctx, cancel := context.WithCancel(context.Background())
+	en := e.engine(false)
+	if err := en.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r, _, err := en.Release(ctx, e.codeID, Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "available:" + factorioKey
+	for i := 0; ; i++ {
+		st := e.steps(r.ID)[name]
+		if st.State == store.StepSending && strings.Contains(string(st.Request), "deadline") {
+			break
+		}
+		if i > 2000 {
+			t.Fatalf("availability never started: %+v", st)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel() // app stops while it waits
+	en.Wait()
+	if st := e.steps(r.ID)[name]; st.State != store.StepSending {
+		t.Fatalf("after the stop: %+v", st)
+	}
+	mu.Lock()
+	now = now.Add(73 * time.Hour)
+	mu.Unlock()
+	restarted := e.engine(false)
+	if err := restarted.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { restarted.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("still waiting after a restart: the deadline started over")
+	}
+	if got := e.run(r.ID); got.State != store.RunHeld || got.HeldReason != HeldAvailability {
+		t.Fatalf("run %+v", got)
+	}
+	if e.factorio.count() != 1 {
+		t.Fatalf("factorio publishes %d", e.factorio.count())
+	}
+}
+
+// No aegis and no verify command: the gate is skipped with the reason recorded.
+func TestReleaseGateSkippedWithoutVerify(t *testing.T) {
+	e := newEnv(t)
+	e.deps.Gate = func(context.Context, string, string, string, string) (CmdResult, bool) { return CmdResult{}, false }
+	r := e.release(e.engine(false), Request{})
+	if st := e.steps(r.ID)["gate"]; st.State != store.StepSkipped || st.Error != "no verify command" || e.run(r.ID).State != store.RunDone {
+		t.Fatalf("gate %+v run %s", st, e.run(r.ID).State)
 	}
 }
