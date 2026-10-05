@@ -22,6 +22,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -137,6 +138,9 @@ type tenv struct {
 	cfg      config.Settings
 	gateOK   bool
 	gates    int
+	smokeRes smoke.Result // fake smoke adapter's answer (OK by default)
+	smokeErr error
+	smokes   []smoke.Request
 	builds   int
 	locks    int
 	crashAt  string // step name (step or step:target)
@@ -254,8 +258,10 @@ func newEnv(t *testing.T) *tenv {
 		Build:     config.BuildProfile{Command: "build.cmd", Output: "dist/{name}_{version}.zip"},
 		Version:   config.VersionProfile{Kind: config.VersionFactorioInfo},
 		Changelog: config.ChangelogProfile{Kind: config.ChangelogFactorio},
+		Smoke:     config.SmokeProfile{Kind: config.SmokeCommand, Command: "smoke.cmd {archive}"},
 		Targets:   map[string]config.TargetProfile{nexusKey: {FileID: "file-main", Category: "main"}, factorioKey: {}},
 	}}
+	e.smokeRes = smoke.Result{Kind: config.SmokeCommand, OK: true, Steps: []smoke.CmdResult{{Command: "smoke.cmd", OK: true}}}
 
 	gp := github.NewProvider(a)
 	e.deps = Deps{
@@ -287,7 +293,16 @@ func newEnv(t *testing.T) *tenv {
 			}
 			return CmdResult{Command: "verify", OK: true}, true
 		},
-		Command:   e.build,
+		Command: e.build,
+		Smoke: func(_ context.Context, req smoke.Request) (smoke.Result, error) {
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			e.smokes = append(e.smokes, req)
+			if _, err := os.Stat(req.Archive); err != nil {
+				return smoke.Result{}, err
+			}
+			return e.smokeRes, e.smokeErr
+		},
 		PollEvery: time.Millisecond,
 	}
 	return e
@@ -438,11 +453,7 @@ func TestReleaseHappyPath(t *testing.T) {
 		"publish:" + nexusKey, "publish:" + factorioKey, "available:" + nexusKey, "available:" + factorioKey}
 	for _, n := range want {
 		s, ok := steps[n]
-		wantState := store.StepSent
-		if n == "smoke" {
-			wantState = store.StepSkipped
-		}
-		if !ok || s.State != wantState {
+		if !ok || s.State != store.StepSent {
 			t.Errorf("step %s: %+v", n, s)
 		}
 	}
@@ -809,13 +820,94 @@ func TestReleaseAvailabilityDeadlineSurvivesRestart(t *testing.T) {
 	}
 }
 
-// No aegis and no verify command: the gate is skipped with the reason recorded.
-func TestReleaseGateSkippedWithoutVerify(t *testing.T) {
+// No aegis and no verify command: the gate is not skipped (owner rule: no
+// publish without verification) — the run is held with an unread attention
+// event before anything is pushed; once a verify command exists, resume ships it.
+func TestReleaseHeldWithoutVerify(t *testing.T) {
 	e := newEnv(t)
-	e.deps.Gate = func(context.Context, string, string, string, string) (CmdResult, bool) { return CmdResult{}, false }
+	hasVerify := false
+	gate := e.deps.Gate
+	e.deps.Gate = func(ctx context.Context, project, localPath, dir, logDir string) (CmdResult, bool) {
+		if !hasVerify {
+			return CmdResult{}, false
+		}
+		return gate(ctx, project, localPath, dir, logDir)
+	}
+	en := e.engine(false)
+	r := e.release(en, Request{})
+	run := e.run(r.ID)
+	st := e.steps(r.ID)["gate"]
+	if run.State != store.RunHeld || run.HeldReason != HeldNoVerify || st.State != store.StepFailed || !strings.Contains(st.Error, "no verify command") {
+		t.Fatalf("run %+v gate %+v", run, st)
+	}
+	if e.git.count("refs/heads/main") != 0 || e.nexus.count() != 0 || len(e.smokes) != 0 {
+		t.Fatal("something ran after the missing gate")
+	}
+	evs, err := e.st.Events(t.Context(), true, 0)
+	if err != nil || len(evs) != 1 || evs[0].Kind != "release.held" || evs[0].Severity != store.SeverityAttention ||
+		evs[0].RunID != r.ID || !strings.Contains(string(evs[0].Detail), "no verify command") {
+		t.Fatalf("events %v %+v", err, evs)
+	}
+	hasVerify = true
+	if _, err := en.Resume(t.Context(), r.ID); err != nil {
+		t.Fatal(err)
+	}
+	en.Wait()
+	if got := e.run(r.ID); got.State != store.RunDone {
+		t.Fatalf("after resume %+v", got)
+	}
+}
+
+// The smoke adapter runs on the built archive after the gate; a failure holds
+// the run before any push with the failing output in the step and the event.
+func TestReleaseSmokeFailedHolds(t *testing.T) {
+	e := newEnv(t)
+	e.smokeRes = smoke.Result{Kind: config.SmokeCommand, Steps: []smoke.CmdResult{{Command: "smoke.cmd", ExitCode: 3, Output: "mod crashed"}}}
 	r := e.release(e.engine(false), Request{})
-	if st := e.steps(r.ID)["gate"]; st.State != store.StepSkipped || st.Error != "no verify command" || e.run(r.ID).State != store.RunDone {
-		t.Fatalf("gate %+v run %s", st, e.run(r.ID).State)
+	run := e.run(r.ID)
+	st := e.steps(r.ID)["smoke"]
+	if run.State != store.RunHeld || run.HeldReason != HeldSmokeFailed || st.State != store.StepFailed ||
+		!strings.Contains(st.Error, "mod crashed") || !strings.Contains(st.ExternalRef, `"exitCode":3`) {
+		t.Fatalf("run %+v smoke %+v", run, st)
+	}
+	if len(e.smokes) != 1 || filepath.Base(e.smokes[0].Archive) != "my-mod_1.0.1.zip" || e.smokes[0].Version != "1.0.1" ||
+		e.smokes[0].Name != "my-mod" || e.smokes[0].Profile.Command != "smoke.cmd {archive}" {
+		t.Fatalf("smoke requests %+v", e.smokes)
+	}
+	if e.git.count("refs/heads/main") != 0 || e.git.count("refs/tags/v1.0.1") != 0 || e.nexus.count() != 0 || e.factorio.count() != 0 {
+		t.Fatal("published after a failed smoke test")
+	}
+	// An adapter that cannot run here holds with its own reason.
+	e2 := newEnv(t)
+	e2.smokeErr = fmt.Errorf("%w: no Factorio install found", smoke.ErrUnavailable)
+	r2 := e2.release(e2.engine(false), Request{})
+	if got := e2.run(r2.ID); got.State != store.RunHeld || got.HeldReason != HeldSmokeUnavailable {
+		t.Fatalf("unavailable %+v", got)
+	}
+}
+
+// No smoke test: held unless the project allows publishing without one.
+func TestReleaseWithoutSmoke(t *testing.T) {
+	e := newEnv(t)
+	pa := e.cfg.Agents.Projects[codeKey]
+	pa.PublishProfile.Smoke = config.SmokeProfile{Kind: config.SmokeNone}
+	e.cfg.Agents.Projects[codeKey] = pa
+	en := e.engine(false)
+	r := e.release(en, Request{})
+	if got := e.run(r.ID); got.State != store.RunHeld || got.HeldReason != HeldSmokeMissing || e.git.count("refs/heads/main") != 0 {
+		t.Fatalf("no smoke %+v", got)
+	}
+	e.mu.Lock()
+	pa.Autopilot.PublishWithoutSmoke = true
+	e.cfg.Agents.Projects[codeKey] = pa
+	e.mu.Unlock()
+	if _, err := en.Resume(t.Context(), r.ID); err != nil {
+		t.Fatal(err)
+	}
+	en.Wait()
+	st := e.steps(r.ID)["smoke"]
+	if got := e.run(r.ID); got.State != store.RunDone || st.State != store.StepSkipped || len(e.smokes) != 0 {
+		t.Fatalf("publishWithoutSmoke %+v smoke %+v", got, st)
 	}
 }
 
@@ -834,6 +926,9 @@ func TestReleaseCheckFullDryRun(t *testing.T) {
 	}
 	if !res.ArchiveCheck.OK || !strings.Contains(res.ArchiveCheck.Note, "factorio layout ok") {
 		t.Fatalf("archive check %+v", res.ArchiveCheck)
+	}
+	if !res.Smoke.OK || res.Smoke.Result == nil || len(e.smokes) != 1 {
+		t.Fatalf("smoke %+v", res.Smoke)
 	}
 	if len(res.TargetPlans) != 2 || !res.TargetPlans[0].OK || len(res.TargetPlans[0].Plan) != 1 || !res.TargetPlans[1].OK {
 		t.Fatalf("target plans %+v", res.TargetPlans)

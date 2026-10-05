@@ -14,6 +14,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -55,8 +56,11 @@ type Deps struct {
 	Gate func(ctx context.Context, project, localPath, dir, logDir string) (res CmdResult, ran bool)
 	// Command runs a shell command in dir inside a job object (the build).
 	Command func(ctx context.Context, dir, command, logDir string, timeout time.Duration) CmdResult
-	Now     func() time.Time
-	Log     *slog.Logger
+	// Smoke runs the profile's smoke adapter on the built archive (smoke.Runner.Run);
+	// nil = no adapter can run (a smoke kind other than none → held).
+	Smoke func(ctx context.Context, req smoke.Request) (smoke.Result, error)
+	Now   func() time.Time
+	Log   *slog.Logger
 	// OnChange runs after every change of a run or one of its steps (SSE autopilot.run).
 	OnChange func(runID int64)
 	// OnEvent runs after an activity log event was written.
@@ -228,6 +232,20 @@ func (e *Engine) holdRun(ctx context.Context, run store.Run, reason, detail stri
 		fmt.Sprintf("Релиз v%s остановлен: %s", r.Version, reason), map[string]any{"reason": reason, "detail": detail})
 }
 
+// stepError is the stored error of st after it ran (the held event's detail).
+func (e *Engine) stepError(ctx context.Context, st store.Step) string {
+	steps, err := e.d.Store.RunSteps(context.WithoutCancel(ctx), st.RunID)
+	if err != nil {
+		return ""
+	}
+	for _, s := range steps {
+		if s.Step == st.Step && s.Target == st.Target {
+			return tail(s.Error, 2000)
+		}
+	}
+	return ""
+}
+
 func (e *Engine) event(ctx context.Context, r store.Run, kind, severity, title string, detail map[string]any) {
 	b, _ := json.Marshal(detail)
 	ev, err := e.d.Store.AddEvent(context.WithoutCancel(ctx), store.AutopilotEvent{RunID: r.ID, ProjectID: r.ProjectID,
@@ -355,7 +373,7 @@ func (e *Engine) Execute(ctx context.Context, id int64) error {
 			return err
 		}
 		if hold != "" && !targetStep(*next) {
-			e.holdRun(ctx, c.run, hold, next.Error)
+			e.holdRun(ctx, c.run, hold, e.stepError(ctx, *next))
 			return nil
 		}
 		if hold != "" && c.hold == "" {
@@ -595,7 +613,7 @@ func (e *Engine) runLocal(ctx context.Context, c *rc, st store.Step) localResult
 	case StepGate:
 		return e.gate(ctx, c)
 	case StepSmoke:
-		return localResult{skip: "no smoke adapter yet (Phase 2)"}
+		return e.smoke(ctx, c)
 	case StepAvailable:
 		return e.available(ctx, c, st)
 	}

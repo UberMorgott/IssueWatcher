@@ -16,6 +16,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider/factorio"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/release/source"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -410,12 +411,15 @@ func (e *Engine) gate(ctx context.Context, c *rc) localResult {
 	if err := e.folderAt(ctx, m, m.BumpSHA); err != nil {
 		return localResult{hold: HeldFolderMoved, err: err}
 	}
+	// Owner rule: nothing is published without verification — a project with
+	// neither Aegis nor a verify command is held, not skipped.
 	if e.d.Gate == nil {
-		return localResult{skip: "no verify gate available"}
+		return localResult{hold: HeldNoVerify, err: errors.New("no verify gate available")}
 	}
 	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, filepath.Join(e.runDir(c.run.ID), "logs"))
 	if !ran {
-		return localResult{skip: "no verify command"} // neither aegis nor the project's verify command
+		return localResult{hold: HeldNoVerify, err: errors.New(
+			"no verify command: the project has neither Aegis nor a verify command; add one (Settings › Projects) and resume")}
 	}
 	if !res.OK {
 		return localResult{hold: HeldGate, err: fmt.Errorf("%s: exit %d: %s", res.Command, res.ExitCode, tail(res.Output, 2000))}
@@ -426,6 +430,49 @@ func (e *Engine) gate(ctx context.Context, c *rc) localResult {
 	res.Output = ""
 	b, _ := json.Marshal(res)
 	return localResult{ref: string(b)}
+}
+
+// --- smoke -------------------------------------------------------------------
+
+// smoke runs the profile's smoke adapter on the built archive (isolated temp
+// dirs under the run dir). No smoke test is allowed only with the project's
+// publishWithoutSmoke; otherwise the run is held.
+func (e *Engine) smoke(ctx context.Context, c *rc) localResult {
+	m := c.m
+	prof := m.Profile.Smoke
+	if prof.Kind == "" || prof.Kind == config.SmokeNone {
+		if e.d.Settings != nil && e.d.Settings().Agents.AutopilotFor(m.Project).PublishWithoutSmoke {
+			return localResult{skip: "no smoke test (publishing without a smoke test is on)"}
+		}
+		return localResult{hold: HeldSmokeMissing, err: errors.New(
+			"no smoke test in the publish profile and «Публиковать без смоук-теста» is off")}
+	}
+	if e.d.Smoke == nil {
+		return localResult{hold: HeldSmokeUnavailable, err: errors.New("smoke tests are not available")}
+	}
+	if c.art == nil {
+		return localResult{err: errors.New("no built archive")}
+	}
+	dir := e.runDir(c.run.ID)
+	work := filepath.Join(dir, "smoke")
+	_ = os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
+	res, err := e.d.Smoke(ctx, smoke.Request{Profile: prof, Archive: c.art.Path, Name: m.ModName, Version: m.Version,
+		WorkDir: work, LogDir: filepath.Join(dir, "logs")})
+	b, _ := json.Marshal(res)
+	switch {
+	case errors.Is(err, smoke.ErrUnavailable):
+		return localResult{hold: HeldSmokeUnavailable, err: err, ref: string(b)}
+	case err != nil:
+		return localResult{hold: HeldSmokeFailed, err: err, ref: string(b)}
+	case !res.OK:
+		return localResult{hold: HeldSmokeFailed, err: fmt.Errorf("smoke %s: %s", res.Kind, res.Summary()), ref: string(b)}
+	}
+	note := res.Kind
+	if res.Version != "" {
+		note += " (game " + res.Version + ")"
+	}
+	return localResult{ref: string(b), note: "passed: " + note}
 }
 
 // --- remote ------------------------------------------------------------------

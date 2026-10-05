@@ -11,8 +11,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/release/source"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -24,7 +26,17 @@ type CheckResult struct {
 	Plan
 	Build        CheckBuild   `json:"build"`
 	ArchiveCheck CheckArchive `json:"archiveCheck"`
+	Smoke        CheckSmoke   `json:"smoke"`
 	TargetPlans  []TargetPlan `json:"targetPlans"`
+}
+
+// CheckSmoke is the smoke test of the trial build.
+type CheckSmoke struct {
+	OK      bool          `json:"ok"`
+	Skipped string        `json:"skipped,omitempty"`
+	Code    string        `json:"code,omitempty"` // smoke_failed | smoke_missing | smoke_unavailable
+	Error   string        `json:"error,omitempty"`
+	Result  *smoke.Result `json:"result,omitempty"`
 }
 
 // CheckBuild is the trial build.
@@ -75,7 +87,7 @@ func (e *Engine) Check(ctx context.Context, projectID int64, req Request) (Check
 		b.Skipped = "builds are not available"
 	}
 	if b.Skipped != "" {
-		res.Build, res.ArchiveCheck.Skipped = b, "no archive"
+		res.Build, res.ArchiveCheck.Skipped, res.Smoke.Skipped = b, "no archive", "no archive"
 		return res, nil
 	}
 	dir := filepath.Join(e.d.DataDir, "release", "check-"+randHex(6))
@@ -83,7 +95,7 @@ func (e *Engine) Check(ctx context.Context, projectID int64, req Request) (Check
 	art, b := e.trialBuild(ctx, m, dir)
 	res.Build = b
 	if art == nil {
-		res.ArchiveCheck.Skipped = "no archive"
+		res.ArchiveCheck.Skipped, res.Smoke.Skipped = "no archive", "no archive"
 		return res, nil
 	}
 	if note, err := e.checkArchive(ctx, *art, m, projectID); err != nil {
@@ -92,6 +104,7 @@ func (e *Engine) Check(ctx context.Context, projectID int64, req Request) (Check
 		res.ArchiveCheck.OK, res.ArchiveCheck.Note = true, note
 	}
 	c := &rc{m: m, art: art, files: map[string]string{}}
+	res.Smoke = e.trialSmoke(ctx, c, filepath.Join(dir, "smoke"), filepath.Join(dir, "logs"))
 	for _, t := range m.Targets {
 		res.TargetPlans = append(res.TargetPlans, e.targetDryRun(ctx, c, t))
 	}
@@ -169,6 +182,33 @@ func (e *Engine) trialBuild(ctx context.Context, m *Manifest, dir string) (*Arti
 	}
 	b.OK, b.Artifact = true, &art
 	return &art, b
+}
+
+// trialSmoke runs the smoke test on the trial archive (as the smoke step would).
+func (e *Engine) trialSmoke(ctx context.Context, c *rc, work, logs string) CheckSmoke {
+	prof := c.m.Profile.Smoke
+	if prof.Kind == "" || prof.Kind == config.SmokeNone {
+		if e.d.Settings != nil && e.d.Settings().Agents.AutopilotFor(c.m.Project).PublishWithoutSmoke {
+			return CheckSmoke{OK: true, Skipped: "no smoke test (publishing without a smoke test is on)"}
+		}
+		return CheckSmoke{Code: HeldSmokeMissing, Error: "no smoke test in the publish profile and «Публиковать без смоук-теста» is off: a release would be held"}
+	}
+	if e.d.Smoke == nil {
+		return CheckSmoke{Code: HeldSmokeUnavailable, Error: "smoke tests are not available"}
+	}
+	defer func() { _ = os.RemoveAll(work) }()
+	res, err := e.d.Smoke(ctx, smoke.Request{Profile: prof, Archive: c.art.Path, Name: c.m.ModName, Version: c.m.Version,
+		WorkDir: work, LogDir: logs})
+	out := CheckSmoke{OK: err == nil && res.OK, Result: &res}
+	switch {
+	case errors.Is(err, smoke.ErrUnavailable):
+		out.Code, out.Error = HeldSmokeUnavailable, err.Error()
+	case err != nil:
+		out.Code, out.Error = HeldSmokeFailed, err.Error()
+	case !res.OK:
+		out.Code, out.Error = HeldSmokeFailed, res.Summary()
+	}
+	return out
 }
 
 // targetDryRun asks the target's publisher for its plan on the trial archive.

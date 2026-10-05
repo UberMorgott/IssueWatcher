@@ -128,10 +128,13 @@ type ChangelogProfile struct {
 
 // SmokeProfile is the post-build smoke test.
 type SmokeProfile struct {
-	Kind    string `json:"kind,omitempty"` // factorio | command | none
-	Save    string `json:"save,omitempty"` // factorio: save to load
-	Ticks   int    `json:"ticks,omitempty"`
-	Command string `json:"command,omitempty"` // command
+	Kind  string `json:"kind,omitempty"` // factorio | command | none
+	Save  string `json:"save,omitempty"` // factorio: save to load ("" = a fresh map)
+	Ticks int    `json:"ticks,omitempty"`
+	// Install is the Factorio install root or factorio.exe ("" = auto-detect: Steam libraries, Program Files).
+	Install string `json:"install,omitempty"`
+	// Command runs in a temp dir with {archive} (quoted path), {name}, {version} replaced.
+	Command string `json:"command,omitempty"`
 }
 
 // TargetProfile configures one publish target; each platform reads its own fields.
@@ -258,7 +261,7 @@ func (p PublishProfile) validate(project string) error {
 		return invalid(base+"smoke.command", "required", nil, "required for a command smoke test")
 	case s.Ticks < 0 || s.Ticks > maxSmokeTicks:
 		return outOfRange(base+"smoke.ticks", 0, maxSmokeTicks)
-	case len(s.Command) > maxProfileText || len(s.Save) > maxProfileText:
+	case len(s.Command) > maxProfileText || len(s.Save) > maxProfileText || len(s.Install) > maxProfileText:
 		return invalid(base+"smoke", "tooLong", map[string]any{"max": maxProfileText}, "too long")
 	case len(p.Targets) > maxPublishTargets:
 		return invalid(base+"targets", "tooMany", map[string]any{"max": maxPublishTargets}, "at most %d targets", maxPublishTargets)

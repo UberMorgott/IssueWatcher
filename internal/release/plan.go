@@ -14,6 +14,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/release/source"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -382,6 +383,29 @@ func (e *Engine) planCaps(ctx context.Context, p *Plan, projectID int64, cfg con
 	}
 }
 
+// smokeStep is the smoke test as the plan shows it.
+func smokeStep(s config.SmokeProfile) PlanStep {
+	switch s.Kind {
+	case config.SmokeFactorio:
+		save := "a fresh map"
+		if s.Save != "" {
+			save = s.Save
+		}
+		ticks := s.Ticks
+		if ticks <= 0 {
+			ticks = smoke.DefaultTicks
+		}
+		install := "auto-detected install"
+		if s.Install != "" {
+			install = s.Install
+		}
+		return PlanStep{Step: StepSmoke, Request: fmt.Sprintf("factorio --create + --benchmark %s for %d ticks with the archive in a temp mod directory (%s)", save, ticks, install)}
+	case config.SmokeCommand:
+		return PlanStep{Step: StepSmoke, Request: "run in a temp dir: " + s.Command}
+	}
+	return PlanStep{Step: StepSmoke, Request: "no smoke test", Note: "held unless «Публиковать без смоук-теста» is on"}
+}
+
 // planSteps lists the run's steps in order (the NewStep list and the plan's view).
 func planSteps(m *Manifest) []PlanStep {
 	st := []PlanStep{
@@ -389,7 +413,7 @@ func planSteps(m *Manifest) []PlanStep {
 		{Step: StepBuild, Request: buildRequest(m)},
 		{Step: StepArchiveCheck, Request: "open " + m.Asset + ": layout, version " + m.Version + ", size vs the previous release"},
 		{Step: StepGate, Request: "verify gate (aegis verify / project verify command) in " + m.Folder + " at the bump commit"},
-		{Step: StepSmoke, Request: "smoke test", Note: "no smoke adapter yet (Phase 2): skipped"},
+		smokeStep(m.Profile.Smoke),
 		{Step: StepPush, IdemKey: m.Branch + ":<bump sha>", Request: "git push <repo>.git <bump sha>:refs/heads/" + m.Branch + " (from the app mirror, fast-forward only)"},
 		{Step: StepTag, IdemKey: m.Tag + ":<bump sha>", Request: "git push <repo>.git refs/tags/" + m.Tag + " (annotated, on the bump sha)"},
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -79,6 +80,24 @@ func (r *Runner) RunCommand(ctx context.Context, dir, command, logDir string, ti
 	}
 	argv := append(append([]string{}, r.opts.Shell...), command)
 	return r.verify(ctx, dir, filepath.Clean(logDir), argv, command, &jobLog{})
+}
+
+// RunArgv runs argv (no shell) in dir inside a job object, like RunCommand
+// (the smoke test's game processes).
+func (r *Runner) RunArgv(ctx context.Context, dir string, argv []string, logDir string, timeout time.Duration) VerifyResult {
+	label := strings.Join(argv, " ")
+	if len(argv) == 0 {
+		return VerifyResult{ExitCode: -1, Output: "no command"}
+	}
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return VerifyResult{Command: label, ExitCode: -1, Output: err.Error()}
+	}
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	return r.verify(ctx, dir, filepath.Clean(logDir), argv, label, &jobLog{})
 }
 
 // TokenEnv is tokenEnv for other packages: the token reaches git through

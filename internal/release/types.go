@@ -56,6 +56,14 @@ const (
 	HeldVersion        = "version_conflict"
 	HeldArtifact       = "artifact_changed"
 	HeldAvailability   = "availability_timeout"
+	// HeldNoVerify: neither Aegis nor a verify command (owner rule: no publish without verification).
+	HeldNoVerify = "no_verify"
+	// HeldSmokeFailed: the smoke test failed on the built archive.
+	HeldSmokeFailed = "smoke_failed"
+	// HeldSmokeMissing: no smoke test and publishWithoutSmoke is off.
+	HeldSmokeMissing = "smoke_missing"
+	// HeldSmokeUnavailable: the smoke adapter cannot run here (no install, missing dependency).
+	HeldSmokeUnavailable = "smoke_unavailable"
 )
 
 // Manifest is a release run's frozen input (store.Run.Manifest). Written once

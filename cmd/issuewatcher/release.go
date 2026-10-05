@@ -11,6 +11,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/release"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
+	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -31,6 +32,14 @@ func newReleaseEngine(log *slog.Logger, dataDir string, cfgs *config.Store, st *
 		Command: func(ctx context.Context, dir, command, logDir string, timeout time.Duration) release.CmdResult {
 			return release.CmdResult(jobs.RunCommand(ctx, dir, command, logDir, timeout))
 		},
+		Smoke: smoke.Runner{
+			Exec: func(ctx context.Context, dir string, argv []string, logDir string, timeout time.Duration) smoke.CmdResult {
+				return smoke.CmdResult(jobs.RunArgv(ctx, dir, argv, logDir, timeout))
+			},
+			Shell: func(ctx context.Context, dir, command, logDir string, timeout time.Duration) smoke.CmdResult {
+				return smoke.CmdResult(jobs.RunCommand(ctx, dir, command, logDir, timeout))
+			},
+		}.Run,
 		Log: log.With("component", "release"),
 		OnChange: func(id int64) {
 			if s := srv(); s != nil {
