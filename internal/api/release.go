@@ -17,7 +17,8 @@ import (
 //
 //	GET  /api/projects/{id}/publish-profile          → ProfileDoc (profile + autopilot + resolved plan)
 //	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?} → ProfileDoc   (agent callers refused)
-//	POST /api/projects/{id}/publish-profile/check    release.Request? → release.Plan
+//	POST /api/projects/{id}/publish-profile/check    release.Request? → release.CheckResult (plan + trial build at HEAD in a temp
+//	                                                 worktree, archive check, per-target publisher dry run; nothing committed or sent)
 //	POST /api/projects/{id}/release/plan             release.Request → release.Plan
 //	POST /api/projects/{id}/release                  release.Request: dryRun → 200 Plan; else 202 {run, plan}  (agent callers refused)
 //	                                                 refused → 409 {error, code, refusals, plan}
@@ -45,7 +46,7 @@ const codeAgentCaller = "agent_caller"
 func (s *Server) registerRelease(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{id}/publish-profile", s.handleProfileGet)
 	mux.HandleFunc("PUT /api/projects/{id}/publish-profile", s.handleProfilePut)
-	mux.HandleFunc("POST /api/projects/{id}/publish-profile/check", s.handlePlan)
+	mux.HandleFunc("POST /api/projects/{id}/publish-profile/check", s.handleCheck)
 	mux.HandleFunc("POST /api/projects/{id}/release/plan", s.handlePlan)
 	mux.HandleFunc("POST /api/projects/{id}/release", s.handleRelease)
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
@@ -286,6 +287,25 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// handleCheck is «Проверить настройку»: the full dry run (slow: it builds).
+func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
+	rp, ok := s.codeProject(w, r)
+	if !ok {
+		return
+	}
+	var req release.Request
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.Origin = s.origin(r)
+	res, err := s.opts.Release.Check(r.Context(), rp.ID, req)
+	if err != nil {
+		s.internalError(w, "publish profile check", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {

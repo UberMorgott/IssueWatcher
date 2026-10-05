@@ -242,9 +242,7 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 	e.planCaps(ctx, &p, projectID, cfg, ap, len(selected), refuse)
 	p.Steps = planSteps(m)
 	p.OK = len(p.Refusals) == 0
-	if p.OK {
-		p.manifest = m
-	}
+	p.manifest = m // Release uses it only when OK; Check builds from it regardless
 	return p, nil
 }
 

@@ -66,6 +66,9 @@ func (f *fakePub) CheckPublish(_ provider.Project, req provider.PublishRequest) 
 }
 
 func (f *fakePub) Publish(_ context.Context, _ provider.Project, req provider.PublishRequest, _ func(provider.PublishProgress)) (provider.PublishResult, error) {
+	if req.DryRun {
+		return provider.PublishResult{DryRun: true, Plan: []provider.PublishStep{{Method: "POST", URL: "/" + f.platform + "/upload", Note: req.Path}}}, nil
+	}
 	b, err := os.ReadFile(req.Path)
 	if err != nil {
 		return provider.PublishResult{}, err
@@ -813,5 +816,47 @@ func TestReleaseGateSkippedWithoutVerify(t *testing.T) {
 	r := e.release(e.engine(false), Request{})
 	if st := e.steps(r.ID)["gate"]; st.State != store.StepSkipped || st.Error != "no verify command" || e.run(r.ID).State != store.RunDone {
 		t.Fatalf("gate %+v run %s", st, e.run(r.ID).State)
+	}
+}
+
+// «Проверить настройку»: builds the archive at HEAD in a temporary worktree
+// (version written there only), checks it and asks every target for its dry
+// run; the folder, the remote and the platforms stay untouched.
+func TestReleaseCheckFullDryRun(t *testing.T) {
+	e := newEnv(t)
+	res, err := e.engine(false).Check(t.Context(), e.codeID, Request{})
+	if err != nil || !res.OK {
+		t.Fatalf("check %v %+v", err, res.Refusals)
+	}
+	if !res.Build.OK || res.Build.Head != e.head || res.Build.Artifact == nil || !slices.Contains(res.Build.Writes, "info.json") ||
+		!slices.Contains(res.Build.Writes, "changelog.txt") || res.Build.Artifact.Name != "my-mod_1.0.1.zip" {
+		t.Fatalf("build %+v", res.Build)
+	}
+	if !res.ArchiveCheck.OK || !strings.Contains(res.ArchiveCheck.Note, "factorio layout ok") {
+		t.Fatalf("archive check %+v", res.ArchiveCheck)
+	}
+	if len(res.TargetPlans) != 2 || !res.TargetPlans[0].OK || len(res.TargetPlans[0].Plan) != 1 || !res.TargetPlans[1].OK {
+		t.Fatalf("target plans %+v", res.TargetPlans)
+	}
+	if git(t, e.folder, "rev-parse", "HEAD") != e.head || git(t, e.folder, "status", "--porcelain") != "" {
+		t.Fatal("the check changed the folder")
+	}
+	if e.nexus.count() != 0 || e.factorio.count() != 0 || e.git.count("refs/heads/main") != 0 || e.ghCalls("POST", "/releases") != 0 {
+		t.Fatal("the check sent something")
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.deps.DataDir, "release", "check-*")); len(left) != 0 {
+		t.Fatalf("temporary build left: %v", left)
+	}
+	runs, _ := e.st.Runs(t.Context(), store.RunFilter{})
+	if len(runs) != 0 {
+		t.Fatal("the check created a run")
+	}
+	// A failing build is reported, not thrown.
+	e.deps.Command = func(context.Context, string, string, string, time.Duration) CmdResult {
+		return CmdResult{Command: "build.cmd", ExitCode: 3, Output: "boom"}
+	}
+	res, err = e.engine(false).Check(t.Context(), e.codeID, Request{})
+	if err != nil || res.Build.OK || res.Build.Command == nil || res.Build.Command.Output != "boom" || res.ArchiveCheck.Skipped == "" {
+		t.Fatalf("failing build %v %+v", err, res.Build)
 	}
 }

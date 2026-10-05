@@ -68,6 +68,11 @@ func TestPublishProfileAndReleaseRoutes(t *testing.T) {
 	if code, got := e.callErr(t, http.MethodPost, base+"/release", `{}`); code != http.StatusConflict || got != release.CodeNoFolder {
 		t.Fatalf("release %d %q", code, got)
 	}
+	var chk release.CheckResult
+	if code := e.call(t, http.MethodPost, base+"/publish-profile/check", `{}`, &chk); code != http.StatusOK || chk.Build.Skipped == "" ||
+		chk.Refusals[0].Code != release.CodeNoFolder {
+		t.Fatalf("check %d %+v", code, chk)
+	}
 	var runs []store.Run
 	if code := e.call(t, http.MethodGet, "/api/runs?project="+itoa(id), "", &runs); code != http.StatusOK || len(runs) != 0 {
 		t.Fatalf("runs %d %+v", code, runs)
