@@ -208,7 +208,7 @@ func TestProvidersMigrationV7(t *testing.T) {
 	provs, _ := raw["providers"].(map[string]any)
 	nx, _ := provs["nexus"].(map[string]any)
 	cf, _ := provs["curseforge"].(map[string]any)
-	if raw["schemaVersion"] != float64(7) || raw["future"] != "keep" || nx["future"] != float64(7) || nx["author"] != "UberMorgott" {
+	if raw["schemaVersion"] != float64(SchemaVersion) || raw["future"] != "keep" || nx["future"] != float64(7) || nx["author"] != "UberMorgott" {
 		t.Fatalf("file: %v", raw)
 	}
 	for id, p := range map[string]map[string]any{"nexus": nx, "curseforge": cf} {

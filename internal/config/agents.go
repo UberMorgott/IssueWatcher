@@ -30,6 +30,8 @@ type Agents struct {
 	// in the linked code project's folder); off = the commit stays local.
 	// Per-project override (keyed by the mod page) in Projects.
 	ModPush bool `json:"modPush"`
+	// Autopilot is the global autopilot block (kill switch, caps); per-project in Projects.
+	Autopilot AgentsAutopilot `json:"autopilot"`
 }
 
 // DefaultTriageTopN is the built-in TriageTopN; MaxTriageTopN its upper bound.
@@ -109,6 +111,10 @@ type ProjectAgent struct {
 	ModPush *bool `json:"modPush,omitempty"`
 	// Automation overrides the global automation defaults for this project.
 	Automation ProjectAutomation `json:"automation,omitzero"`
+	// Autopilot is the unattended fix/release setup of a code project (defaults off).
+	Autopilot ProjectAutopilot `json:"autopilot,omitzero"`
+	// PublishProfile says how the project is built, versioned and published.
+	PublishProfile PublishProfile `json:"publishProfile,omitzero"`
 }
 
 // Default prompt texts. Variables: {repo} {issue.number} {issue.title}
@@ -209,6 +215,7 @@ func defaultAgents() Agents {
 		Automation: defaultAutomation(),
 		JobMCP:     true,
 		TriageTopN: DefaultTriageTopN,
+		Autopilot:  defaultAgentsAutopilot(),
 	}
 }
 
@@ -373,6 +380,15 @@ func (a Agents) validate() error {
 		if err := p.Automation.validate(name); err != nil {
 			return err
 		}
+		if err := p.Autopilot.validate(name); err != nil {
+			return err
+		}
+		if err := p.PublishProfile.validate(name); err != nil {
+			return err
+		}
+	}
+	if err := a.Autopilot.validate(); err != nil {
+		return err
 	}
 	return a.Automation.validate(seen)
 }

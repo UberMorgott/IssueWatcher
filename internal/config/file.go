@@ -120,6 +120,7 @@ func migrate(raw map[string]any) bool {
 			}
 		}
 	}
+	// v7 → v8: autopilot blocks only add defaults (decode fills them); nothing moves.
 	raw["schemaVersion"] = SchemaVersion
 	return true
 }

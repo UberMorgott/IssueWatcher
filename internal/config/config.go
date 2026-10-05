@@ -27,7 +27,9 @@ const File = "config.json"
 //	     overrides; only defaults are added
 //	6:   project keys source-qualified: agents.projects keys and rule projects owner/repo → github:owner/repo
 //	7:   providers.nexus/curseforge lose mcp + engine (the MCP engine is gone; native only)
-const SchemaVersion = 7
+//	8:   + agents.autopilot (paused, caps), agents.projects.*.autopilot and .publishProfile;
+//	     only defaults are added (docs/AUTOPILOT.md → Config schema)
+const SchemaVersion = 8
 
 // ErrConflict means the caller edited an older revision.
 var ErrConflict = errors.New("config: settings changed elsewhere")
@@ -140,6 +142,9 @@ func (s *Store) change(rev int, edit func(map[string]any), before func(old, next
 		err = invalid("", "json", nil, "%v", err)
 	} else {
 		err = next.Validate()
+	}
+	if err == nil {
+		err = checkNoSecrets(raw)
 	}
 	if err == nil && before != nil {
 		err = before(s.cur, next)
