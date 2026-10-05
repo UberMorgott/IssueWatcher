@@ -362,16 +362,18 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		},
 		// Tray/notification clicks give this process foreground rights: bring the
 		// dashboard's browser window to the front, or open a new tab.
-		Focus:         focus,
-		SessionSecret: session,
-		Runner:        jobs,
-		Picker:        picker,
-		Steam:         stm,
-		NexusKey:      mods.nexusKeys,
-		Publishers:    mods.Publisher,
-		PageEditors:   mods.PageEditor,
-		Platforms:     mods,
-		Release:       releases,
+		Focus:            focus,
+		SessionSecret:    session,
+		Runner:           jobs,
+		Picker:           picker,
+		Steam:            stm,
+		NexusKey:         mods.nexusKeys,
+		CurseForgeUpload: mods.cfUpload,
+		SteamUpload:      mods.workshop,
+		Publishers:       mods.Publisher,
+		PageEditors:      mods.PageEditor,
+		Platforms:        mods,
+		Release:          releases,
 	})
 	if err != nil {
 		return err

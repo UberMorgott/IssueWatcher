@@ -80,6 +80,10 @@ type Options struct {
 	Steam SteamSettings
 	// NexusKey is the Nexus API key store (/api/providers/nexus); nil disables it.
 	NexusKey NexusKeys
+	// CurseForgeUpload / SteamUpload are the upload credentials
+	// (/api/providers/{curseforge,steam}/upload); nil disables them.
+	CurseForgeUpload CurseForgeUpload
+	SteamUpload      SteamUpload
 	// Publishers returns the provider that publishes new versions for a
 	// platform, nil when none (/api/projects/{id}/publish, needs Store); nil disables them.
 	Publishers func(platform string) provider.Publisher
@@ -190,6 +194,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	if opts.NexusKey != nil {
 		s.registerNexus(mux)
 	}
+	s.registerUploads(mux)
 	if opts.Publishers != nil && opts.Store != nil {
 		s.registerPublish(mux)
 	}

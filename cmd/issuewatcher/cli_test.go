@@ -170,6 +170,8 @@ func TestCLIActionCommands(t *testing.T) {
 		{"", []string{"job", "labels", "9", "bug", "ui"}, apiCall{"POST", "/api/jobs/9/labels", "", `{"labels":["bug","ui"]}`}, `"id": 9`},
 		{"", []string{"publish", "69", "--path", `C:\m\mod_1.1.6.zip`, "--version", "1.1.6", "--dry-run"},
 			apiCall{"POST", "/api/projects/69/publish", "", `{"path":"C:\\m\\mod_1.1.6.zip","version":"1.1.6","dryRun":true}`}, `"dryRun": true`},
+		{"", []string{"publish", "69", "--path", `C:\m\mod.jar`, "--version", "0.1.0", "--game-versions", "0.6, Early Access", "--release-type", "beta", "--app-id", "839770"},
+			apiCall{"POST", "/api/projects/69/publish", "", `{"path":"C:\\m\\mod.jar","version":"0.1.0","appId":839770,"gameVersions":["0.6","Early Access"],"releaseType":"beta"}`}, ``},
 		{"", []string{"publish", "targets", "69"}, apiCall{"GET", "/api/projects/69/publish/targets", "", ""}, `"files"`},
 		{"", []string{"publish", "status", "t1"}, apiCall{"GET", "/api/publish/t1", "", ""}, `"done"`},
 	} {

@@ -21,6 +21,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider/factorio"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steamcmd"
 	"github.com/UberMorgott/issuewatcher/internal/secret"
 	"github.com/UberMorgott/issuewatcher/internal/signin"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -59,6 +60,10 @@ type modPlatforms struct {
 	// nexusKeys is the Nexus API key (data\secrets\nexus-api.json) the v3 upload API takes.
 	nexusKeys    *nexus.Keys
 	factorioKeys *factorio.Keys
+	// cfUpload (upload token) and workshop (steamcmd) publish to CurseForge and
+	// the Steam Workshop, independent of the platforms' read sessions.
+	cfUpload *curseforge.Uploader
+	workshop *steamcmd.Workshop
 
 	// native replaces building a native provider (tests: fake sites).
 	native func(id string, author func() string) (provider.Provider, *signin.Manager)
@@ -83,7 +88,14 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 	m := &modPlatforms{cfgs: cfgs, st: st, log: log, group: group, gh: gh, steam: stm, onUpdate: onUpdate, dataDir: dataDir,
 		live: map[string]*modPlatform{}, checks: map[string]api.PlatformStatus{}, notified: map[string]bool{},
 		nexusKeys:    nexus.NewKeys(nexus.KeysOptions{Dir: filepath.Join(dataDir, "secrets"), Version: Version}),
-		factorioKeys: factorio.NewKeys(factorio.KeysOptions{Dir: filepath.Join(dataDir, "secrets")})}
+		factorioKeys: factorio.NewKeys(factorio.KeysOptions{Dir: filepath.Join(dataDir, "secrets")}),
+		cfUpload:     curseforge.NewUploader(curseforge.UploadOptions{Dir: filepath.Join(dataDir, "secrets")})}
+	m.workshop = steamcmd.New(steamcmd.Options{DataDir: dataDir, OnRelogin: func() {
+		log.Warn("steamcmd sign-in expired: sign in again in Settings › Платформы › Steam")
+		if m.onRelogin != nil {
+			m.onRelogin(steam.Platform, "Steam (steamcmd)")
+		}
+	}})
 	m.apply(cfgs.Get())
 	group.OnProgress(func(p syncer.Progress) {
 		if p.State == syncer.ProgressDone || p.State == syncer.ProgressError {
@@ -797,6 +809,12 @@ func (m *modPlatforms) connected(ctx context.Context, id string) {
 // Publisher is the running provider of platform that publishes new versions
 // (api.Options.Publishers); nil when it is off or cannot publish.
 func (m *modPlatforms) Publisher(platform string) provider.Publisher {
+	switch platform {
+	case curseforge.Platform:
+		return m.cfUpload
+	case steamcmd.Platform:
+		return m.workshop
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	mp := m.live[platform]

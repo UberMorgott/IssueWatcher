@@ -476,6 +476,9 @@ func (c *cli) publish(args []string) (json.RawMessage, error) {
 	changelog := fs.String("changelog-file", "", "file with the changelog (nexus)")
 	fs.BoolVar(&req.ArchivePrevious, "archive-previous", false, "archive the file's current version (nexus, new version only)")
 	fs.BoolVar(&req.UpdateModVersion, "update-mod-version", false, "set the mod's version to --version (nexus)")
+	fs.IntVar(&req.AppID, "app-id", 0, "the game's app id (steam; default: the item's app)")
+	gameVersions := fs.String("game-versions", "", "comma-separated game version ids or names (curseforge; default: the previous file's)")
+	fs.StringVar(&req.ReleaseType, "release-type", "", "release, beta or alpha (curseforge; default release)")
 	fs.BoolVar(&req.DryRun, "dry-run", false, "plan only")
 	wait := fs.Bool("wait", false, "wait until the publish finishes")
 	pos, err := flags(fs, args)
@@ -491,6 +494,11 @@ func (c *cli) publish(args []string) (json.RawMessage, error) {
 	}
 	if abs, err := filepath.Abs(req.Path); err == nil {
 		req.Path = abs
+	}
+	for v := range strings.SplitSeq(*gameVersions, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			req.GameVersions = append(req.GameVersions, v)
+		}
 	}
 	if *changelog != "" {
 		b, err := os.ReadFile(*changelog)

@@ -179,27 +179,31 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		})
 
 	type publish struct {
-		Project     int64  `json:"project" jsonschema:"project id from list_projects (a mod platform project)"`
-		Path        string `json:"path" jsonschema:"absolute path of the local archive (.zip) to upload"`
-		Version     string `json:"version" jsonschema:"version to publish (Factorio: must equal the archive's info.json version)"`
-		FileID      string `json:"file_id,omitempty" jsonschema:"Nexus: the file to add the version to (list_publish_targets); Factorio: omit"`
-		NewFile     bool   `json:"new_file,omitempty" jsonschema:"Nexus only: create a new file instead of a version of file_id"`
-		Name        string `json:"name,omitempty" jsonschema:"Nexus: the file version's display name; Factorio: ignored"`
-		Description string `json:"description,omitempty" jsonschema:"Nexus: file description"`
-		Changelog   string `json:"changelog,omitempty" jsonschema:"Nexus: changelog for the version; Factorio: not accepted (the portal reads changelog.txt from the archive)"`
-		Category    string `json:"category,omitempty" jsonschema:"Nexus: main, optional or miscellaneous (default main)"`
-		ArchivePrev bool   `json:"archive_previous,omitempty" jsonschema:"Nexus, new version of file_id only: move the file's current version to Old versions"`
-		UpdateMod   bool   `json:"update_mod_version,omitempty" jsonschema:"Nexus: set the mod's version to version"`
-		DryRun      bool   `json:"dry_run,omitempty" jsonschema:"plan only: return the requests that would be sent, upload nothing"`
-		Wait        bool   `json:"wait,omitempty" jsonschema:"wait until the publish finishes and return the final task (default: return the running task at once)"`
+		Project     int64    `json:"project" jsonschema:"project id from list_projects (a mod platform project)"`
+		Path        string   `json:"path" jsonschema:"absolute path of the local archive (.zip) to upload"`
+		Version     string   `json:"version" jsonschema:"version to publish (Factorio: must equal the archive's info.json version)"`
+		FileID      string   `json:"file_id,omitempty" jsonschema:"Nexus: the file to add the version to (list_publish_targets); Factorio: omit"`
+		NewFile     bool     `json:"new_file,omitempty" jsonschema:"Nexus only: create a new file instead of a version of file_id"`
+		Name        string   `json:"name,omitempty" jsonschema:"Nexus: the file version's display name; Factorio: ignored"`
+		Description string   `json:"description,omitempty" jsonschema:"Nexus: file description"`
+		Changelog   string   `json:"changelog,omitempty" jsonschema:"Nexus: changelog for the version; Factorio: not accepted (the portal reads changelog.txt from the archive)"`
+		Category    string   `json:"category,omitempty" jsonschema:"Nexus: main, optional or miscellaneous (default main)"`
+		ArchivePrev bool     `json:"archive_previous,omitempty" jsonschema:"Nexus, new version of file_id only: move the file's current version to Old versions"`
+		UpdateMod   bool     `json:"update_mod_version,omitempty" jsonschema:"Nexus: set the mod's version to version"`
+		AppID       int      `json:"app_id,omitempty" jsonschema:"Steam Workshop: the game's app id (default: the item's app)"`
+		GameVersion []string `json:"game_versions,omitempty" jsonschema:"CurseForge: game version ids or names (default: the previous file's)"`
+		ReleaseType string   `json:"release_type,omitempty" jsonschema:"CurseForge: release, beta or alpha (default release)"`
+		DryRun      bool     `json:"dry_run,omitempty" jsonschema:"plan only: return the requests that would be sent, upload nothing"`
+		Wait        bool     `json:"wait,omitempty" jsonschema:"wait until the publish finishes and return the final task (default: return the running task at once)"`
 	}
-	add(s, &mcp.Tool{Name: "publish_version", Description: "Upload an archive as a new version of a mod project on its platform (Nexus Mods, Factorio mod portal) " +
+	add(s, &mcp.Tool{Name: "publish_version", Description: "Upload an archive as a new version of a mod project on its platform (Nexus Mods, Factorio mod portal, Steam Workshop via steamcmd: path = content folder or a zip of it, CurseForge upload API) " +
 		"through the app's stored credentials. Public unless dry_run: run dry_run first, then publish exactly once; " +
 		"never resend after an error without checking get_publish_task and the platform. Returns the publish task (or the dry-run plan)."},
 		func(ctx context.Context, in publish) (json.RawMessage, error) {
 			out, err := c.Publish(ctx, in.Project, PublishRequest{Path: in.Path, Version: in.Version, FileID: in.FileID, NewFile: in.NewFile,
 				Name: in.Name, Description: in.Description, Category: in.Category, Changelog: in.Changelog,
-				ArchivePrevious: in.ArchivePrev, UpdateModVersion: in.UpdateMod, DryRun: in.DryRun})
+				ArchivePrevious: in.ArchivePrev, UpdateModVersion: in.UpdateMod, AppID: in.AppID, GameVersions: in.GameVersion, ReleaseType: in.ReleaseType,
+				DryRun: in.DryRun})
 			if err != nil || !in.Wait || in.DryRun {
 				return out, err
 			}

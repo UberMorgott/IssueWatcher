@@ -354,7 +354,12 @@ type PublishRequest struct {
 	// new version only); UpdateModVersion sets the mod's version to Version.
 	ArchivePrevious  bool `json:"archivePrevious,omitempty"`
 	UpdateModVersion bool `json:"updateModVersion,omitempty"`
-	DryRun           bool `json:"dryRun,omitempty"`
+	// AppID: Steam (0 = the item's app); GameVersions (ids or names, none =
+	// the previous file's) and ReleaseType (release | beta | alpha): CurseForge.
+	AppID        int      `json:"appId,omitempty"`
+	GameVersions []string `json:"gameVersions,omitempty"`
+	ReleaseType  string   `json:"releaseType,omitempty"`
+	DryRun       bool     `json:"dryRun,omitempty"`
 }
 
 // PublishTargets lists the project's publishable files and their versions.
