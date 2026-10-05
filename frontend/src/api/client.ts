@@ -40,6 +40,8 @@ import type {
   PublishResult,
   PublishTargets,
   PublishTask,
+  AutopilotEvents,
+  AutopilotUnread,
   CancelResult,
   CheckResult,
   ProfileDoc,
@@ -326,6 +328,16 @@ export const api = {
   /** project → that project's autopilot.enabled = !paused; none → the global kill switch. */
   pauseAutopilot: (paused: boolean, project?: number) =>
     call<{ paused: boolean; project?: number; enabled?: boolean }>('POST', '/api/autopilot/pause', project ? { project, paused } : { paused }),
+  /** Activity log, newest first, with the unread / attention counters. */
+  autopilotEvents(q: { limit?: number; unreadOnly?: boolean } = {}) {
+    const p = new URLSearchParams()
+    if (q.limit) p.set('limit', String(q.limit))
+    if (q.unreadOnly) p.set('unreadOnly', 'true')
+    const qs = p.toString()
+    return call<AutopilotEvents>('GET', '/api/autopilot/events' + (qs ? '?' + qs : ''))
+  },
+  /** Marks the given events read (only those the owner saw). */
+  readAutopilotEvents: (ids: number[]) => call<AutopilotUnread | null>('POST', '/api/autopilot/events/read', { ids }),
 }
 
 /** Job rows always carry a result object (the column may hold null). */

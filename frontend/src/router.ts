@@ -19,6 +19,8 @@ export const router = createRouter({
     // Autopilot release runs: list + step timeline (docs/AUTOPILOT.md → UI).
     { path: '/runs', name: 'runs', component: () => import('./views/RunsView.vue'), meta: { title: 'runs' } },
     { path: '/runs/:id', name: 'run', component: () => import('./views/RunView.vue'), props: true, meta: { title: 'run' } },
+    // Autopilot activity log (top bar «Автопилот» with the unread badge).
+    { path: '/autopilot', name: 'autopilot', component: () => import('./views/AutopilotView.vue'), meta: { title: 'autopilot' } },
     { path: '/agents', redirect: '/settings/agents' },
     // One page for every account (GitHub + mod platforms); Settings › Подключения links here, the old path redirects.
     { path: '/connections', name: 'connections', component: () => import('./views/ConnectionsView.vue'), meta: { title: 'connections' } },

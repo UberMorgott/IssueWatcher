@@ -5,7 +5,7 @@ import Message from 'primevue/message'
 import { useI18n } from 'vue-i18n'
 import PlatformIcon from './PlatformIcon.vue'
 import type { CheckResult, CheckTargetPlan, PlanTarget } from '../api/types'
-import { bytes, refusalText, requestText, shortSha, stepLabel, targetBlock, targetLabel } from '../lib/release'
+import { bytes, noteText, refusalText, requestText, shortSha, smokeKindText, stepLabel, targetBlock, targetLabel } from '../lib/release'
 import { elapsed } from '../lib/format'
 import { safeUrl } from '../lib/safeUrl'
 
@@ -122,7 +122,12 @@ function planError(p: CheckTargetPlan): string {
       <dt>{{ t('release.plan.githubRelease') }}</dt>
       <dd>{{ plan.githubRelease ? t('release.yes') : t('release.no') }}</dd>
       <dt>{{ t('release.plan.smoke') }}</dt>
-      <dd>{{ plan.smokeKind ? plan.smokeKind : '—' }} <span class="muted">· {{ t('release.plan.smokeLater') }}</span></dd>
+      <dd>
+        {{ plan.smokeKind ? smokeKindText(plan.smokeKind) : '—' }}<span
+          v-if="!plan.smokeKind || plan.smokeKind === 'none'"
+          class="muted"
+        > · {{ t('release.plan.smokeNone') }}</span>
+      </dd>
       <dt>{{ t('release.plan.caps') }}</dt>
       <dd>
         {{ t('release.plan.capsText', {
@@ -355,7 +360,7 @@ function planError(p: CheckTargetPlan): string {
           <span
             v-if="s.note"
             class="muted note"
-          >{{ s.note }}</span>
+          >{{ noteText(s.note) }}</span>
         </li>
       </ol>
     </section>

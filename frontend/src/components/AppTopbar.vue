@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import PlatformIcon from './PlatformIcon.vue'
 import { useAppStore } from '../stores/app'
 import { useSettingsStore } from '../stores/settings'
+import { useAutopilotStore } from '../stores/autopilot'
 import { platformName } from '../lib/platforms'
 import { liveConnected } from '../api/live'
 import { routeTitle } from '../router'
@@ -26,6 +27,16 @@ const settings = useSettingsStore()
 const { t } = useI18n()
 
 const title = computed(() => routeTitle(route))
+
+// «Автопилот»: the activity log with the unread badge (red while an event needs attention).
+const autopilot = useAutopilotStore()
+const autopilotTip = computed(() => {
+  const n = autopilot.unread
+  if (!n) return t('autopilot.topbarTip')
+  return autopilot.attention > 0
+    ? t('autopilot.topbarAttention', { n, a: autopilot.attention })
+    : t('autopilot.topbarUnread', { n })
+})
 
 type Tone = 'ok' | 'busy' | 'warn' | 'error' | 'off'
 /** Every source's status (the top-level fields alone are the GitHub one). */
@@ -256,6 +267,20 @@ const accountItems = computed(() => [
         </div>
       </Popover>
 
+      <RouterLink
+        v-tooltip.bottom="autopilotTip"
+        to="/autopilot"
+        class="ap-btn"
+        :class="{ active: route.name === 'autopilot' }"
+        :aria-label="autopilotTip"
+      >
+        <i class="pi pi-bell" />
+        <span
+          v-if="autopilot.unread"
+          class="ap-badge"
+          :class="{ attention: autopilot.attention > 0 }"
+        >{{ autopilot.unread > 99 ? '99+' : autopilot.unread }}</span>
+      </RouterLink>
       <Button
         v-tooltip.bottom="t('topbar.syncNowTip')"
         icon="pi pi-sync"
@@ -479,6 +504,46 @@ const accountItems = computed(() => [
   color: var(--iw-danger);
   background: var(--iw-danger-soft);
   overflow-wrap: anywhere;
+}
+
+.ap-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--iw-muted);
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.ap-btn:hover,
+.ap-btn.active {
+  color: var(--iw-text);
+  background: var(--iw-elevated);
+}
+
+.ap-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: calc(10.5px * var(--iw-fs, 1));
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+  color: var(--iw-text);
+  background: var(--iw-elevated);
+  border: 1px solid var(--iw-border-strong);
+}
+
+.ap-badge.attention {
+  color: #fff;
+  background: var(--iw-danger);
+  border-color: var(--iw-danger);
 }
 
 .avatar-btn {

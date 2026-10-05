@@ -81,6 +81,17 @@ export function heldText(reason: string, targets?: NamedTargets): string {
   return te('release.held.' + reason) ? t('release.held.' + reason) : reason
 }
 
+/** A step note: a known code (no_verify, smoke_missing, …) as text, else the server's wording. */
+export function noteText(note: string): string {
+  if (!note) return ''
+  return /^[a-z_]+$/.test(note) && te('release.held.' + note) ? t('release.held.' + note) : note
+}
+
+/** Name of a smoke kind (factorio / command / none), unknown kinds as is. */
+export function smokeKindText(kind: string): string {
+  return te('release.profile.smokeKind.' + kind) ? t('release.profile.smokeKind.' + kind) : kind
+}
+
 /**
  * Why a target cannot be published to ("" = it can): the platform has no
  * uploader, no / bad API key, or the profile does not configure it yet.

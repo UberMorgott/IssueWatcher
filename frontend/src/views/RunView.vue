@@ -13,7 +13,7 @@ import { api } from '../api/client'
 import type { RunStep, RunView } from '../api/types'
 import { useCrumbs } from '../lib/crumbs'
 import { absTime, elapsed, relTime } from '../lib/format'
-import { STEP_ICON, bytes, heldText, releaseError, requestText, runActive, shortSha, stepLabel, targetLabel } from '../lib/release'
+import { STEP_ICON, bytes, heldText, noteText, releaseError, requestText, runActive, shortSha, stepLabel, targetLabel } from '../lib/release'
 import { safeUrl } from '../lib/safeUrl'
 import { useAppStore } from '../stores/app'
 
@@ -165,11 +165,12 @@ function stepRef(s: RunStep): Ref | null {
     }
   }
   if (s.step === 'gate') return null // shown as details below
+  if (s.step === 'smoke') return x.startsWith('{') ? null : { text: noteText(x) } // a JSON log → details below
   if (s.step === 'publish') return { text: t('release.publishedVersion', { id: x }), mono: true }
   return { text: x, mono: true }
 }
 function gateDetails(s: RunStep): string {
-  if (s.step !== 'gate' || !s.externalRef) return ''
+  if (!s.externalRef || !(s.step === 'gate' || (s.step === 'smoke' && s.externalRef.startsWith('{')))) return ''
   try {
     return JSON.stringify(JSON.parse(s.externalRef), null, 2)
   } catch {
@@ -414,7 +415,7 @@ function took(s: RunStep): string {
                 v-if="s.error"
                 class="tl-error"
               >
-                {{ s.error }}
+                {{ noteText(s.error) }}
               </div>
               <details
                 v-if="requestText(s.request) || gateDetails(s)"

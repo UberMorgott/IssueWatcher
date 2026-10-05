@@ -1174,6 +1174,8 @@ export interface SmokeProfile {
   kind?: string
   save?: string
   ticks?: number
+  /** Factorio install folder or factorio.exe; empty = auto-detect (Steam / standalone). */
+  install?: string
   command?: string
 }
 /** One publish target's settings; each platform reads its own fields. */
@@ -1295,4 +1297,32 @@ export interface CancelResult {
   run: ReleaseRun
   bumpDropped: boolean
   note: string
+}
+
+/** One autopilot activity log entry (GET /api/autopilot/events, SSE autopilot.event). */
+export interface AutopilotEvent {
+  id: number
+  at: string
+  runId?: number
+  projectId?: number
+  itemId?: number
+  /** release.held | release.done | release.cancelled | … (unknown kinds show the title only). */
+  kind: string
+  severity: 'info' | 'attention' | string
+  title: string
+  /** Free-form JSON object: reason (held reason code), detail (text), version, targets, … */
+  detail: Record<string, unknown> | null
+  /** "" = unread. */
+  readAt: string
+}
+
+/** Unread counters (also the SSE autopilot.unread payload). */
+export interface AutopilotUnread {
+  unread: number
+  attention: number
+}
+
+/** GET /api/autopilot/events. */
+export interface AutopilotEvents extends AutopilotUnread {
+  events: AutopilotEvent[] | null
 }

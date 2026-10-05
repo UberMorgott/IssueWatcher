@@ -17,6 +17,7 @@ export const LIVE_EVENTS = [
   'publish.progress',
   'autopilot.run',
   'autopilot.event',
+  'autopilot.unread',
 ] as const
 export type LiveEventName = (typeof LIVE_EVENTS)[number]
 

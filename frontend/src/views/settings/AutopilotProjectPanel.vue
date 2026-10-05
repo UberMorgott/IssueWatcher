@@ -37,7 +37,9 @@ import { useSettingsStore } from '../../stores/settings'
 // Autopilot of a GitHub code project (docs/AUTOPILOT.md → UI, Phase 1):
 // master switch, «GitHub релиз», «Загружать на <платформу>» per linked mod page
 // (disabled with the reason), the daily release cap; the publish profile
-// editor + «Проверить настройку» (dry run, nothing public). Fix / push / auto
+// editor + «Проверить настройку» (dry run, nothing public); Phase 2: the smoke
+// block (factorio save / ticks / install, command) and «Публиковать без
+// смоук-теста». Fix / push / auto
 // release / reply switches come with later phases (shown disabled).
 const { t, te } = useI18n()
 const app = useAppStore()
@@ -385,6 +387,17 @@ const name = (k: string) => platformName(k)
           />
         </SettingRow>
         <SettingRow
+          :title="t('release.autopilot.publishWithoutSmoke')"
+          :text="t('release.autopilot.publishWithoutSmokeText')"
+        >
+          <ToggleSwitch
+            :model-value="ap.publishWithoutSmoke"
+            :disabled="!!saving"
+            :aria-label="t('release.autopilot.publishWithoutSmoke')"
+            @update:model-value="(v: boolean) => saveAutopilot({ publishWithoutSmoke: v })"
+          />
+        </SettingRow>
+        <SettingRow
           v-for="l in LATER"
           :key="l.key"
           :title="t('release.autopilot.' + l.key)"
@@ -541,7 +554,7 @@ const name = (k: string) => platformName(k)
       />
     </SettingRow>
 
-    <!-- smoke (Phase 2: the step is skipped for now) -->
+    <!-- smoke: factorio (save / ticks / install) | command | none (held unless «Публиковать без смоук-теста») -->
     <SettingRow
       :title="t('release.profile.smoke')"
       :text="t('release.profile.smokeText')"
@@ -558,30 +571,60 @@ const name = (k: string) => platformName(k)
         :aria-label="t('release.profile.smoke')"
       />
       <template v-if="draft.smoke.kind === 'factorio'">
+        <label
+          class="field"
+          for="smoke-save"
+        >{{ t('release.profile.smokeSave') }} <span class="muted">· {{ t('release.profile.smokeSaveHint') }}</span></label>
         <InputText
+          id="smoke-save"
           v-model="draft.smoke.save"
           class="mono wide"
           size="small"
           placeholder="E:/Saves/test.zip"
-          :aria-label="t('release.profile.smokeSave')"
         />
+        <label
+          class="field"
+          for="smoke-ticks"
+        >{{ t('release.profile.smokeTicks') }} <span class="muted">· {{ t('release.profile.smokeTicksHint') }}</span></label>
         <InputNumber
           v-model="draft.smoke.ticks"
+          input-id="smoke-ticks"
           :min="1"
           :max="100000"
           size="small"
-          :placeholder="t('release.profile.smokeTicks')"
+          placeholder="600"
           input-class="num-input"
-          :aria-label="t('release.profile.smokeTicks')"
+        />
+        <label
+          class="field"
+          for="smoke-install"
+        >{{ t('release.profile.smokeInstall') }} <span class="muted">· {{ t('release.profile.smokeInstallHint') }}</span></label>
+        <InputText
+          id="smoke-install"
+          v-model="draft.smoke.install"
+          class="mono wide"
+          size="small"
+          placeholder="C:/Program Files (x86)/Steam/steamapps/common/Factorio"
         />
       </template>
-      <InputText
-        v-if="draft.smoke.kind === 'command'"
-        v-model="draft.smoke.command"
-        class="mono wide"
-        size="small"
-        :aria-label="t('release.profile.smokeCommand')"
-      />
+      <template v-else-if="draft.smoke.kind === 'command'">
+        <label
+          class="field"
+          for="smoke-command"
+        >{{ t('release.profile.smokeCommand') }} <span class="muted">· {{ t('release.profile.smokeCommandHint') }}</span></label>
+        <InputText
+          id="smoke-command"
+          v-model="draft.smoke.command"
+          class="mono wide"
+          size="small"
+          :invalid="!draft.smoke.command?.trim()"
+          placeholder="pwsh -File smoke.ps1"
+        />
+      </template>
+      <span
+        v-else
+        class="small"
+      >{{ ap?.publishWithoutSmoke ? t('release.profile.smokeNoneOn') : t('release.profile.smokeNoneHeld') }}</span>
     </SettingRow>
 
     <!-- targets -->
@@ -726,6 +769,11 @@ const name = (k: string) => platformName(k)
 .small {
   font-size: calc(12px * var(--iw-fs, 1));
   color: var(--iw-muted);
+}
+
+.field {
+  font-size: calc(12.5px * var(--iw-fs, 1));
+  margin-top: 4px;
 }
 
 .mode {

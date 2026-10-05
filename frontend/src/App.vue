@@ -12,11 +12,12 @@ import AppSidebar from './components/AppSidebar.vue'
 import AppTopbar from './components/AppTopbar.vue'
 import PlatformIcon from './components/PlatformIcon.vue'
 import { connectLive, type LiveEventName } from './api/live'
-import type { DataChange, LiveItemEvent, PublishTask, RunView, SettingsDoc, SyncProgress } from './api/types'
+import type { AutopilotEvent, AutopilotUnread, DataChange, LiveItemEvent, PublishTask, RunView, SettingsDoc, SyncProgress } from './api/types'
 import { useAppStore } from './stores/app'
 import { useSettingsStore } from './stores/settings'
 import { useUpdatesStore } from './stores/updates'
 import { useJobsStore } from './stores/jobs'
+import { useAutopilotStore } from './stores/autopilot'
 import { jobOutcome, jobRef } from './lib/jobs'
 import { jobFailReason } from './lib/failReason'
 import { itemRef, jobPlatform, repoPlatform } from './lib/platforms'
@@ -29,6 +30,7 @@ const app = useAppStore()
 const settings = useSettingsStore()
 const updates = useUpdatesStore()
 const jobs = useJobsStore()
+const autopilot = useAutopilotStore()
 const router = useRouter()
 const route = useRoute()
 const toast = useToast()
@@ -141,7 +143,10 @@ function onLive(name: LiveEventName, data: unknown) {
       app.onRun(data as RunView | null)
       return
     case 'autopilot.event':
-      // Activity log (Phase 2): no page reads it yet.
+      autopilot.onEvent(data as AutopilotEvent | null)
+      return
+    case 'autopilot.unread':
+      autopilot.setCounts(data as AutopilotUnread | null)
       return
     case 'item.new':
     case 'comment.new':
@@ -184,6 +189,7 @@ function startLive() {
     void app.loadAuth()
     void app.loadSync()
     void jobs.seed()
+    void autopilot.loadCounts()
     app.bump()
   })
 }
@@ -213,6 +219,7 @@ function takeOver() {
   void app.loadAuth()
   void app.loadSync()
   void jobs.seed()
+  void autopilot.loadCounts()
   app.bump()
   updateDocumentTitle()
 }
@@ -235,6 +242,7 @@ onMounted(() => {
   void app.init()
   void updates.load()
   void jobs.seed()
+  void autopilot.loadCounts()
   startLive()
   prefetchViews()
   if ('BroadcastChannel' in window) {
