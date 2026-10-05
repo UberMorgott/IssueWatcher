@@ -129,9 +129,24 @@ func (c *client) status(resp *http.Response, data []byte, req *http.Request) err
 		}
 		return fmt.Errorf("github: %s %s: %s: %s", req.Method, req.URL.Path, resp.Status, truncate(string(data), 300))
 	case resp.StatusCode < 200 || resp.StatusCode > 299:
-		return fmt.Errorf("github: %s %s: %s: %s", req.Method, req.URL.Path, resp.Status, truncate(string(data), 300))
+		return &statusError{code: resp.StatusCode,
+			msg: fmt.Sprintf("github: %s %s: %s: %s", req.Method, req.URL.Path, resp.Status, truncate(string(data), 300))}
 	}
 	return nil
+}
+
+// statusError is a non-2xx answer other than a sign-out or a rate limit.
+type statusError struct {
+	code int
+	msg  string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+// isNotFound reports a 404 answer.
+func isNotFound(err error) bool {
+	se, ok := errors.AsType[*statusError](err)
+	return ok && se.code == http.StatusNotFound
 }
 
 func (c *client) retryAt(h http.Header) time.Time {

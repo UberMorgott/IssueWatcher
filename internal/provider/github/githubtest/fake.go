@@ -57,11 +57,12 @@ type Server struct {
 
 	Repos         []string // owner/name reachable through installation 1
 	Issues        []*Issue
-	PullRequests  []*Issue // listed by the REST issues endpoint only
-	ExpiresIn     int      // seconds; 0 = non-expiring user tokens
-	PollInterval  int      // X-Poll-Interval seconds on change checks; 0 = none
-	DefaultBranch string   // GET /repos/{o}/{r} default_branch; "" = main
-	Pulls         []*Pull  // pull requests opened through the REST API
+	PullRequests  []*Issue   // listed by the REST issues endpoint only
+	ExpiresIn     int        // seconds; 0 = non-expiring user tokens
+	PollInterval  int        // X-Poll-Interval seconds on change checks; 0 = none
+	DefaultBranch string     // GET /repos/{o}/{r} default_branch; "" = main
+	Pulls         []*Pull    // pull requests opened through the REST API
+	Releases      []*Release // releases (GET by tag, POST, asset uploads)
 	// Labels are the repository labels by owner/name (GET /repos/{o}/{r}/labels).
 	Labels map[string][]string
 	// LabelAdds counts POST /repos/{o}/{r}/issues/{n}/labels calls.
@@ -119,6 +120,9 @@ func NewUnstarted() *Server {
 	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", s.authed(s.createPull))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/labels", s.authed(s.listLabels))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/issues/{number}/labels", s.authed(s.addLabels))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/releases/tags/{tag}", s.authed(s.releaseByTag))
+	mux.HandleFunc("POST /repos/{owner}/{repo}/releases", s.authed(s.createRelease))
+	mux.HandleFunc("POST /repos/{owner}/{repo}/releases/{id}/assets", s.authed(s.uploadAsset))
 	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.Mu.Lock()
 		s.calls = append(s.calls, Call{Method: r.Method, Path: r.URL.Path})
