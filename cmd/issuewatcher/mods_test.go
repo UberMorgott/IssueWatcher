@@ -85,6 +85,22 @@ func TestModPlatformsApplyLive(t *testing.T) {
 	}
 }
 
+// The built Factorio provider has the key store: it publishes (api Publishers).
+func TestFactorioPublisherWired(t *testing.T) {
+	m, cfgs, _, _ := newTestPlatforms(t)
+	if m.Publisher(factorio.Platform) != nil {
+		t.Fatal("factorio off: no publisher")
+	}
+	on, err := cfgs.Patch(cfgs.Get().Revision, []byte(`{"providers":{"factorio":{"enabled":true,"author":"Morgott"}}}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.apply(on)
+	if m.Publisher(factorio.Platform) == nil || !platformState(t, m, factorio.Platform).Capabilities.Publish {
+		t.Fatal("factorio on: no publisher")
+	}
+}
+
 func newTestPlatforms(t *testing.T) (*modPlatforms, *config.Store, *syncer.Group, string) {
 	t.Helper()
 	dir := t.TempDir()

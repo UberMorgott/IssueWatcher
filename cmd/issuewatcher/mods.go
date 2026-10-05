@@ -82,7 +82,8 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 ) *modPlatforms {
 	m := &modPlatforms{cfgs: cfgs, st: st, log: log, group: group, gh: gh, steam: stm, onUpdate: onUpdate, dataDir: dataDir,
 		live: map[string]*modPlatform{}, checks: map[string]api.PlatformStatus{}, notified: map[string]bool{},
-		nexusKeys: nexus.NewKeys(nexus.KeysOptions{Dir: filepath.Join(dataDir, "secrets"), Version: Version})}
+		nexusKeys:    nexus.NewKeys(nexus.KeysOptions{Dir: filepath.Join(dataDir, "secrets"), Version: Version}),
+		factorioKeys: factorio.NewKeys(factorio.KeysOptions{Dir: filepath.Join(dataDir, "secrets")})}
 	m.apply(cfgs.Get())
 	group.OnProgress(func(p syncer.Progress) {
 		if p.State == syncer.ProgressDone || p.State == syncer.ProgressError {
