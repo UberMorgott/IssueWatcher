@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
@@ -19,7 +21,9 @@ import (
 // FAKE_UGC=<dir> it runs Run on a fake API that records its calls in
 // <dir>/calls.jsonl; FAKE_UGC_MODE = ok | crash_after_create (answer
 // recorded in the result file, the process dies before printing it) |
-// crash_before_create | init_fail. Without FAKE_UGC it is the real helper.
+// crash_before_create | init_fail | offline (BLoggedOn false) | eresult_fail |
+// eresult_21 | crash_upload (dies after SubmitItemUpdate, no answer).
+// Without FAKE_UGC it is the real helper.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == HelperArg {
 		dir := os.Getenv("FAKE_UGC")
@@ -27,10 +31,10 @@ func TestMain(m *testing.M) {
 			os.Exit(Main())
 		}
 		api := &fakeAPI{dir: dir, mode: os.Getenv("FAKE_UGC_MODE")}
-		if api.mode == "crash_after_create" || api.mode == "crash_before_create" {
+		if api.mode == "crash_after_create" || api.mode == "crash_before_create" || api.mode == "crash_upload" {
 			var job Job
 			_ = json.NewDecoder(os.Stdin).Decode(&job)
-			if api.mode == "crash_after_create" {
+			if api.mode != "crash_before_create" {
 				Run(api, job)
 			}
 			os.Exit(3)
@@ -71,6 +75,20 @@ func (f *fakeAPI) Update(app uint32, item uint64, u Update) (int, bool, error) {
 	f.log(map[string]any{"call": "update", "app": app, "item": item, "u": u})
 	return 1, false, nil
 }
+func (f *fakeAPI) SteamRunning() bool { return f.mode != "init_fail" }
+func (f *fakeAPI) LoggedOn() bool     { return f.mode != "offline" }
+func (f *fakeAPI) Upload(app uint32, item uint64, dir, note string, progress func(UploadProgress)) (int, bool, bool, error) {
+	f.log(map[string]any{"call": "upload", "app": app, "item": item, "dir": dir, "note": note})
+	progress(UploadProgress{Status: 3, Processed: 5, Total: 10})
+	progress(UploadProgress{Status: 5, Processed: 10, Total: 10})
+	switch f.mode {
+	case "eresult_fail":
+		return 2, false, true, nil
+	case "eresult_21":
+		return 21, false, true, nil
+	}
+	return 1, true, true, nil
+}
 
 type harness struct {
 	c     *Client
@@ -105,12 +123,12 @@ func newHarness(t *testing.T) *harness {
 			return h.src, nil
 		},
 		Now: func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) },
-		Spawn: func(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error) {
+		Spawn: func(ctx context.Context, exe, dir string, env []string, stdin []byte, stderr io.Writer) ([]byte, error) {
 			h.spawn.Add(1)
 			if dir != filepath.Join(h.data, "tools", "steamworks") {
 				t.Errorf("helper runs in %s", dir)
 			}
-			return spawn(ctx, exe, dir, append(env, "FAKE_UGC="+h.dir, "FAKE_UGC_MODE="+h.mode), stdin)
+			return spawn(ctx, exe, dir, append(env, "FAKE_UGC="+h.dir, "FAKE_UGC_MODE="+h.mode), stdin, stderr)
 		}})
 	return h
 }
@@ -400,4 +418,83 @@ func (h *harness) toolFile(t *testing.T) string {
 	defer func() { _ = root.Close() }()
 	b, _ := root.ReadFile(filepath.Join("tools", "steamworks", "steam_api64.dll"))
 	return string(b)
+}
+
+// TestUploadThroughTheSteamClient: one upload job (content folder + change
+// note), progress lines reach the caller, the legal flag comes back.
+func TestUploadThroughTheSteamClient(t *testing.T) {
+	h := newHarness(t)
+	content := t.TempDir()
+	var seen []UploadProgress
+	res, err := h.c.Upload(context.Background(), 839770, 3800000001, content, "v1.2.3 - fixes", func(p UploadProgress) { seen = append(seen, p) })
+	if err != nil || res.Item != 3800000001 || !res.NeedsLegal || h.spawn.Load() != 1 {
+		t.Fatalf("upload: %+v %v", res, err)
+	}
+	if len(seen) != 2 || seen[0] != (UploadProgress{Status: 3, Processed: 5, Total: 10}) || seen[1].Processed != 10 {
+		t.Fatalf("progress %+v", seen)
+	}
+	cs := h.calls(t)
+	if len(cs) != 2 || cs[0]["appEnv"] != "839770" || cs[1]["call"] != "upload" || cs[1]["dir"] != content || cs[1]["note"] != "v1.2.3 - fixes" || cs[1]["item"] != float64(3800000001) {
+		t.Fatalf("calls %v", cs)
+	}
+}
+
+// TestUploadFailures: Steam offline / not signed in (no submit, or EResult
+// 21) is ErrSteamOffline (provider.ErrNoUploadAuth), an EResult refusal is
+// ErrSteam, a helper that dies after the submit is ErrUploadUnknown.
+func TestUploadFailures(t *testing.T) {
+	for _, c := range []struct {
+		mode     string
+		want     error
+		uploaded bool
+		text     string
+	}{
+		{"init_fail", ErrSteamOffline, false, "no Steam"},
+		{"offline", ErrSteamOffline, false, "not signed in"},
+		{"eresult_21", ErrSteamOffline, true, "EResult 21 (NotLoggedOn)"},
+		{"eresult_fail", ErrSteam, true, "EResult 2 (Fail)"},
+		{"crash_upload", ErrUploadUnknown, true, "no answer"},
+	} {
+		h := newHarness(t)
+		h.mode = c.mode
+		_, err := h.c.Upload(context.Background(), 839770, 3800000001, t.TempDir(), "v1.0.0", nil)
+		if !errors.Is(err, c.want) || !strings.Contains(err.Error(), c.text) {
+			t.Errorf("%s: %v, want %v (%q)", c.mode, err, c.want, c.text)
+		}
+		if errors.Is(c.want, ErrSteamOffline) && !errors.Is(err, provider.ErrNoUploadAuth) {
+			t.Errorf("%s: %v is not ErrNoUploadAuth", c.mode, err)
+		}
+		uploaded := false
+		for _, call := range h.calls(t) {
+			uploaded = uploaded || call["call"] == "upload"
+		}
+		if uploaded != c.uploaded || h.spawn.Load() != 1 {
+			t.Errorf("%s: uploaded %v spawns %d", c.mode, uploaded, h.spawn.Load())
+		}
+	}
+	h := newHarness(t)
+	if _, err := h.c.Upload(context.Background(), 839770, 3800000001, "relative", "", nil); !errors.Is(err, ErrBadPage) || h.spawn.Load() != 0 {
+		t.Fatalf("relative folder: %v", err)
+	}
+}
+
+// TestStatusReportsTheSteamClient: running + signed in with the SteamID;
+// not running is a status (code init), not an error; default app 480.
+func TestStatusReportsTheSteamClient(t *testing.T) {
+	h := newHarness(t)
+	st, err := h.c.Status(context.Background(), 0)
+	if err != nil || !st.Running || !st.LoggedOn || st.SteamID != "76561197996210591" || st.AppID != StatusAppID {
+		t.Fatalf("status: %+v %v", st, err)
+	}
+	if cs := h.calls(t); len(cs) != 1 || cs[0]["appEnv"] != "480" {
+		t.Fatalf("calls %v", cs)
+	}
+	h.mode = "offline"
+	if st, err := h.c.Status(context.Background(), 839770); err != nil || !st.Running || st.LoggedOn || st.AppID != 839770 {
+		t.Fatalf("offline: %+v %v", st, err)
+	}
+	h.mode = "init_fail"
+	if st, err := h.c.Status(context.Background(), 0); err != nil || st.Running || st.LoggedOn || st.Code != "init" || st.SteamID != "" {
+		t.Fatalf("not running: %+v %v", st, err)
+	}
 }

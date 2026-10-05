@@ -60,8 +60,8 @@ type modPlatforms struct {
 	// nexusKeys is the Nexus API key (data\secrets\nexus-api.json) the v3 upload API takes.
 	nexusKeys    *nexus.Keys
 	factorioKeys *factorio.Keys
-	// cfUpload (upload token) and workshop (steamcmd) publish to CurseForge and
-	// the Steam Workshop, independent of the platforms' read sessions.
+	// cfUpload (upload token) and workshop (the running Steam client) publish to
+	// CurseForge and the Steam Workshop, independent of the platforms' read sessions.
 	cfUpload *curseforge.Uploader
 	workshop *steamcmd.Workshop
 
@@ -83,14 +83,14 @@ type modPlatforms struct {
 }
 
 func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, group *syncer.Group,
-	gh provider.Provider, stm *steam.Provider, onUpdate func([]store.Event, int), dataDir string,
+	gh provider.Provider, stm *steam.Provider, onUpdate func([]store.Event, int), dataDir string, ugc steamcmd.Uploader,
 ) *modPlatforms {
 	m := &modPlatforms{cfgs: cfgs, st: st, log: log, group: group, gh: gh, steam: stm, onUpdate: onUpdate, dataDir: dataDir,
 		live: map[string]*modPlatform{}, checks: map[string]api.PlatformStatus{}, notified: map[string]bool{},
 		nexusKeys:    nexus.NewKeys(nexus.KeysOptions{Dir: filepath.Join(dataDir, "secrets"), Version: Version}),
 		factorioKeys: factorio.NewKeys(factorio.KeysOptions{Dir: filepath.Join(dataDir, "secrets")}),
 		cfUpload:     curseforge.NewUploader(curseforge.UploadOptions{Dir: filepath.Join(dataDir, "secrets")})}
-	m.workshop = steamcmd.New(steamcmd.Options{DataDir: dataDir, Log: func(msg string, err error) { log.Warn(msg, "err", err) }, OnRelogin: func() {
+	m.workshop = steamcmd.New(steamcmd.Options{DataDir: dataDir, Upload: ugc, Log: func(msg string, err error) { log.Warn(msg, "err", err) }, OnRelogin: func() {
 		log.Warn("steamcmd sign-in expired: sign in again in Settings › Платформы › Steam")
 		if m.onRelogin != nil {
 			m.onRelogin(steam.Platform, "Steam (steamcmd)")

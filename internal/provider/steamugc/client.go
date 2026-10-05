@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/secret"
 	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
@@ -26,6 +28,12 @@ var (
 	ErrCreateUnknown = errors.New("steam: an earlier Workshop item creation has no recorded answer")
 	ErrNoSteamAPI    = errors.New("steam: steam_api64.dll is not set up: no installed Steam game has one (Steamworks SDK 1.57+) to copy into tools\\steamworks")
 	ErrSteam         = errors.New("steam: the Steam client refused")
+	// ErrSteamOffline: the Steam client is not running or not signed in
+	// (API init failed, BLoggedOn false or EResult 21): nothing was sent.
+	ErrSteamOffline = fmt.Errorf("steam: the Steam client is not running or not signed in — start Steam and sign in as the item's owner (Workshop uploads use the running Steam client): %w", provider.ErrNoUploadAuth)
+	// ErrUploadUnknown: the submit was sent and its answer is lost.
+	ErrUploadUnknown = errors.New("steam: the Workshop upload's outcome is unknown")
+	errNoAnswer      = errors.New("no answer")
 )
 
 const itemsFile = "steam-items.json"
@@ -37,8 +45,9 @@ type Options struct {
 	// Find locates a steam_api64.dll to copy into tools\steamworks once
 	// (default: the newest usable one of the installed Steam games; tests: a fake).
 	Find func() (string, error)
-	// Spawn runs the helper in dir (tests: a fake); default exec with a timeout.
-	Spawn func(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error)
+	// Spawn runs the helper in dir (tests: a fake); default exec with a
+	// timeout. The helper's stderr (upload progress lines) goes to stderr.
+	Spawn func(ctx context.Context, exe, dir string, env []string, stdin []byte, stderr io.Writer) ([]byte, error)
 	Now   func() time.Time
 }
 
@@ -64,8 +73,12 @@ func New(opts Options) *Client {
 	return &Client{opts: opts}
 }
 
-func spawn(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+// spawnTimeout backstops the helper (its own calls time out first: 10 min,
+// an upload 2 h).
+const spawnTimeout = 2*time.Hour + 10*time.Minute
+
+func spawn(ctx context.Context, exe, dir string, env []string, stdin []byte, stderr io.Writer) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, spawnTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, HelperArg)
 	cmd.Env = append(os.Environ(), env...)
@@ -74,8 +87,34 @@ func spawn(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]
 	hideWindow(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = stderr
 	err := cmd.Run()
 	return out.Bytes(), err
+}
+
+// progressLines feeds the helper's stderr JSON lines to a progress func.
+type progressLines struct {
+	buf []byte
+	f   func(UploadProgress)
+}
+
+func (p *progressLines) Write(b []byte) (int, error) {
+	p.buf = append(p.buf, b...)
+	for {
+		i := bytes.IndexByte(p.buf, '\n')
+		if i < 0 {
+			break
+		}
+		var up UploadProgress
+		if json.Unmarshal(bytes.TrimSpace(p.buf[:i]), &up) == nil && p.f != nil {
+			p.f(up)
+		}
+		p.buf = p.buf[i+1:]
+	}
+	if len(p.buf) > 64<<10 {
+		p.buf = p.buf[:0]
+	}
+	return len(b), nil
 }
 
 // item is one entry of the items journal: State creating until Item is known.
@@ -109,6 +148,12 @@ func (c *Client) exe() (string, error) {
 
 // run sends job to the helper. A helper that dies without an answer is an error with no Result.
 func (c *Client) run(ctx context.Context, job Job) (Result, error) {
+	return c.runProgress(ctx, job, nil)
+}
+
+// runProgress is run with the helper's upload progress fed to progress. A
+// helper that answers nothing is errNoAnswer.
+func (c *Client) runProgress(ctx context.Context, job Job, progress func(UploadProgress)) (Result, error) {
 	dll, err := c.steamAPI()
 	if err != nil {
 		return Result{}, err
@@ -119,13 +164,13 @@ func (c *Client) run(ctx context.Context, job Job) (Result, error) {
 	}
 	in, _ := json.Marshal(job)
 	app := strconv.FormatUint(uint64(job.AppID), 10)
-	out, runErr := c.opts.Spawn(ctx, exe, filepath.Dir(dll), []string{EnvDLL + "=" + dll, "SteamAppId=" + app, "SteamGameId=" + app}, in)
+	out, runErr := c.opts.Spawn(ctx, exe, filepath.Dir(dll), []string{EnvDLL + "=" + dll, "SteamAppId=" + app, "SteamGameId=" + app}, in, &progressLines{f: progress})
 	var res Result
 	if err := json.Unmarshal(bytes.TrimSpace(out), &res); err != nil {
 		if runErr == nil {
-			runErr = errors.New("no answer")
+			return Result{}, fmt.Errorf("steam helper: %w", errNoAnswer)
 		}
-		return Result{}, fmt.Errorf("steam helper: %w", runErr)
+		return Result{}, fmt.Errorf("steam helper: %w (%w)", errNoAnswer, runErr)
 	}
 	return res, nil
 }
@@ -334,6 +379,76 @@ func (c *Client) WhoAmI(ctx context.Context, appID uint32) (string, error) {
 	}
 	return res.SteamID, nil
 }
+
+// UploadResult is an Upload outcome.
+type UploadResult struct {
+	Item       uint64 `json:"item"`
+	EResult    int    `json:"eresult,omitempty"`
+	NeedsLegal bool   `json:"needsLegalAgreement,omitempty"`
+}
+
+// Upload sends dir as item's new content with the change note, through the
+// running Steam client (no login of its own). Errors: ErrSteamOffline (Steam
+// not running / not signed in: nothing sent), ErrSteam (refused: nothing
+// published), ErrUploadUnknown (sent, answer lost: probe before retrying),
+// ErrNoSteamAPI / provisioning errors (nothing sent).
+func (c *Client) Upload(ctx context.Context, appID uint32, item uint64, dir, note string, progress func(UploadProgress)) (UploadResult, error) {
+	if appID == 0 || item == 0 || dir == "" || !filepath.IsAbs(dir) {
+		return UploadResult{}, fmt.Errorf("%w: app id, item and an absolute content folder", ErrBadPage)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	res, err := c.runProgress(context.WithoutCancel(ctx), Job{Op: "upload", AppID: appID, Item: item, Content: dir, ChangeNote: note}, progress)
+	out := UploadResult{Item: item, EResult: res.EResult, NeedsLegal: res.NeedsLegal}
+	switch {
+	case errors.Is(err, errNoAnswer):
+		return out, fmt.Errorf("%w (%w)", ErrUploadUnknown, err)
+	case err != nil:
+		return out, err
+	case res.Error == "":
+		return out, nil
+	case res.Code == "init" || res.Code == "not_logged_on":
+		return out, fmt.Errorf("%w (%s)", ErrSteamOffline, res.Error)
+	case res.Code == "unknown" || res.Sent && res.Code != "eresult":
+		return out, fmt.Errorf("%w: %s", ErrUploadUnknown, res.Error)
+	}
+	return out, fmt.Errorf("%w: %s", ErrSteam, res.Error)
+}
+
+// StatusAppID is the app the status check starts the API with by default:
+// Spacewar, Valve's test app every account may use.
+const StatusAppID = 480
+
+// Status is the running Steam client as the helper sees it.
+type Status struct {
+	Running  bool   `json:"running"`
+	LoggedOn bool   `json:"loggedOn"`
+	SteamID  string `json:"steamId,omitempty"`
+	AppID    uint32 `json:"appId"`
+	Error    string `json:"error,omitempty"`
+	Code     string `json:"code,omitempty"` // init: the API did not start (Steam not running, …)
+}
+
+// Status starts the API once (no writes) for appID (0: StatusAppID): is the
+// Steam client running and signed in, and as whom. A client that is not
+// running is a Status, not an error.
+func (c *Client) Status(ctx context.Context, appID uint32) (Status, error) {
+	if appID == 0 {
+		appID = StatusAppID
+	}
+	res, err := c.run(ctx, Job{Op: "status", AppID: appID})
+	if err != nil {
+		return Status{AppID: appID}, err
+	}
+	st := Status{Running: res.Running, LoggedOn: res.LoggedOn, AppID: appID, Error: res.Error, Code: res.Code}
+	if res.Error == "" && res.SteamID != "0" {
+		st.SteamID = res.SteamID
+	}
+	return st, nil
+}
+
+// Ready: steam_api64.dll is set up or can be (dry runs: nothing written).
+func (c *Client) Ready() error { return c.canProvision() }
 
 // Main is the helper process (main: os.Args[1] == HelperArg).
 func Main() int {

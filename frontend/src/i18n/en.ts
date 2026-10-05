@@ -910,7 +910,7 @@ const en = {
     tools: {
       title: 'Tools',
       hint: 'Everything the app needs lives in its own folder (data\\tools) and is set up automatically at startup; nothing is installed into the system.',
-      name: { steamcmd: 'steamcmd — uploads updates', steamworks: 'steam_api64.dll — Workshop pages' },
+      name: { steamcmd: 'steamcmd — uploads updates', steamworks: 'steam_api64.dll — Workshop pages and uploads' },
       state: { missing: 'not set up', working: 'setting up…', ready: 'ready', error: 'error' },
       provision: 'Set up',
       retry: 'Retry',
@@ -926,6 +926,7 @@ const en = {
       cancel: 'Cancel',
     },
     steamUpload: {
+      viaClient: 'Workshop uploads now use the running Steam client (keep Steam running and signed in as the item’s owner); steamcmd is no longer needed.',
       title: 'Sign-in for uploads (steamcmd)',
       hint: "Workshop updates are uploaded by Valve's steamcmd. Sign in once: the login, password and Steam Guard code go straight to steamcmd and are stored nowhere — steamcmd remembers the sign-in itself.",
       none: 'Not signed in',
@@ -1663,8 +1664,8 @@ const en = {
       off: 'Uploading is off in the autopilot settings.',
       notPublishable: '{platform}: uploading is not supported yet.',
       noKey: 'No {platform} API key — add it in Settings › Platforms.',
-      noSteamLogin: 'Steam: no steamcmd sign-in — sign in under Settings › Platforms › Steam.',
-      steamRelogin: 'Steam: the steamcmd sign-in expired — sign in again under Settings › Platforms › Steam.',
+      noSteamLogin: 'Steam: the Steam client is not running or not signed in — start Steam and sign in as the item’s owner.',
+      steamRelogin: 'Steam: the Steam client refused the upload — check that Steam is signed in as the item’s owner.',
       badKey: '{platform} rejected the API key — save it again in Settings › Platforms.',
       noFileId: 'Pick the Nexus file to add versions to (publish profile below).',
       notConfigured: 'Not set up in the publish profile yet.',

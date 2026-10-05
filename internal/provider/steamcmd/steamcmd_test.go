@@ -23,6 +23,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/conpty"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
@@ -208,6 +209,8 @@ type harness struct {
 	steam  *fakeSteam
 	env    []string
 	relog  atomic.Int32
+	runs   atomic.Int32 // steamcmd starts
+	up     *fakeUploader
 	exeDir string
 }
 
@@ -216,7 +219,7 @@ func newHarness(t *testing.T, env ...string) *harness {
 	if runtime.GOOS != "windows" {
 		t.Skip("pseudo console: Windows only")
 	}
-	h := &harness{state: t.TempDir(), data: t.TempDir(), env: env,
+	h := &harness{state: t.TempDir(), data: t.TempDir(), env: env, up: &fakeUploader{},
 		steam: &fakeSteam{timeUpdated: 1787481191, notes: []changeNote{{At: 1787481191, Text: "v1.7.0 - drills"}, {At: 1783797336, Text: "v1.6.1 - Fix"}}}}
 	srv := httptest.NewServer(h.steam.handler(t))
 	t.Cleanup(srv.Close)
@@ -238,9 +241,10 @@ func newHarness(t *testing.T, env ...string) *harness {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	h.w = New(Options{DataDir: h.data, HTTP: srv.Client(), APIURL: srv.URL, Site: srv.URL, Now: func() time.Time { return now },
+	h.w = New(Options{DataDir: h.data, Upload: h.up, HTTP: srv.Client(), APIURL: srv.URL, Site: srv.URL, Now: func() time.Time { return now },
 		OnRelogin: func() { h.relog.Add(1) },
 		Run: func(exe string, args []string, dir string) (Proc, error) {
+			h.runs.Add(1)
 			if exe != fakeExe || dir != filepath.Dir(fakeExe) {
 				t.Errorf("runs %s in %s", exe, dir)
 			}
@@ -480,48 +484,82 @@ func contentZip(t *testing.T) string {
 	return p
 }
 
-func signedIn(t *testing.T, h *harness) {
-	t.Helper()
-	if _, err := h.w.StartLogin("owner_acc", fakePassword, ""); err != nil {
-		t.Fatal(err)
-	}
-	h.waitLogin(t, LoginOK)
-	_ = os.Remove(filepath.Join(h.state, "argv.txt"))
-}
-
 var item = provider.Project{ExternalID: "3739613434"}
 
-func TestPublishExactVDFAndArgs(t *testing.T) {
+// fakeUploader is the Steam client uploader (steamugc.Client): it records
+// each upload and the content folder's files at that moment.
+type fakeUploader struct {
+	mu    sync.Mutex
+	calls []upCall
+	err   error
+	ready error
+}
+
+type upCall struct {
+	app       uint32
+	item      uint64
+	dir, note string
+	files     []string
+}
+
+func (f *fakeUploader) Upload(_ context.Context, app uint32, item uint64, dir, note string, progress func(steamugc.UploadProgress)) (steamugc.UploadResult, error) {
+	var files []string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(dir, p)
+			files = append(files, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	slices.Sort(files)
+	f.mu.Lock()
+	f.calls = append(f.calls, upCall{app: app, item: item, dir: dir, note: note, files: files})
+	err := f.err
+	f.mu.Unlock()
+	progress(steamugc.UploadProgress{Status: 3, Processed: 4, Total: 8})
+	return steamugc.UploadResult{Item: item, EResult: 1}, err
+}
+
+func (f *fakeUploader) Ready() error { return f.ready }
+
+func (f *fakeUploader) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+// TestPublishThroughTheSteamClient: the upload goes through the running
+// Steam client (the uploader) with the unpacked content and the change note;
+// steamcmd never runs and no steamcmd sign-in is needed.
+func TestPublishThroughTheSteamClient(t *testing.T) {
 	h := newHarness(t)
 	zp := contentZip(t)
 	req := provider.PublishRequest{Path: zp, Version: "1.7.1", Name: "Oracle", Changelog: `Fixes #3: "quoted"`}
-	if _, err := h.w.Publish(context.Background(), item, req, nil); !errors.Is(err, ErrNoLogin) || !errors.Is(err, provider.ErrNoUploadAuth) {
-		t.Fatalf("no sign-in: %v", err)
-	}
-	signedIn(t, h)
 
 	dry := req
 	dry.DryRun = true
 	res, err := h.w.Publish(context.Background(), item, dry, nil)
-	if err != nil || len(res.Plan) != 1 || h.file("argv.txt") != "" {
-		t.Fatalf("dry run: %+v %v argv %q", res, err, h.file("argv.txt"))
+	if err != nil || len(res.Plan) != 1 || strings.Contains(res.Plan[0].Note, "not ready") || h.up.count() != 0 {
+		t.Fatalf("dry run: %+v %v", res, err)
 	}
-	res, err = h.w.Publish(context.Background(), item, req, nil)
+	var steps []provider.PublishProgress
+	res, err = h.w.Publish(context.Background(), item, req, func(p provider.PublishProgress) { steps = append(steps, p) })
 	if err != nil || res.VersionID != "1.7.1" || !strings.HasPrefix(res.FileName, "2 files, content sha256 ") {
 		t.Fatalf("publish: %+v %v", res, err)
 	}
-	vdfPath := filepath.Join(h.data, "tools", "steamcmd", "builds", "3739613434.vdf")
-	if got, want := h.file("argv.txt"), "+@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 +login owner_acc +workshop_build_item "+vdfPath+" +quit\n"; got != want {
-		t.Fatalf("argv\n%q\nwant\n%q", got, want)
+	content := filepath.Join(h.data, "tools", "steamugc", "content", "3739613434")
+	if h.up.count() != 1 {
+		t.Fatalf("uploads %d", h.up.count())
 	}
-	content := filepath.ToSlash(filepath.Join(h.data, "tools", "steamcmd", "content", "3739613434"))
-	want := "\"workshopitem\"\n{\n\t\"appid\"\t\t\"839770\"\n\t\"publishedfileid\"\t\t\"3739613434\"\n\t\"contentfolder\"\t\t\"" + content +
-		"\"\n\t\"changenote\"\t\t\"v1.7.1 - Fixes #3: 'quoted'\"\n}\n"
-	if got := h.file("vdf.txt"); got != want {
-		t.Fatalf("vdf\n%s\nwant\n%s", got, want)
+	c := h.up.calls[0]
+	if c.app != 839770 || c.item != 3739613434 || c.dir != content || c.note != "v1.7.1 - Fixes #3: 'quoted'" || strings.Join(c.files, ",") != "Oracle.dll,meta.json" {
+		t.Fatalf("upload %+v", c)
 	}
-	if b, err := os.ReadFile(filepath.Join(filepath.FromSlash(content), "Oracle.dll")); err != nil || string(b) != "MZ dll" {
-		t.Fatalf("content: %q %v", b, err)
+	if last := steps[len(steps)-1]; last.Stage != provider.StagePublish || last.Sent != 4 || last.Total != 8 {
+		t.Fatalf("progress %+v", steps)
+	}
+	if n := h.runs.Load(); n != 0 || h.file("argv.txt") != "" {
+		t.Fatalf("steamcmd ran %d times", n)
 	}
 
 	// Available once the change note is listed and the item updated.
@@ -544,9 +582,8 @@ func TestPublishExactVDFAndArgs(t *testing.T) {
 	if last := vs[len(vs)-1]; last.Version != "1.7.1" || last.Pending || last.ID != "1790000000" || len(vs) != 3 {
 		t.Fatalf("available: %+v", vs)
 	}
-	// The same version again is refused before steamcmd runs.
-	_ = os.Remove(filepath.Join(h.state, "argv.txt"))
-	if _, err := h.w.Publish(context.Background(), item, req, nil); !errors.Is(err, provider.ErrBadPublish) || h.file("argv.txt") != "" {
+	// The same version again is refused before anything is sent.
+	if _, err := h.w.Publish(context.Background(), item, req, nil); !errors.Is(err, provider.ErrBadPublish) || h.up.count() != 1 {
 		t.Fatalf("republish: %v", err)
 	}
 	if err := h.w.CheckPublish(item, provider.PublishRequest{Path: zp, Version: "1.7.2", AppID: 1}); err != nil {
@@ -555,44 +592,64 @@ func TestPublishExactVDFAndArgs(t *testing.T) {
 	if _, err := h.w.Publish(context.Background(), item, provider.PublishRequest{Path: zp, Version: "1.7.2", AppID: 1}, nil); !errors.Is(err, provider.ErrBadPublish) {
 		t.Fatalf("app id mismatch: %v", err)
 	}
+	if n := h.runs.Load(); n != 0 {
+		t.Fatalf("steamcmd ran %d times", n)
+	}
 }
 
-func TestPublishExpiredSignInIsRelogin(t *testing.T) {
-	for _, mode := range []string{"fail", "prompt"} {
-		t.Run(mode, func(t *testing.T) {
-			h := newHarness(t, "FAKE_EXPIRED="+mode)
-			signedIn(t, h)
-			_ = os.Remove(filepath.Join(h.state, "cached")) // steamcmd lost its cached sign-in
-			req := provider.PublishRequest{Path: contentZip(t), Version: "1.7.1", Name: "Oracle"}
-			_, err := h.w.Publish(context.Background(), item, req, nil)
-			if !errors.Is(err, ErrRelogin) || !errors.Is(err, provider.ErrUploadAuthRefused) {
-				t.Fatalf("expired: %v", err)
+// TestPublishSteamClientFailures: Steam offline is an upload-auth error at
+// resolve (nothing sent: the release holds auth:steam); a refusal or a lost
+// answer fails the publish stage (sent: the probe decides); a missing
+// steam_api64.dll refuses before anything is sent. steamcmd never runs.
+func TestPublishSteamClientFailures(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		err, ready error
+		stage      string
+		auth       bool
+		uploads    int
+	}{
+		{"offline", fmt.Errorf("%w (Steam API init failed)", steamugc.ErrSteamOffline), nil, provider.StageResolve, true, 1},
+		{"refused", fmt.Errorf("%w: SubmitItemUpdate: EResult 15 (AccessDenied)", steamugc.ErrSteam), nil, provider.StagePublish, false, 1},
+		{"unknown", fmt.Errorf("%w: no answer", steamugc.ErrUploadUnknown), nil, provider.StagePublish, false, 1},
+		{"no dll", nil, steamugc.ErrNoSteamAPI, provider.StageResolve, false, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.up.err, h.up.ready = c.err, c.ready
+			_, err := h.w.Publish(context.Background(), item, provider.PublishRequest{Path: contentZip(t), Version: "1.7.1"}, nil)
+			var pe *provider.PublishError
+			if !errors.As(err, &pe) || pe.Stage != c.stage || errors.Is(err, provider.ErrNoUploadAuth) != c.auth || h.up.count() != c.uploads {
+				t.Fatalf("%v (stage %+v) uploads %d", err, pe, h.up.count())
 			}
-			if h.file("vdf.txt") != "" {
-				t.Fatal("uploaded without a sign-in")
-			}
-			// Known expired: refused without running steamcmd, still one notification.
-			_, err = h.w.Publish(context.Background(), item, req, nil)
-			if !errors.Is(err, ErrRelogin) || h.relog.Load() != 1 {
-				t.Fatalf("second: %v, notifications %d", err, h.relog.Load())
-			}
-			if st, _ := h.w.Status(); st.LoggedIn || !st.Expired {
-				t.Fatalf("status %+v", st)
-			}
-			if _, err := h.w.CheckSession(context.Background()); !errors.Is(err, ErrRelogin) || h.relog.Load() != 1 {
-				t.Fatalf("check: %v", err)
+			if h.runs.Load() != 0 {
+				t.Fatal("steamcmd ran")
 			}
 		})
 	}
 }
 
-func TestPublishUploadFailure(t *testing.T) {
-	h := newHarness(t, "FAKE_UPLOAD=fail")
-	signedIn(t, h)
-	_, err := h.w.Publish(context.Background(), item, provider.PublishRequest{Path: contentZip(t), Version: "1.7.1"}, nil)
-	var pe *provider.PublishError
-	if !errors.As(err, &pe) || !strings.Contains(err.Error(), "Access Denied") || errors.Is(err, ErrRelogin) {
-		t.Fatalf("upload failure: %v", err)
+// TestPublishOutcomeUnknownThenProbe: a lost answer is not retried by the
+// publisher; the probe (PublishTargets) finds the version once its change
+// note is listed, and a retry is then refused before anything is sent.
+func TestPublishOutcomeUnknownThenProbe(t *testing.T) {
+	h := newHarness(t)
+	h.up.err = fmt.Errorf("%w: steam helper: no answer", steamugc.ErrUploadUnknown)
+	if _, err := h.w.Publish(context.Background(), item, provider.PublishRequest{Path: contentZip(t), Version: "1.7.1"}, nil); !errors.Is(err, steamugc.ErrUploadUnknown) {
+		t.Fatalf("lost answer: %v", err)
+	}
+	h.steam.mu.Lock()
+	h.steam.notes = append([]changeNote{{At: 1790000000, Text: "v1.7.1"}}, h.steam.notes...)
+	h.steam.mu.Unlock()
+	pt, err := h.w.PublishTargets(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vs := pt.Files[0].Versions; vs[len(vs)-1].Version != "1.7.1" {
+		t.Fatalf("probe: %+v", vs)
+	}
+	if _, err := h.w.Publish(context.Background(), item, provider.PublishRequest{Path: contentZip(t), Version: "1.7.1"}, nil); !errors.Is(err, provider.ErrBadPublish) || h.up.count() != 1 {
+		t.Fatalf("retry after the probe: %v uploads %d", err, h.up.count())
 	}
 }
 

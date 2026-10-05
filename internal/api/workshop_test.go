@@ -30,6 +30,12 @@ func (f *fakeWorkshop) Create(_ context.Context, _ string, app uint32, dry bool)
 	return steamugc.Created{Item: f.item, URL: steamugc.ItemURL(f.item), Created: true}, nil
 }
 func (f *fakeWorkshop) ResetCreate(string) error { return nil }
+func (f *fakeWorkshop) Status(_ context.Context, app uint32) (steamugc.Status, error) {
+	if app == 0 {
+		app = steamugc.StatusAppID
+	}
+	return steamugc.Status{Running: true, LoggedOn: true, SteamID: "76561197996210591", AppID: app}, nil
+}
 func (f *fakeWorkshop) SetPage(_ context.Context, app uint32, item uint64, p steamugc.Page, _ string, dry bool) (steamugc.PageResult, error) {
 	f.app = app
 	if !dry {
@@ -93,5 +99,20 @@ func TestWorkshopCreateAndPage(t *testing.T) {
 	}
 	if code := e.call(t, http.MethodPost, base+"/page", `{"dryRun": true}`, &res); code != http.StatusOK || !res.DryRun {
 		t.Fatalf("agent dry run %d", code)
+	}
+}
+
+func TestSteamStatus(t *testing.T) {
+	e, _ := releaseEnv(t, func(o *Options) { o.Workshop = &fakeWorkshop{} })
+	var out map[string]any
+	if code := e.call(t, http.MethodGet, "/api/steam/status", "", &out); code != http.StatusOK || out["loggedOn"] != true || out["running"] != true ||
+		out["steamId"] != "76561197996210591" || out["appId"] != float64(480) {
+		t.Fatalf("status %d %v", code, out)
+	}
+	if code := e.call(t, http.MethodGet, "/api/steam/status?appId=839770", "", &out); code != http.StatusOK || out["appId"] != float64(839770) {
+		t.Fatalf("status app %d %v", code, out)
+	}
+	if code := e.call(t, http.MethodGet, "/api/steam/status?appId=x", "", &out); code != http.StatusBadRequest {
+		t.Fatalf("bad app id %d %v", code, out)
 	}
 }

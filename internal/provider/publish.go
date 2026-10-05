@@ -14,9 +14,9 @@ import (
 var ErrBadPublish = errors.New("bad publish request")
 
 // ErrNoUploadAuth: the platform's upload credentials are not set up (Steam:
-// no steamcmd sign-in, CurseForge: no upload token); the owner fills the form
-// in Settings › Платформы. ErrUploadAuthRefused: they are set up but refused
-// (expired steamcmd session, revoked token).
+// the Steam client is not running or not signed in, CurseForge: no upload
+// token); the owner fixes it (Settings › Платформы). ErrUploadAuthRefused:
+// they are set up but refused (revoked token).
 var (
 	ErrNoUploadAuth      = errors.New("upload credentials not set up")
 	ErrUploadAuthRefused = errors.New("upload credentials refused")

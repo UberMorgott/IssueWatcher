@@ -148,6 +148,7 @@ func TestCLIActionCommands(t *testing.T) {
 		"POST /api/projects/69/steam/item":     `200 {"dryRun":true}`,
 		"POST /api/projects/69/steam/page":     `200 {"dryRun":true}`,
 		"GET /api/publish/t1":                  `200 {"id":"t1","state":"done"}`,
+		"GET /api/steam/status":                `200 {"running":true,"loggedOn":true,"appId":480}`,
 	})
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("from file"), 0o600); err != nil {
@@ -180,6 +181,8 @@ func TestCLIActionCommands(t *testing.T) {
 			apiCall{"POST", "/api/projects/69/steam/page", "", `{"title":"Content Tool","tags":["Tools","Gameplay"],"visibility":"public","dryRun":true}`}, `dryRun`},
 		{"", []string{"publish", "targets", "69"}, apiCall{"GET", "/api/projects/69/publish/targets", "", ""}, `"files"`},
 		{"", []string{"publish", "status", "t1"}, apiCall{"GET", "/api/publish/t1", "", ""}, `"done"`},
+		{"", []string{"workshop", "status"}, apiCall{"GET", "/api/steam/status", "", ""}, `"loggedOn": true`},
+		{"", []string{"workshop", "status", "--app-id", "839770"}, apiCall{"GET", "/api/steam/status", "appId=839770", ""}, `loggedOn`},
 	} {
 		code, out, stderr := cliRun(tc.stdin, tc.args...)
 		if code != exitOK || !strings.Contains(out, tc.out) {

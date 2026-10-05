@@ -118,7 +118,7 @@ func newTestPlatforms(t *testing.T) (*modPlatforms, *config.Store, *syncer.Group
 	gh := github.NewProvider(newAuth(log, dir))
 	stm := steam.New(steam.Options{Dir: filepath.Join(dir, "secrets"), Log: log})
 	group := syncer.NewGroup(syncer.New(syncer.Options{Store: st, Provider: gh, Log: log}))
-	m := newModPlatforms(cfgs, st, log, group, gh, stm, nil, dir)
+	m := newModPlatforms(cfgs, st, log, group, gh, stm, nil, dir, nil)
 	t.Cleanup(m.Close)
 	return m, cfgs, group, dir
 }

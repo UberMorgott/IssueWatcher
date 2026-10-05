@@ -280,7 +280,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}), syncer.New(syncer.Options{
 		Store: st, Provider: stm, Plan: syncPlan(cfg.Sync), Log: log, OnUpdate: onUpdate,
 	}))
-	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate, dataDir) // Nexus / CurseForge / Factorio (native), switched live
+	ugc := steamugc.New(steamugc.Options{DataDir: dataDir})                     // Workshop items, pages and uploads through the running Steam client
+	mods := newModPlatforms(cfgs, st, log, sy, gh, stm, onUpdate, dataDir, ugc) // Nexus / CurseForge / Factorio (native), switched live
 	defer mods.Close()
 	mods.onRelogin = func(id, name string) { // a click opens «Подключить» for that platform
 		c := notify.ReloginCard(id, name, time.Now())
@@ -345,7 +346,6 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	if err != nil {
 		log.Error("session secret: per-run fallback", "err", err) // tabs sign in again after a restart
 	}
-	ugc := steamugc.New(steamugc.Options{DataDir: dataDir})
 	srv, err = api.New(context.Background(), api.Options{
 		Assets:         issuewatcher.Assets(),
 		PreferredPort:  preferred,
@@ -377,7 +377,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		CurseForgeUpload: mods.cfUpload,
 		SteamUpload:      mods.workshop,
 		Workshop:         ugc,
-		Tools:            []api.Tool{mods.workshop, ugc},
+		Tools:            []api.Tool{ugc}, // steamcmd is no longer used for uploads: not provisioned
 		Publishers:       mods.Publisher,
 		PageEditors:      mods.PageEditor,
 		Platforms:        mods,
@@ -388,7 +388,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	}
 	serving.Store(true)
 	if !headless {
-		go provisionTools(log, mods.workshop, ugc)
+		go provisionTools(log, ugc)
 	}
 	if err := instance.WritePort(dataDir, srv.Port()); err != nil {
 		log.Error("remember port", "err", err)

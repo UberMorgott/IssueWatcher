@@ -3,6 +3,8 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -18,6 +20,15 @@ type WorkshopPage struct {
 	Visibility string   `json:"visibility,omitempty"`
 	ChangeNote string   `json:"changeNote,omitempty"`
 	DryRun     bool     `json:"dryRun,omitempty"`
+}
+
+// SteamStatus reports whether the Steam client runs and is signed in (GET /api/steam/status).
+func (c *Client) SteamStatus(ctx context.Context, appID uint32) (json.RawMessage, error) {
+	var q url.Values
+	if appID != 0 {
+		q = url.Values{"appId": {strconv.FormatUint(uint64(appID), 10)}}
+	}
+	return c.get(ctx, "/api/steam/status", q)
 }
 
 // WorkshopItem reports the code project's recorded Workshop item.

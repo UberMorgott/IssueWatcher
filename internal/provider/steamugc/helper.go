@@ -18,14 +18,23 @@ const (
 
 // Job is the helper's input (one JSON object on stdin).
 type Job struct {
-	Op    string `json:"op"` // create | page | whoami
+	Op    string `json:"op"` // create | page | upload | whoami | status
 	AppID uint32 `json:"appId"`
 	// ResultPath: create writes the new item id here (then fsyncs) before
 	// anything else, so a lost answer never leads to a second item.
 	ResultPath string `json:"resultPath,omitempty"`
-	Item       uint64 `json:"item,omitempty"` // page
+	Item       uint64 `json:"item,omitempty"` // page, upload
 	Page       Page   `json:"page"`
 	ChangeNote string `json:"changeNote,omitempty"`
+	Content    string `json:"content,omitempty"` // upload: the content folder (absolute)
+}
+
+// UploadProgress is one GetItemUpdateProgress reading of an upload; the
+// helper prints it as a JSON line on stderr while the submit runs.
+type UploadProgress struct {
+	Status    int    `json:"status"` // EItemUpdateStatus: 1 preparing config, 2 preparing content, 3 uploading content, 4 uploading preview, 5 committing
+	Processed uint64 `json:"processed"`
+	Total     uint64 `json:"total"`
 }
 
 // LangResult is one language's submit.
@@ -41,8 +50,17 @@ type Result struct {
 	Item       uint64       `json:"item,omitempty"`
 	NeedsLegal bool         `json:"needsLegalAgreement,omitempty"`
 	Languages  []LangResult `json:"languages,omitempty"`
-	Error      string       `json:"error,omitempty"`
-	Code       string       `json:"code,omitempty"` // init | create | submit | bad_job
+	// upload: the submit's EResult; Sent = SubmitItemUpdate was called (an
+	// error after it leaves the outcome unknown).
+	EResult int  `json:"eresult,omitempty"`
+	Sent    bool `json:"sent,omitempty"`
+	// status: the Steam client process runs / is signed in to Steam.
+	Running  bool   `json:"running,omitempty"`
+	LoggedOn bool   `json:"loggedOn,omitempty"`
+	Error    string `json:"error,omitempty"`
+	// Code: init | create | submit | bad_job | record | not_logged_on |
+	// content (refused before anything was sent) | eresult | unknown
+	Code string `json:"code,omitempty"`
 }
 
 // API is the part of ISteamUGC / ISteamUser the helper uses (ffi_windows.go;
@@ -55,6 +73,14 @@ type API interface {
 	CreateItem(appID uint32) (uint64, bool, int, error)
 	// Update is one StartItemUpdate … SubmitItemUpdate round.
 	Update(appID uint32, item uint64, u Update) (int, bool, error)
+	// SteamRunning: the Steam client process runs (callable before Init).
+	SteamRunning() bool
+	// LoggedOn is ISteamUser::BLoggedOn.
+	LoggedOn() bool
+	// Upload is StartItemUpdate → SetItemContent(dir) → SubmitItemUpdate(note),
+	// polling GetItemUpdateProgress until SubmitItemUpdateResult_t: the
+	// EResult, the legal-agreement flag and whether the submit was sent.
+	Upload(appID uint32, item uint64, dir, note string, progress func(UploadProgress)) (int, bool, bool, error)
 }
 
 // Update is one item update: Language scopes Title / Description.
@@ -68,17 +94,32 @@ type Update struct {
 	ChangeNote  string
 }
 
-const eresultOK = 1
+const (
+	eresultOK          = 1
+	eresultNotLoggedOn = 21
+)
 
-// HelperMain runs the helper: Job on stdin, Result on stdout; exit 0 when
-// the result has no error.
+// eresultNames are the EResult values an upload commonly meets.
+var eresultNames = map[int]string{2: "Fail", 3: "NoConnection", 8: "InvalidParam", 9: "FileNotFound", 10: "Busy",
+	15: "AccessDenied", 16: "Timeout", 17: "Banned", 21: "NotLoggedOn", 25: "LimitExceeded"}
+
+func eresultText(er int) string {
+	if n, ok := eresultNames[er]; ok {
+		return fmt.Sprintf("EResult %d (%s)", er, n)
+	}
+	return fmt.Sprintf("EResult %d", er)
+}
+
+// HelperMain runs the helper: Job on stdin, Result on stdout, upload
+// progress as JSON lines on stderr; exit 0 when the result has no error.
 func HelperMain(api API, in io.Reader, out io.Writer) int {
 	var job Job
 	res := Result{}
 	if err := json.NewDecoder(io.LimitReader(in, 1<<20)).Decode(&job); err != nil {
 		res.Error, res.Code = "bad job: "+err.Error(), "bad_job"
 	} else {
-		res = Run(api, job)
+		enc := json.NewEncoder(os.Stderr)
+		res = RunProgress(api, job, func(p UploadProgress) { _ = enc.Encode(p) })
 	}
 	_ = json.NewEncoder(out).Encode(res)
 	if res.Error != "" {
@@ -88,17 +129,49 @@ func HelperMain(api API, in io.Reader, out io.Writer) int {
 }
 
 // Run executes job against api.
-func Run(api API, job Job) Result {
+func Run(api API, job Job) Result { return RunProgress(api, job, nil) }
+
+// RunProgress executes job against api; progress gets an upload's readings.
+func RunProgress(api API, job Job, progress func(UploadProgress)) Result {
 	if job.AppID == 0 {
 		return Result{Error: "no app id", Code: "bad_job"}
 	}
+	if progress == nil {
+		progress = func(UploadProgress) {}
+	}
+	running := job.Op == "status" && api.SteamRunning()
 	if err := api.Init(); err != nil {
-		return Result{Error: err.Error(), Code: "init"}
+		return Result{Running: running, Error: err.Error(), Code: "init"}
 	}
 	defer api.Shutdown()
 	res := Result{SteamID: fmt.Sprint(api.SteamID())}
 	switch job.Op {
 	case "whoami":
+		return res
+	case "status":
+		res.Running, res.LoggedOn = true, api.LoggedOn()
+		return res
+	case "upload":
+		if job.Item == 0 || job.Content == "" {
+			return Result{Error: "upload needs an item and a content folder", Code: "bad_job"}
+		}
+		res.Item = job.Item
+		if !api.LoggedOn() {
+			res.EResult, res.Error, res.Code = eresultNotLoggedOn, "the Steam client is not signed in to Steam (offline?)", "not_logged_on"
+			return res
+		}
+		er, legal, sent, err := api.Upload(job.AppID, job.Item, job.Content, job.ChangeNote, progress)
+		res.EResult, res.NeedsLegal, res.Sent = er, legal, sent
+		switch {
+		case err != nil && !sent:
+			res.Error, res.Code = err.Error(), "content"
+		case err != nil:
+			res.Error, res.Code = err.Error(), "unknown"
+		case er == eresultNotLoggedOn:
+			res.Error, res.Code = "SubmitItemUpdate: "+eresultText(er)+": the Steam client is not signed in", "not_logged_on"
+		case er != eresultOK:
+			res.Error, res.Code = "SubmitItemUpdate: "+eresultText(er), "eresult"
+		}
 		return res
 	case "create":
 		if job.ResultPath == "" {

@@ -196,7 +196,7 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		DryRun      bool     `json:"dry_run,omitempty" jsonschema:"plan only: return the requests that would be sent, upload nothing"`
 		Wait        bool     `json:"wait,omitempty" jsonschema:"wait until the publish finishes and return the final task (default: return the running task at once)"`
 	}
-	add(s, &mcp.Tool{Name: "publish_version", Description: "Upload an archive as a new version of a mod project on its platform (Nexus Mods, Factorio mod portal, Steam Workshop via steamcmd: path = content folder or a zip of it, CurseForge upload API) " +
+	add(s, &mcp.Tool{Name: "publish_version", Description: "Upload an archive as a new version of a mod project on its platform (Nexus Mods, Factorio mod portal, Steam Workshop through the owner's running, signed-in Steam client (not steamcmd; Steam offline = code no_api_key): path = content folder or a zip of it, CurseForge upload API) " +
 		"through the app's stored credentials. Public unless dry_run: run dry_run first, then publish exactly once; " +
 		"never resend after an error without checking get_publish_task and the platform. Returns the publish task (or the dry-run plan)."},
 		func(ctx context.Context, in publish) (json.RawMessage, error) {

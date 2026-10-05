@@ -230,7 +230,7 @@ func startOwnerApp(t *testing.T, dir string, sites *ownerSites) *ownerApp {
 	if onDisk.Nexus.Enabled || onDisk.CurseForge.Enabled || onDisk.Factorio.Enabled {
 		t.Fatal("seed config must keep the platforms off on disk")
 	}
-	a.m = newModPlatforms(cfgs, a.st, log, group, gh, stm, onUpdate, dir)
+	a.m = newModPlatforms(cfgs, a.st, log, group, gh, stm, onUpdate, dir, nil)
 	host, _, _ := strings.Cut(strings.TrimPrefix(sites.srv.URL, "https://"), ":")
 	a.m.native = func(id string, author func() string) (provider.Provider, *signin.Manager) {
 		jar, _ := websession.Open(filepath.Join(dir, "secrets", id+".json"))

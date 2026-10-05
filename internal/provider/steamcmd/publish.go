@@ -11,6 +11,7 @@ import (
 	"html"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 )
 
 const userAgent = "IssueWatcher (+https://github.com/UberMorgott/issuewatcher)"
@@ -130,30 +132,13 @@ func noteVersion(text string) string {
 
 func itemURL(id string) string { return "https://steamcommunity.com/sharedfiles/filedetails/?id=" + id }
 
-// ready: steamcmd is there and signed in (as far as known without running it).
-func (w *Workshop) ready() error {
-	s, err := w.user()
-	if err != nil {
-		return err
-	}
-	if s.Expired {
-		return ErrRelogin
-	}
-	_, err = w.steamcmd()
-	return err
-}
-
 // PublishTargets implements provider.Publisher: the item is one file whose
 // versions are the change notes naming a version (oldest first). A version
-// is Pending while the item is private or banned. Without a steamcmd sign-in
-// it reports the auth error (the plan shows it).
+// is Pending while the item is private or banned. Public reads: no sign-in.
 func (w *Workshop) PublishTargets(ctx context.Context, project provider.Project) (provider.PublishTargets, error) {
 	id := project.ExternalID
 	if !itemIDRe.MatchString(id) {
 		return provider.PublishTargets{}, fmt.Errorf("steam: %q is not a Workshop item id", id)
-	}
-	if err := w.ready(); err != nil {
-		return provider.PublishTargets{}, err
 	}
 	d, err := w.details(ctx, id)
 	if err != nil {
@@ -195,7 +180,7 @@ func (w *Workshop) CheckPublish(project provider.Project, req provider.PublishRe
 	case req.FileID != "" && req.FileID != project.ExternalID:
 		return badPublish("fileId: the item's only target is %s", project.ExternalID)
 	case req.UploadID != "":
-		return badPublish("uploadId: steamcmd has no reusable uploads")
+		return badPublish("uploadId: Workshop uploads have no reusable uploads")
 	case req.Path == "":
 		return badPublish("path: the content folder or a zip of it")
 	case !filepath.IsAbs(req.Path):
@@ -231,13 +216,6 @@ func changeNoteFor(req provider.PublishRequest) string {
 		}
 	}
 	return vdfUnsafe.Replace(note)
-}
-
-// vdf is the workshop_build_item file. Paths use forward slashes (no escape
-// sequences); quotes in the note become apostrophes.
-func vdf(appID int, id, content, note string) string {
-	return fmt.Sprintf("\"workshopitem\"\n{\n\t\"appid\"\t\t\"%d\"\n\t\"publishedfileid\"\t\t\"%s\"\n\t\"contentfolder\"\t\t\"%s\"\n\t\"changenote\"\t\t\"%s\"\n}\n",
-		appID, id, filepath.ToSlash(content), note)
 }
 
 // manifest is the content folder's sorted relative paths with sha256: its
@@ -341,21 +319,28 @@ func unpack(zipPath, dir string) error {
 	return nil
 }
 
-// content is the folder steamcmd uploads: req.Path itself, or the zip
-// unpacked into data\tools\steamcmd\content\<item>.
+// content is the folder the Steam client uploads: req.Path itself, or the
+// zip unpacked into data\tools\steamugc\content\<item>.
 func (w *Workshop) content(id, path string) (string, error) {
 	if st, err := os.Stat(path); err == nil && st.IsDir() {
 		return path, nil
 	}
-	dir := filepath.Join(w.opts.DataDir, "tools", "steamcmd", "content", id)
+	dir := filepath.Join(w.opts.DataDir, "tools", "steamugc", "content", id)
 	if err := unpack(path, dir); err != nil {
 		return "", badPublish("path: %v", err)
 	}
 	return dir, nil
 }
 
-// Publish implements provider.Publisher: one workshop_build_item run, sent
-// at most once. An expired sign-in is ErrRelogin (nothing was uploaded).
+// ErrNoUploader: the app has no Steam client uploader wired (a build error).
+var ErrNoUploader = errors.New("steam: Workshop uploads are not available (no Steam client uploader)")
+
+// Publish implements provider.Publisher: one ISteamUGC update of the item's
+// content through the owner's running, signed-in Steam client (steamugc
+// helper; no login of its own, steamcmd is not used), sent at most once.
+// Steam not running / not signed in is steamugc.ErrSteamOffline (nothing
+// sent, provider.ErrNoUploadAuth); a lost answer leaves the outcome to the
+// probe (the item's change notes).
 func (w *Workshop) Publish(ctx context.Context, project provider.Project, req provider.PublishRequest, progress func(provider.PublishProgress)) (provider.PublishResult, error) {
 	if progress == nil {
 		progress = func(provider.PublishProgress) {}
@@ -380,6 +365,9 @@ func (w *Workshop) Publish(ctx context.Context, project provider.Project, req pr
 	} else if d.ConsumerAppID != 0 && appID != d.ConsumerAppID {
 		return res, badPublish("appId %d: item %s belongs to app %d", appID, id, d.ConsumerAppID)
 	}
+	if appID <= 0 || appID > math.MaxInt32 {
+		return res, badPublish("appId: item %s names no app; set appId in the publish profile", id)
+	}
 	pt, err := w.PublishTargets(ctx, project)
 	if err != nil {
 		return fail(provider.StageResolve, err)
@@ -401,60 +389,50 @@ func (w *Workshop) Publish(ctx context.Context, project provider.Project, req pr
 	}
 	res.Size, res.MD5, res.FileName = m.Size, "", fmt.Sprintf("%d files, content sha256 %s", m.Files, m.Digest)
 	note := changeNoteFor(req)
-	vdfPath := filepath.Join(w.opts.DataDir, "tools", "steamcmd", "builds", id+".vdf")
+	item, _ := strconv.ParseUint(id, 10, 64)
 
-	s, uerr := w.user()
-	exe, xerr := w.steamcmd()
+	up := w.opts.Upload
+	rerr := ErrNoUploader
+	if up != nil {
+		rerr = up.Ready()
+	}
 	if req.DryRun {
-		res.Plan = w.plan(id, appID, dir, note, m, s.User, errors.Join(uerr, xerr))
+		res.Plan = w.plan(id, appID, dir, note, m, rerr)
 		return res, nil
 	}
-	if uerr != nil {
-		return fail(provider.StageResolve, uerr)
-	}
-	if s.Expired {
-		return fail(provider.StageResolve, ErrRelogin)
-	}
-	if xerr != nil {
-		return fail(provider.StageResolve, xerr)
-	}
-	if err := os.MkdirAll(filepath.Dir(vdfPath), 0o700); err != nil {
-		return fail(provider.StageUpload, err)
-	}
-	if err := os.WriteFile(vdfPath, []byte(vdf(appID, id, dir, note)), 0o600); err != nil {
-		return fail(provider.StageUpload, err)
-	}
-	if err := w.lock(ctx, 2*time.Minute); err != nil {
-		return fail(provider.StageResolve, err)
+	if rerr != nil {
+		return fail(provider.StageResolve, rerr)
 	}
 	progress(provider.PublishProgress{Stage: provider.StagePublish, Total: m.Size})
-	b, err := w.runBatch(context.WithoutCancel(ctx), exe, batchArgs(s.User, "+workshop_build_item", vdfPath), w.opts.UploadTimeout)
-	w.run.Unlock()
+	ur, err := up.Upload(ctx, uint32(appID), item, dir, note, func(p steamugc.UploadProgress) {
+		total := int64(min(p.Total, math.MaxInt64))
+		if total == 0 {
+			total = m.Size
+		}
+		progress(provider.PublishProgress{Stage: provider.StagePublish, Sent: int64(min(p.Processed, math.MaxInt64)), Total: total})
+	})
 	switch {
+	case errors.Is(err, steamugc.ErrUploadUnknown), errors.Is(err, steamugc.ErrSteam):
+		return fail(provider.StagePublish, err) // sent (outcome unknown: the probe decides) or refused by Steam
 	case err != nil:
-		return fail(provider.StagePublish, err) // outcome unknown: the probe decides
-	case b.loginFailed():
-		w.markExpired()
-		return fail(provider.StagePublish, ErrRelogin)
-	case uploadErr.MatchString(b.out):
-		return fail(provider.StagePublish, fmt.Errorf("steam: %s", scrub(lastLine(uploadErr, b.out))))
-	case b.code != 0 || !successRe.MatchString(b.out):
-		return fail(provider.StagePublish, fmt.Errorf("steam: steamcmd exited (code %d) without reporting success", b.code))
+		return fail(provider.StageResolve, err) // nothing sent: Steam offline, no steam_api64.dll, …
 	}
-	_, _ = w.update(func(s *settings) { s.Expired, s.CheckedAt = false, w.opts.Now().UTC() })
+	if ur.NeedsLegal {
+		w.opts.Log("steam: the item needs the Steam Workshop legal agreement accepted before it becomes visible", nil)
+	}
 	res.VersionID = req.Version
 	return res, nil
 }
 
-// plan lists what a publish of req would run.
-func (w *Workshop) plan(id string, appID int, dir, note string, m manifest, user string, authErr error) []provider.PublishStep {
-	login := "+login " + user + " (cached steamcmd sign-in)"
-	if authErr != nil {
-		login = "not ready: " + authErr.Error()
+// plan lists what a publish of req would send.
+func (w *Workshop) plan(id string, appID int, dir, note string, m manifest, readyErr error) []provider.PublishStep {
+	via := "through the running Steam client (no login)"
+	if readyErr != nil {
+		via = "not ready: " + readyErr.Error()
 	}
 	return []provider.PublishStep{
-		{Method: "RUN", URL: "steamcmd +@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 +login <user> +workshop_build_item <vdf> +quit",
+		{Method: "RUN", URL: "ISteamUGC StartItemUpdate → SetItemContent → SubmitItemUpdate(changenote)",
 			Body: map[string]any{"appid": appID, "publishedfileid": id, "contentfolder": filepath.ToSlash(dir), "changenote": note},
-			Note: fmt.Sprintf("%s; content %d files, %d bytes, sha256 %s; updates %s once", login, m.Files, m.Size, m.Digest, itemURL(id))},
+			Note: fmt.Sprintf("%s; content %d files, %d bytes, sha256 %s; updates %s once; the Steam client must be running and signed in as the item's owner", via, m.Files, m.Size, m.Digest, itemURL(id))},
 	}
 }

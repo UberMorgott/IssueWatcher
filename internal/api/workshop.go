@@ -21,6 +21,8 @@ type WorkshopItems interface {
 	Create(ctx context.Context, key string, appID uint32, dryRun bool) (steamugc.Created, error)
 	ResetCreate(key string) error
 	SetPage(ctx context.Context, appID uint32, item uint64, p steamugc.Page, changeNote string, dryRun bool) (steamugc.PageResult, error)
+	// Status: is the Steam client running and signed in (Workshop uploads need it).
+	Status(ctx context.Context, appID uint32) (steamugc.Status, error)
 }
 
 // New Workshop items and their pages in every language, for a code project
@@ -31,7 +33,9 @@ type WorkshopItems interface {
 //	POST   /api/projects/{id}/steam/item          {appId, dryRun?} → {item, url, created, linked, target, needsLegalAgreement?}; 409 {code: create_unknown}
 //	DELETE /api/projects/{id}/steam/item/pending  drop an unanswered creation (after checking the Workshop files)
 //	POST   /api/projects/{id}/steam/page          {item?, appId?, title?, localeDir?, preview?, tags?, visibility?, changeNote?, dryRun?} → steamugc.PageResult
+//	GET    /api/steam/status?appId=               {running, loggedOn, steamId?, appId, error?, code?}: the running Steam client (read-only; default app 480)
 func (s *Server) registerWorkshop(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/steam/status", s.handleSteamStatus)
 	mux.HandleFunc("GET /api/projects/{id}/steam/item", s.handleWorkshopItem)
 	mux.HandleFunc("POST /api/projects/{id}/steam/item", s.handleWorkshopCreate)
 	mux.HandleFunc("DELETE /api/projects/{id}/steam/item/pending", s.handleWorkshopReset)
@@ -54,6 +58,23 @@ func (s *Server) workshopError(w http.ResponseWriter, err error) {
 		s.opts.Log.Warn("api: workshop", "err", err)
 	}
 	writeJSON(w, status, map[string]string{"error": err.Error(), "code": code})
+}
+
+func (s *Server) handleSteamStatus(w http.ResponseWriter, r *http.Request) {
+	var app uint64
+	if v := r.URL.Query().Get("appId"); v != "" {
+		var err error
+		if app, err = strconv.ParseUint(v, 10, 32); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "appId: a Steam app id", "code": "bad_request"})
+			return
+		}
+	}
+	st, err := s.opts.Workshop.Status(r.Context(), uint32(app))
+	if err != nil {
+		s.workshopError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleWorkshopItem(w http.ResponseWriter, r *http.Request) {

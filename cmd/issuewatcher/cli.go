@@ -68,10 +68,12 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
           [--update-mod-version] [--dry-run] [--wait]
           [--app-id N] [--game-versions V,..] [--release-type release|beta|alpha]
                       upload an archive as a new mod version on the project's platform
-                      (nexus, factorio, steam via steamcmd, curseforge); public unless --dry-run; --wait polls to the end
+                      (nexus, factorio, steam via the running Steam client, curseforge); public unless --dry-run; --wait polls to the end
   publish status <taskId>
 
   Steam Workshop items of a code project (Steam client running, signed in as the owner):
+  workshop status [--app-id N]
+                      is the Steam client running and signed in (uploads need it); read-only, default app 480
   workshop item <project>
   workshop create <project> --app-id N [--dry-run]
                       create the project's Workshop item once (id recorded first; a retry reuses it)

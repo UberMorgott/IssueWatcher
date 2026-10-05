@@ -7,7 +7,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/control"
 )
 
-// workshop: `workshop item|create|page <project> …` (Steam Workshop items of a code project).
+// workshop: `workshop status` (the running Steam client) and `workshop item|create|page <project> …` (Steam Workshop items of a code project).
 func (c *cli) workshop(args []string) (json.RawMessage, error) {
 	sub := ""
 	if len(args) > 0 {
@@ -16,6 +16,15 @@ func (c *cli) workshop(args []string) (json.RawMessage, error) {
 	cmd := "workshop " + sub
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	switch sub {
+	case "status":
+		appID := fs.Uint("app-id", 0, "start the API as this app (default 480)")
+		if _, err := flags(fs, args[1:]); err != nil {
+			return nil, err
+		}
+		if *appID > 1<<31 {
+			return nil, usagef("workshop status: bad --app-id")
+		}
+		return c.c.SteamStatus(c.ctx, uint32(*appID))
 	case "item":
 		pos, err := flags(fs, args[1:])
 		if err != nil {
@@ -69,5 +78,5 @@ func (c *cli) workshop(args []string) (json.RawMessage, error) {
 		}
 		return c.c.SetWorkshopPage(c.ctx, id, p)
 	}
-	return nil, usagef("workshop: want item, create or page")
+	return nil, usagef("workshop: want status, item, create or page")
 }

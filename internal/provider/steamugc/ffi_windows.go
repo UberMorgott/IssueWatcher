@@ -23,6 +23,7 @@ const (
 	cbSubmitItemUpdate    = ugcCallbacks + 4
 	workshopFileCommunity = 0
 	callTimeout           = 10 * time.Minute
+	uploadTimeout         = 2 * time.Hour
 )
 
 // createItemResult is CreateItemResult_t (callback pack 8 on Windows).
@@ -111,7 +112,8 @@ var required = []string{"SteamAPI_RunCallbacks", "SteamAPI_Shutdown", "SteamAPI_
 	"SteamAPI_ISteamUGC_SetItemUpdateLanguage", "SteamAPI_ISteamUGC_SetItemTitle", "SteamAPI_ISteamUGC_SetItemDescription",
 	"SteamAPI_ISteamUGC_SetItemPreview", "SteamAPI_ISteamUGC_SetItemVisibility", "SteamAPI_ISteamUGC_SetItemTags",
 	"SteamAPI_ISteamUGC_SubmitItemUpdate", "SteamAPI_ISteamUtils_IsAPICallCompleted", "SteamAPI_ISteamUtils_GetAPICallResult",
-	"SteamAPI_ISteamUser_GetSteamID"}
+	"SteamAPI_ISteamUser_GetSteamID", "SteamAPI_ISteamUser_BLoggedOn", "SteamAPI_ISteamUGC_SetItemContent",
+	"SteamAPI_ISteamUGC_GetItemUpdateProgress"}
 
 func (f *flat) Init() error {
 	for _, n := range required {
@@ -163,20 +165,37 @@ func (f *flat) Shutdown() { f.call("SteamAPI_Shutdown") }
 
 func (f *flat) SteamID() uint64 { return uint64(f.call("SteamAPI_ISteamUser_GetSteamID", f.user)) }
 
+// SteamRunning: SteamAPI_IsSteamRunning (no Init needed; false if the DLL lacks it).
+func (f *flat) SteamRunning() bool {
+	return f.has("SteamAPI_IsSteamRunning") && isTrue(f.call("SteamAPI_IsSteamRunning"))
+}
+
+func (f *flat) LoggedOn() bool { return isTrue(f.call("SteamAPI_ISteamUser_BLoggedOn", f.user)) }
+
 // wait polls call until it completes and copies its result into out.
 func (f *flat) wait(call uint64, cb int, out unsafe.Pointer, size uintptr) error {
+	return f.waitTick(call, cb, out, size, callTimeout, nil)
+}
+
+// waitTick is wait with a timeout and a tick run about every half second.
+func (f *flat) waitTick(call uint64, cb int, out unsafe.Pointer, size uintptr, timeout time.Duration, tick func()) error {
 	if call == 0 {
 		return errors.New("the call was not started (k_uAPICallInvalid)")
 	}
-	deadline := time.Now().Add(callTimeout)
+	deadline := time.Now().Add(timeout)
 	var failed bool
+	var ticked time.Time
 	for {
 		f.call("SteamAPI_RunCallbacks")
 		if isTrue(f.call("SteamAPI_ISteamUtils_IsAPICallCompleted", f.utils, uintptr(call), uintptr(unsafe.Pointer(&failed)))) { //nolint:gosec // G103: out flag
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("no answer from Steam in %s", callTimeout)
+			return fmt.Errorf("no answer from Steam in %s", timeout)
+		}
+		if tick != nil && time.Since(ticked) >= 500*time.Millisecond {
+			ticked = time.Now()
+			tick()
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -249,4 +268,34 @@ func (f *flat) Update(appID uint32, item uint64, u Update) (int, bool, error) {
 		return 0, false, err
 	}
 	return int(r.EResult), r.Legal, nil
+}
+
+// Upload sends the content folder as the item's new content: nothing is sent
+// before SubmitItemUpdate returns a call handle (sent = false until then).
+func (f *flat) Upload(appID uint32, item uint64, dir, note string, progress func(UploadProgress)) (int, bool, bool, error) {
+	h := uint64(f.call("SteamAPI_ISteamUGC_StartItemUpdate", f.ugc, uintptr(appID), uintptr(item)))
+	if h == 0 || h == ^uint64(0) {
+		return 0, false, false, errors.New("StartItemUpdate refused")
+	}
+	pdir, pnote := cstr(dir), cstr(note)
+	if !isTrue(f.call("SteamAPI_ISteamUGC_SetItemContent", f.ugc, uintptr(h), uintptr(unsafe.Pointer(pdir)))) { //nolint:gosec // G103: C string for the call
+		return 0, false, false, errors.New("SetItemContent refused (is the folder there?)")
+	}
+	call := uint64(f.call("SteamAPI_ISteamUGC_SubmitItemUpdate", f.ugc, uintptr(h), uintptr(unsafe.Pointer(pnote)))) //nolint:gosec // G103: C string for the call
+	if call == 0 {
+		return 0, false, false, errors.New("SubmitItemUpdate was not started (k_uAPICallInvalid)")
+	}
+	var done, total uint64
+	tick := func() {
+		st := low32(f.call("SteamAPI_ISteamUGC_GetItemUpdateProgress", f.ugc, uintptr(h), uintptr(unsafe.Pointer(&done)), uintptr(unsafe.Pointer(&total)))) //nolint:gosec // G103: out values
+		progress(UploadProgress{Status: st, Processed: done, Total: total})
+	}
+	var r submitItemUpdateResult
+	err := f.waitTick(call, cbSubmitItemUpdate, unsafe.Pointer(&r), unsafe.Sizeof(r), uploadTimeout, tick) //nolint:gosec // G103: out struct
+	runtime.KeepAlive(pdir)
+	runtime.KeepAlive(pnote)
+	if err != nil {
+		return 0, false, true, err
+	}
+	return int(r.EResult), r.Legal, true, nil
 }

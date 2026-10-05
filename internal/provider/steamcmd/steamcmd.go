@@ -1,8 +1,11 @@
-// Package steamcmd publishes Steam Workshop updates with Valve's steamcmd,
-// driven by the app: steamcmd +login <user> +workshop_build_item <vdf> +quit
-// (VDF: appid, publishedfileid, contentfolder, changenote).
+// Package steamcmd is the Steam Workshop publisher (platform steam). Uploads
+// go through the owner's running, signed-in Steam client (Options.Upload,
+// steamugc's ISteamUGC helper): steamcmd's own "+login" replaced the Steam
+// client's session ("Session Replaced") and signed the owner out, so
+// steamcmd is no longer used for uploads.
 //
-// Sign-in: the owner types the login, password and Steam Guard code once in
+// The steamcmd driver below (provisioning, sign-in) is kept for now but no
+// upload path uses it. Sign-in: the owner types the login, password and Steam Guard code once in
 // Settings › Платформы › Steam › «Вход для загрузки»; the app types them into
 // steamcmd's console (a pseudo console: steamcmd reads its prompts from the
 // console, not from a redirected stdin), never on a command line or in a log.
@@ -28,6 +31,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/conpty"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 	"github.com/UberMorgott/issuewatcher/internal/secret"
 	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
@@ -55,8 +59,18 @@ type Proc = conpty.Proc
 // Runner starts exe with args in a pseudo console (tests: a fake steamcmd).
 type Runner func(exe string, args []string, dir string) (Proc, error)
 
+// Uploader sends a content folder as a Workshop item's new content through
+// the running Steam client (steamugc.Client).
+type Uploader interface {
+	Upload(ctx context.Context, appID uint32, item uint64, dir, note string, progress func(steamugc.UploadProgress)) (steamugc.UploadResult, error)
+	// Ready: the Steam API DLL is set up or can be (no writes).
+	Ready() error
+}
+
 // Options configures the Workshop publisher.
 type Options struct {
+	// Upload publishes content (required for Publish).
+	Upload   Uploader
 	DataDir  string // the app's data dir: secrets\steamcmd.json, tools\steamcmd
 	HTTP     *http.Client
 	APIURL   string // https://api.steampowered.com (tests)
@@ -476,8 +490,6 @@ var (
 	loggedInRe   = regexp.MustCompile(`(?i)waiting for user info\.*\s*ok|logged in ok`)
 	cachedNone   = regexp.MustCompile(`(?i)cached credentials not found|no cached credentials`)
 	failRe       = regexp.MustCompile(`(?im)^.*\b(?:failed|error)\b[^\n]*\([^)\n]*\)[^\n]*$|^.*login failure[^\n]*$`)
-	successRe    = regexp.MustCompile(`(?m)^\s*Success\.`)
-	uploadErr    = regexp.MustCompile(`(?im)^.*ERROR! Failed to update workshop item[^\n]*$`)
 )
 
 // scrub removes secrets from a line shown to the owner.
