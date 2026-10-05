@@ -143,6 +143,9 @@ type tenv struct {
 	smokeErr error
 	smokes   []smoke.Request
 	builds   int
+	commands []string // build commands as run (placeholders expanded)
+	verify   string   // the project's verify command the fake gate expands ("" = none)
+	verified []string // verify commands as expanded by the gate
 	locks    int
 	crashAt  string // step name (step or step:target)
 	crashPnt string // before | after
@@ -282,10 +285,17 @@ func newEnv(t *testing.T) *tenv {
 		TokenEnv:      testTokenEnv,
 		GitURL:        func(string) string { return e.bare },
 		Folders:       e,
-		Gate: func(_ context.Context, project, _, dir, _ string) (CmdResult, bool) {
+		Gate: func(_ context.Context, project, _, dir, _ string, expand func(string) (string, error)) (CmdResult, bool) {
 			e.mu.Lock()
 			defer e.mu.Unlock()
 			e.gates++
+			if e.verify != "" {
+				v, err := expand(e.verify)
+				if err != nil {
+					return CmdResult{Command: e.verify, ExitCode: -1, Output: err.Error()}, true
+				}
+				e.verified = append(e.verified, v)
+			}
 			if project != codeKey || dir != e.folder {
 				return CmdResult{Command: "verify", ExitCode: 2, Output: "wrong folder " + dir}, true
 			}
@@ -322,6 +332,7 @@ func (e *tenv) AcquireFolder(string) (func(), error) {
 func (e *tenv) build(_ context.Context, dir, command, _ string, _ time.Duration) CmdResult {
 	e.mu.Lock()
 	e.builds++
+	e.commands = append(e.commands, command)
 	e.mu.Unlock()
 	info, err := os.ReadFile(filepath.Join(dir, "info.json")) //nolint:gosec // test worktree
 	if err != nil {
@@ -829,11 +840,11 @@ func TestReleaseHeldWithoutVerify(t *testing.T) {
 	e := newEnv(t)
 	hasVerify := false
 	gate := e.deps.Gate
-	e.deps.Gate = func(ctx context.Context, project, localPath, dir, logDir string) (CmdResult, bool) {
+	e.deps.Gate = func(ctx context.Context, project, localPath, dir, logDir string, expand func(string) (string, error)) (CmdResult, bool) {
 		if !hasVerify {
 			return CmdResult{}, false
 		}
-		return gate(ctx, project, localPath, dir, logDir)
+		return gate(ctx, project, localPath, dir, logDir, expand)
 	}
 	en := e.engine(false)
 	r := e.release(en, Request{})

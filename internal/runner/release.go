@@ -54,12 +54,21 @@ func (r *Runner) AcquireFolder(path string) (release func(), err error) {
 // Gate runs the static verify gate of project (platform:external_id) in dir:
 // `aegis verify` when localPath has Aegis enabled, else the project's verify
 // command. ran is false when the project has neither. logDir receives the
-// process list while it runs (crash cleanup).
-func (r *Runner) Gate(ctx context.Context, project, localPath, dir, logDir string) (res VerifyResult, ran bool) {
+// process list while it runs (crash cleanup). expand (nil = none) substitutes
+// the placeholders of the project's verify command; `aegis verify` is not
+// expanded. An expand error fails the gate without running anything.
+func (r *Runner) Gate(ctx context.Context, project, localPath, dir, logDir string, expand func(string) (string, error)) (res VerifyResult, ran bool) {
 	pa := r.opts.Settings().Agents.Projects[project]
 	argv, label := r.verifyCommand(localPath, dir, pa)
 	if argv == nil {
 		return VerifyResult{}, false
+	}
+	if expand != nil && label != aegisVerifyLabel {
+		c, err := expand(label)
+		if err != nil {
+			return VerifyResult{Command: label, ExitCode: -1, Output: err.Error()}, true
+		}
+		argv[len(argv)-1], label = c, c
 	}
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return VerifyResult{Command: label, ExitCode: -1, Output: err.Error()}, true

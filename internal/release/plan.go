@@ -160,7 +160,11 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 	}
 	p.RemoteHead = remoteHead
 	if remoteHead != "" && head != remoteHead {
-		refuse(CodeHeadNotRemote, "the folder's HEAD %s is not the remote %s head %s (push or pull first)", short(head), branch, short(remoteHead))
+		unpushed, why := e.unpushed(ctx, mir, m, remoteHead, req.Origin)
+		if why != "" {
+			refuse(CodeHeadNotRemote, "the folder's HEAD %s is not the remote %s head %s: %s", short(head), branch, short(remoteHead), why)
+		}
+		m.Unpushed, p.Unpushed = unpushed, unpushed
 	}
 	if req.Head != "" && !strings.HasPrefix(head, strings.ToLower(req.Head)) {
 		refuse(CodeHeadNotRemote, "head %s is not the folder's HEAD %s", req.Head, short(head))
@@ -238,6 +242,16 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 		m.Asset = path.Base(filepath.ToSlash(expandOutput(b.Output, m)))
 	}
 	p.Asset = m.Asset
+	if b.Path == "" && b.Command != "" {
+		if _, err := expandCommand(b.Command, m.ModName, m.Version); err != nil {
+			refuse(CodeNoProfile, "publishProfile.build.command: %v", err)
+		}
+	}
+	if v := strings.TrimSpace(pa.Verify); v != "" {
+		if _, err := expandCommand(v, m.ModName, m.Version); err != nil {
+			refuse(CodeNoVerify, "the project's verify command: %v", err)
+		}
+	}
 	m.Identity = e.identity(ctx, m)
 
 	// Items: each gets a reply (autoReply, platform can reply) and, a GitHub
@@ -432,7 +446,7 @@ func planSteps(m *Manifest) []PlanStep {
 		{Step: StepArchiveCheck, Request: "open " + m.Asset + ": layout, version " + m.Version + ", size vs the previous release"},
 		{Step: StepGate, Request: "verify gate (aegis verify / project verify command) in " + m.Folder + " at the bump commit"},
 		smokeStep(m.Profile.Smoke),
-		{Step: StepPush, IdemKey: m.Branch + ":<bump sha>", Request: "git push <repo>.git <bump sha>:refs/heads/" + m.Branch + " (from the app mirror, fast-forward only)"},
+		{Step: StepPush, IdemKey: m.Branch + ":<bump sha>", Request: "git push <repo>.git <bump sha>:refs/heads/" + m.Branch + " (from the app mirror, fast-forward only" + unpushedNote(m) + ")"},
 		{Step: StepTag, IdemKey: m.Tag + ":<bump sha>", Request: "git push <repo>.git refs/tags/" + m.Tag + " (annotated, on the bump sha)"},
 	}
 	if m.GithubRelease {
@@ -469,12 +483,55 @@ func fileNote(t Target) string {
 	return ""
 }
 
+// unpushed checks a folder HEAD that differs from the remote head: the run
+// may push it only when it is a fast-forward of the remote (the folder clean,
+// checked by the caller) and the release was not started by autopilot (which
+// never pushes the owner's own unpushed work). It returns the commits ahead of
+// the remote, newest first (the push step allows exactly these and the bump),
+// or why the release is refused.
+func (e *Engine) unpushed(ctx context.Context, mir *mirror, m *Manifest, remoteHead, origin string) ([]string, string) {
+	if err := mir.fetchFolder(ctx, m.Folder, m.Branch, m.Head); err != nil {
+		return nil, err.Error()
+	}
+	ff, err := mir.isAncestor(ctx, remoteHead, m.Head)
+	switch {
+	case err != nil:
+		return nil, err.Error()
+	case !ff:
+		return nil, "the remote has commits the folder lacks (diverged or behind: pull first)"
+	case origin == store.RunOriginAuto:
+		return nil, "the folder has unpushed commits and autopilot never pushes the owner's own work (push them, or release manually)"
+	}
+	out, err := mir.run(ctx, nil, "rev-list", remoteHead+".."+m.Head)
+	if err != nil {
+		return nil, err.Error()
+	}
+	var shas []string
+	for sha := range strings.SplitSeq(out, "\n") {
+		if sha = strings.TrimSpace(sha); sha != "" {
+			shas = append(shas, sha)
+		}
+	}
+	return shas, ""
+}
+
+func unpushedNote(m *Manifest) string {
+	if len(m.Unpushed) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; also pushes the folder's %d unpushed commit(s) under the bump", len(m.Unpushed))
+}
+
 func buildRequest(m *Manifest) string {
 	b := m.Profile.Build
 	if b.Path != "" {
 		return "copy the ready archive " + b.Path
 	}
-	return "in data\\release\\<run>\\src (clean worktree of the bump sha): " + b.Command + " → " + expandOutput(b.Output, m)
+	cmd, err := expandCommand(b.Command, m.ModName, m.Version)
+	if err != nil {
+		cmd = b.Command + " (" + err.Error() + ")"
+	}
+	return "in data\\release\\<run>\\src (clean worktree of the bump sha): " + cmd + " → " + expandOutput(b.Output, m)
 }
 
 // Release plans a release and, when nothing refuses it, creates the run with

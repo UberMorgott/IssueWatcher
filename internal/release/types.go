@@ -95,13 +95,16 @@ const (
 // Manifest is a release run's frozen input (store.Run.Manifest). Written once
 // at start; BumpSHA and Changelog are filled once by the bump step.
 type Manifest struct {
-	ProjectID     int64                 `json:"projectId"`
-	Project       string                `json:"project"` // github:owner/repo
-	Repo          string                `json:"repo"`    // owner/repo
-	RepoURL       string                `json:"repoUrl"`
-	Folder        string                `json:"folder"`
-	Branch        string                `json:"branch"`
-	Head          string                `json:"head"`    // verified HEAD == remote default branch head at start
+	ProjectID int64  `json:"projectId"`
+	Project   string `json:"project"` // github:owner/repo
+	Repo      string `json:"repo"`    // owner/repo
+	RepoURL   string `json:"repoUrl"`
+	Folder    string `json:"folder"`
+	Branch    string `json:"branch"`
+	Head      string `json:"head"` // the folder's HEAD at start: the remote head or a fast-forward of it
+	// Unpushed are the folder's commits ahead of the remote at start (manual /
+	// MCP releases): the push step sends them under the bump, nothing else.
+	Unpushed      []string              `json:"unpushed,omitempty"`
 	BaseTag       string                `json:"baseTag"` // last v* tag ("" = none)
 	FromVersion   string                `json:"fromVersion"`
 	Version       string                `json:"version"`
@@ -214,6 +217,7 @@ type Plan struct {
 	Branch         string       `json:"branch"`
 	Head           string       `json:"head"`
 	RemoteHead     string       `json:"remoteHead"`
+	Unpushed       []string     `json:"unpushed,omitempty"` // folder commits ahead of the remote that the push step sends
 	BaseTag        string       `json:"baseTag"`
 	CurrentVersion string       `json:"currentVersion"`
 	Version        string       `json:"version"`

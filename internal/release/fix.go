@@ -554,7 +554,7 @@ func (e *Engine) verifyFix(ctx context.Context, r store.Run, m *FixManifest) (re
 		return "", HeldNoVerify, errors.New("no verify gate available")
 	}
 	logDir := filepath.Join(e.d.DataDir, "autopilot", "fix", strconv.FormatInt(r.ID, 10), "logs")
-	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, logDir)
+	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, logDir, e.folderExpander(m.Project, m.Folder, m.Repo)) //nolint:contextcheck // source reads git tags with its own timeout
 	if !ran {
 		return "", HeldNoVerify, errors.New("no verify gate: the project has neither Aegis nor a verify command")
 	}

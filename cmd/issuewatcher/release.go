@@ -63,8 +63,8 @@ func newReleaseEngine(log *slog.Logger, dataDir string, cfgs *config.Store, sett
 		},
 		Store: st, Settings: cfgs.Get, DataDir: dataDir, Releaser: gh, Publishers: publishers,
 		DefaultBranch: gh.DefaultBranch, GitToken: gh.GitToken, TokenEnv: runner.TokenEnv, Folders: jobs,
-		Gate: func(ctx context.Context, project, localPath, dir, logDir string) (release.CmdResult, bool) {
-			v, ran := jobs.Gate(ctx, project, localPath, dir, logDir)
+		Gate: func(ctx context.Context, project, localPath, dir, logDir string, expand func(string) (string, error)) (release.CmdResult, bool) {
+			v, ran := jobs.Gate(ctx, project, localPath, dir, logDir, expand)
 			return release.CmdResult(v), ran
 		},
 		Command: func(ctx context.Context, dir, command, logDir string, timeout time.Duration) release.CmdResult {

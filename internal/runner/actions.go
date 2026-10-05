@@ -519,11 +519,14 @@ const (
 
 // verifyCommand picks the check: `aegis verify` when the mapped folder has
 // Aegis enabled (unless turned off for the project), else the project's command.
+// aegisVerifyLabel is verifyCommand's label of the Aegis gate.
+const aegisVerifyLabel = "aegis verify"
+
 func (r *Runner) verifyCommand(localPath, wt string, pa config.ProjectAgent) (argv []string, label string) {
 	if !pa.NoAegis {
 		if st, err := os.Stat(filepath.Join(localPath, ".aegis")); err == nil && st.IsDir() {
 			if exe, err := r.opts.LookPath("aegis"); err == nil {
-				return []string{exe, "verify", "-root", wt}, "aegis verify"
+				return []string{exe, "verify", "-root", wt}, aegisVerifyLabel
 			}
 		}
 	}

@@ -53,7 +53,9 @@ type Deps struct {
 	GitURL  func(projectURL string) string
 	Folders FolderLocker
 	// Gate runs the project's verify gate in dir; ran = false when it has none.
-	Gate func(ctx context.Context, project, localPath, dir, logDir string) (res CmdResult, ran bool)
+	// expand substitutes the placeholders ({name}, {version}) in the project's
+	// verify command (not in `aegis verify`); an error fails the gate.
+	Gate func(ctx context.Context, project, localPath, dir, logDir string, expand func(string) (string, error)) (res CmdResult, ran bool)
 	// Command runs a shell command in dir inside a job object (the build).
 	Command func(ctx context.Context, dir, command, logDir string, timeout time.Duration) CmdResult
 	// Smoke runs the profile's smoke adapter on the built archive (smoke.Runner.Run);

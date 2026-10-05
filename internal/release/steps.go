@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -320,6 +321,49 @@ func expandOutput(p string, m *Manifest) string {
 	return strings.NewReplacer("{name}", m.ModName, "{version}", m.Version).Replace(p)
 }
 
+// safeValue is what a placeholder value may be to go into a shell command
+// unquoted: cmd.exe and pwsh treat none of these characters specially, so no
+// quoting (which differs per shell) is needed and nothing can inject.
+var safeValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// expandCommand substitutes the output path's placeholders ({name},
+// {version}) in a build or verify command. A placeholder whose value is empty
+// or holds anything but letters, digits and . _ + - is refused, never quoted.
+func expandCommand(cmd, name, version string) (string, error) {
+	var pairs []string
+	for _, kv := range [][2]string{{"{name}", name}, {"{version}", version}} {
+		if !strings.Contains(cmd, kv[0]) {
+			continue
+		}
+		if !safeValue.MatchString(kv[1]) {
+			return "", fmt.Errorf("placeholder %s = %q cannot go into a command (allowed: letters, digits, . _ + -)", kv[0], kv[1])
+		}
+		pairs = append(pairs, kv[0], kv[1])
+	}
+	if pairs == nil {
+		return cmd, nil
+	}
+	return strings.NewReplacer(pairs...).Replace(cmd), nil
+}
+
+// folderExpander is expandCommand outside a release (a fix run's gate): {name}
+// and {version} are the folder's current ones from the publish profile.
+func (e *Engine) folderExpander(project, folder, repo string) func(string) (string, error) {
+	return func(cmd string) (string, error) {
+		prof := e.d.Settings().Agents.Projects[project].PublishProfile
+		version := ""
+		if strings.Contains(cmd, "{version}") && prof.Version.Kind != "" {
+			version, _ = source.CurrentVersion(folder, source.VersionSource(prof.Version))
+		}
+		return expandCommand(cmd, modName(folder, prof, repo), version)
+	}
+}
+
+// expander is expandCommand over the manifest's values (Deps.Gate's expand).
+func (m *Manifest) expander() func(string) (string, error) {
+	return func(cmd string) (string, error) { return expandCommand(cmd, m.ModName, m.Version) }
+}
+
 // build checks the bump sha out of the mirror into data\release\<run>\src,
 // runs the profile's build command there (job object, 30 min) and copies the
 // declared output next to it; the worktree must stay clean but for it.
@@ -348,7 +392,11 @@ func (e *Engine) build(ctx context.Context, c *rc) localResult {
 			src = filepath.Join(m.Folder, filepath.FromSlash(src))
 		}
 	case p.Command != "" && e.d.Command != nil:
-		cmd = e.d.Command(ctx, wt, p.Command, filepath.Join(dir, "logs"), buildTimeout)
+		command, err := expandCommand(p.Command, m.ModName, m.Version)
+		if err != nil {
+			return localResult{hold: "build_failed", err: fmt.Errorf("build command: %w", err)}
+		}
+		cmd = e.d.Command(ctx, wt, command, filepath.Join(dir, "logs"), buildTimeout)
 		if !cmd.OK {
 			return localResult{hold: "build_failed", err: fmt.Errorf("build exit %d: %s", cmd.ExitCode, tail(cmd.Output, 2000))}
 		}
@@ -417,7 +465,7 @@ func (e *Engine) gate(ctx context.Context, c *rc) localResult {
 	if e.d.Gate == nil {
 		return localResult{hold: HeldNoVerify, err: errors.New("no verify gate available")}
 	}
-	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, filepath.Join(e.runDir(c.run.ID), "logs"))
+	res, ran := e.d.Gate(ctx, m.Project, m.Folder, m.Folder, filepath.Join(e.runDir(c.run.ID), "logs"), m.expander())
 	if !ran {
 		return localResult{hold: HeldNoVerify, err: errors.New(
 			"no verify command: the project has neither Aegis nor a verify command; add one (Settings › Projects) and resume")}
@@ -577,7 +625,8 @@ func (e *Engine) probePush(ctx context.Context, c *rc, _ store.Step) (probeResul
 }
 
 // checkPush: fast-forward only, and the commits ahead of the remote must be
-// the manifest's (Phase 1: the bump commit only).
+// the manifest's: the bump and the folder's unpushed commits the plan saw
+// (manual / MCP releases).
 func (e *Engine) checkPush(ctx context.Context, c *rc, _ store.Step) (string, error) {
 	m := c.m
 	head, err := c.mir.run(ctx, nil, "rev-parse", "refs/remotes/origin/"+m.Branch)
@@ -592,7 +641,7 @@ func (e *Engine) checkPush(ctx context.Context, c *rc, _ store.Step) (string, er
 		return "check:push", err
 	}
 	for sha := range strings.SplitSeq(out, "\n") {
-		if sha = strings.TrimSpace(sha); sha != "" && sha != m.BumpSHA {
+		if sha = strings.TrimSpace(sha); sha != "" && sha != m.BumpSHA && !slices.Contains(m.Unpushed, sha) {
 			return HeldForeignCommits, fmt.Errorf("commit %s ahead of the remote is not part of the release", short(sha))
 		}
 	}

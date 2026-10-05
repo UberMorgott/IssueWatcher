@@ -154,7 +154,11 @@ func (e *Engine) trialBuild(ctx context.Context, m *Manifest, dir string) (*Arti
 			src = filepath.Join(m.Folder, filepath.FromSlash(src))
 		}
 	} else {
-		cmd := e.d.Command(ctx, wt, p.Command, filepath.Join(dir, "logs"), buildTimeout)
+		command, err := expandCommand(p.Command, m.ModName, m.Version)
+		if err != nil {
+			return fail(fmt.Errorf("build command: %w", err))
+		}
+		cmd := e.d.Command(ctx, wt, command, filepath.Join(dir, "logs"), buildTimeout)
 		cmd.Output = tail(cmd.Output, 4000)
 		b.Command = &cmd
 		if !cmd.OK {
