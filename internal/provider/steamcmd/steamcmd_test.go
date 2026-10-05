@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,8 +42,14 @@ const (
 	fakeCode     = "AB12C"
 )
 
-func appendFile(path, s string) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+// appendFile appends s to name inside the fake's state dir.
+func appendFile(dir, name, s string) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
@@ -51,13 +58,13 @@ func appendFile(path, s string) {
 }
 
 func fakeSteamCMD(dir string, args []string) int {
-	appendFile(filepath.Join(dir, "argv.txt"), strings.Join(args, " ")+"\n")
+	appendFile(dir, "argv.txt", strings.Join(args, " ")+"\n")
 	in := bufio.NewReader(os.Stdin)
 	say := func(s string) { _, _ = os.Stdout.WriteString(s) }
 	read := func() string {
 		line, _ := in.ReadString('\n')
 		line = strings.TrimRight(line, "\r\n")
-		appendFile(filepath.Join(dir, "typed.txt"), line+"\n")
+		appendFile(dir, "typed.txt", line+"\n")
 		return line
 	}
 	say("Steam Console Client (c) Valve Corporation - version 1788292693\n-- type 'quit' to exit --\nLoading Steam API...OK\n\n")
@@ -93,13 +100,13 @@ func fakeSteamCMD(dir string, args []string) int {
 					say("\nThis account is protected by a Steam Guard mobile authenticator.\nPlease confirm the login in the Steam Mobile app on your phone.\n\nWaiting for confirmation...")
 					time.Sleep(700 * time.Millisecond)
 				}
-				appendFile(filepath.Join(dir, "cached"), "1")
+				appendFile(dir, "cached", "1")
 			}
 			say("OK\nWaiting for client config...OK\nWaiting for user info...OK\n")
 		case "+workshop_build_item":
 			i++
 			b, _ := os.ReadFile(args[i])
-			appendFile(filepath.Join(dir, "vdf.txt"), string(b))
+			appendFile(dir, "vdf.txt", string(b))
 			say("Uploading content...\nPreparing update...\nCommitting update...\n")
 			if os.Getenv("FAKE_UPLOAD") == "fail" {
 				say("ERROR! Failed to update workshop item (Access Denied).\n")
@@ -195,7 +202,12 @@ func newHarness(t *testing.T, env ...string) *harness {
 }
 
 func (h *harness) file(name string) string {
-	b, _ := os.ReadFile(filepath.Join(h.state, name))
+	root, err := os.OpenRoot(h.state)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = root.Close() }()
+	b, _ := root.ReadFile(name)
 	return string(b)
 }
 
@@ -208,10 +220,8 @@ func (h *harness) waitLogin(t *testing.T, states ...string) LoginState {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, s := range states {
-			if st.Login.State == s {
-				return st.Login
-			}
+		if slices.Contains(states, st.Login.State) {
+			return st.Login
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -285,8 +295,14 @@ func TestLoginWrongPasswordFails(t *testing.T) {
 // contentZip writes a mod archive and returns its path.
 func contentZip(t *testing.T) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "oracle_1.7.1.zip")
-	f, err := os.Create(p)
+	dir := t.TempDir()
+	p := filepath.Join(dir, "oracle_1.7.1.zip")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Create("oracle_1.7.1.zip")
 	if err != nil {
 		t.Fatal(err)
 	}

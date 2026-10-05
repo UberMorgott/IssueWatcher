@@ -19,7 +19,12 @@ func TestMain(m *testing.M) {
 		buf := make([]byte, 0, 64)
 		one := make([]byte, 1)
 		lines := 0
-		os.Stdout.WriteString("prompt: ")
+		say := func(s string) {
+			if _, err := os.Stdout.WriteString(s); err != nil {
+				os.Exit(2)
+			}
+		}
+		say("prompt: ")
 		for lines < 2 {
 			n, err := os.Stdin.Read(one)
 			if err != nil {
@@ -27,7 +32,7 @@ func TestMain(m *testing.M) {
 			}
 			if n == 1 && (one[0] == '\r' || one[0] == '\n') {
 				if len(buf) > 0 {
-					os.Stdout.WriteString("\ngot <" + string(buf) + ">\n")
+					say("\ngot <" + string(buf) + ">\n")
 					buf = buf[:0]
 					lines++
 				}
