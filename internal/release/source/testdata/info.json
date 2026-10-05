@@ -1,0 +1,7 @@
+{
+    "name": "my-mod",
+    "version": "1.2.3",
+    "title": "My Mod",
+    "dependencies": ["base >= 2.0", "? other"],
+    "factorio_version": "2.0"
+}

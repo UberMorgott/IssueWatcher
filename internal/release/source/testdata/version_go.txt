@@ -1,0 +1,6 @@
+package main
+
+// Version is stamped by the release.
+const Version = "2.0.9"
+
+const other = "1.0.0"
