@@ -159,3 +159,34 @@ func (e *env) callErr(t *testing.T, method, path, body string) (int, string) {
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out.Code
 }
+
+// The browser session (owner) plans without the disabled refusal; the bearer
+// token (MCP / CLI) gets it.
+func TestReleaseOriginByAuth(t *testing.T) {
+	e, id := releaseEnv(t)
+	path := "/api/projects/" + itoa(id) + "/release/plan"
+	var p release.Plan
+	if code := e.call(t, http.MethodPost, path, `{}`, &p); code != http.StatusOK || hasCode(p, release.CodeDisabled) {
+		t.Fatalf("owner: %d %+v", code, p.Refusals)
+	}
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, e.s.BaseURL()+path, strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+e.s.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	p = release.Plan{}
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil || !hasCode(p, release.CodeDisabled) {
+		t.Fatalf("mcp: %v %+v", err, p.Refusals)
+	}
+}
+
+func hasCode(p release.Plan, code string) bool {
+	for _, r := range p.Refusals {
+		if r.Code == code {
+			return true
+		}
+	}
+	return false
+}

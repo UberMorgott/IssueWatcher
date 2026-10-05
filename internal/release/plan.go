@@ -47,10 +47,13 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 	ap := cfg.Agents.AutopilotFor(repo.Key)
 	prof := pa.PublishProfile
 	p.Paused, p.Enabled, p.GithubRelease, p.SmokeKind = cfg.Agents.Autopilot.Paused, ap.Enabled, ap.GithubRelease, prof.Smoke.Kind
-	if p.Paused {
+	// The owner's click (manual) is the owner's decision; an MCP / CLI release is
+	// never owner approval, so the kill switch and the project switch hold it.
+	owner := req.Origin == "" || req.Origin == store.RunOriginManual
+	if p.Paused && !owner {
 		refuse(CodePaused, "autopilot is paused (agents.autopilot.paused)")
 	}
-	if !ap.Enabled {
+	if !ap.Enabled && !owner {
 		refuse(CodeDisabled, "autopilot is off for %s", repo.Key)
 	}
 	if repo.Platform != "github" {

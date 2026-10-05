@@ -685,7 +685,7 @@ func TestReleasePlanRefusals(t *testing.T) {
 	e := newEnv(t)
 	write(t, filepath.Join(e.folder, "control.lua"), "-- dirty\n")
 	e.cfg.Agents.Autopilot.Paused = true
-	p, err := e.engine(false).Plan(t.Context(), e.codeID, Request{Version: "1.0.0", Targets: []string{"steam:1"}})
+	p, err := e.engine(false).Plan(t.Context(), e.codeID, Request{Version: "1.0.0", Targets: []string{"steam:1"}, Origin: store.RunOriginMCP})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,5 +710,40 @@ func TestReleasePlanRefusals(t *testing.T) {
 	p, _ = e2.engine(false).Plan(t.Context(), e2.codeID, Request{})
 	if !slices.ContainsFunc(p.Refusals, func(r Refusal) bool { return r.Code == CodeHeadNotRemote }) {
 		t.Fatalf("refusals %+v", p.Refusals)
+	}
+}
+
+// The owner's click bypasses the kill switch and the project switch; an MCP /
+// CLI release is refused by both.
+func TestReleaseOriginRules(t *testing.T) {
+	e := newEnv(t)
+	e.mu.Lock()
+	e.cfg.Agents.Autopilot.Paused = true
+	pa := e.cfg.Agents.Projects[codeKey]
+	pa.Autopilot.Enabled = false
+	e.cfg.Agents.Projects[codeKey] = pa
+	e.mu.Unlock()
+	en := e.engine(false)
+	codes := func(p Plan) []string {
+		var out []string
+		for _, r := range p.Refusals {
+			out = append(out, r.Code)
+		}
+		return out
+	}
+	p, err := en.Plan(t.Context(), e.codeID, Request{Origin: store.RunOriginMCP})
+	if err != nil || p.OK || !slices.Contains(codes(p), CodePaused) || !slices.Contains(codes(p), CodeDisabled) {
+		t.Fatalf("mcp: %v %v", err, codes(p))
+	}
+	if _, _, err := en.Release(t.Context(), e.codeID, Request{Origin: store.RunOriginMCP}); err == nil {
+		t.Fatal("mcp release started while paused")
+	}
+	r, p, err := en.Release(t.Context(), e.codeID, Request{Origin: store.RunOriginManual})
+	if err != nil {
+		t.Fatalf("manual: %v %v", err, codes(p))
+	}
+	en.Wait()
+	if got := e.run(r.ID); got.State != store.RunDone || got.Origin != store.RunOriginManual {
+		t.Fatalf("manual run %+v", got)
 	}
 }

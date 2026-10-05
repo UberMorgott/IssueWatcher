@@ -156,7 +156,7 @@ func (s *Server) profileDoc(r *http.Request, rp store.Repo) (ProfileDoc, error) 
 	}
 	ag := doc.Settings.Agents
 	pa := ag.Projects[rp.Key]
-	plan, err := s.opts.Release.Plan(r.Context(), rp.ID, release.Request{})
+	plan, err := s.opts.Release.Plan(r.Context(), rp.ID, release.Request{Origin: s.origin(r)})
 	if err != nil {
 		return ProfileDoc{}, err
 	}
@@ -279,6 +279,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeRequest(w, r, &req) {
 		return
 	}
+	req.Origin = s.origin(r)
 	p, err := s.opts.Release.Plan(r.Context(), rp.ID, req)
 	if err != nil {
 		s.internalError(w, "release plan", err)

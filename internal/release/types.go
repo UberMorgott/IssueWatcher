@@ -121,7 +121,9 @@ type Request struct {
 	Items   []int64  `json:"items,omitempty"`   // items this release answers
 	Targets []string `json:"targets,omitempty"` // subset of the enabled targets; empty = all
 	DryRun  bool     `json:"dryRun,omitempty"`
-	Origin  string   `json:"-"` // manual | mcp (set by the API from the caller)
+	// Origin is set by the API from the caller: manual (the owner's browser session)
+	// bypasses paused / disabled; mcp (bearer: MCP / CLI) is refused by both. "" = manual.
+	Origin string `json:"-"`
 }
 
 // PlanTarget is a target as the plan sees it.
