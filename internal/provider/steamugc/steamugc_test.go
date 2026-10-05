@@ -479,14 +479,18 @@ func TestUploadFailures(t *testing.T) {
 }
 
 // TestStatusReportsTheSteamClient: running + signed in with the SteamID;
-// not running is a status (code init), not an error; default app 480.
+// not running is a status (code init), not an error; no app id is refused
+// (no default app: Steam would show the owner playing it).
 func TestStatusReportsTheSteamClient(t *testing.T) {
 	h := newHarness(t)
-	st, err := h.c.Status(context.Background(), 0)
-	if err != nil || !st.Running || !st.LoggedOn || st.SteamID != "76561197996210591" || st.AppID != StatusAppID {
+	if _, err := h.c.Status(context.Background(), 0); err == nil {
+		t.Fatal("status without app id: want an error")
+	}
+	st, err := h.c.Status(context.Background(), 839770)
+	if err != nil || !st.Running || !st.LoggedOn || st.SteamID != "76561197996210591" || st.AppID != 839770 {
 		t.Fatalf("status: %+v %v", st, err)
 	}
-	if cs := h.calls(t); len(cs) != 1 || cs[0]["appEnv"] != "480" {
+	if cs := h.calls(t); len(cs) != 1 || cs[0]["appEnv"] != "839770" {
 		t.Fatalf("calls %v", cs)
 	}
 	h.mode = "offline"
@@ -494,7 +498,7 @@ func TestStatusReportsTheSteamClient(t *testing.T) {
 		t.Fatalf("offline: %+v %v", st, err)
 	}
 	h.mode = "init_fail"
-	if st, err := h.c.Status(context.Background(), 0); err != nil || st.Running || st.LoggedOn || st.Code != "init" || st.SteamID != "" {
+	if st, err := h.c.Status(context.Background(), 839770); err != nil || st.Running || st.LoggedOn || st.Code != "init" || st.SteamID != "" {
 		t.Fatalf("not running: %+v %v", st, err)
 	}
 }

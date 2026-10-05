@@ -22,11 +22,15 @@ type WorkshopPage struct {
 	DryRun     bool     `json:"dryRun,omitempty"`
 }
 
-// SteamStatus reports whether the Steam client runs and is signed in (GET /api/steam/status).
-func (c *Client) SteamStatus(ctx context.Context, appID uint32) (json.RawMessage, error) {
-	var q url.Values
+// SteamStatus reports whether the Steam client runs and is signed in (GET
+// /api/steam/status), as appID or else the project's Steam target app.
+func (c *Client) SteamStatus(ctx context.Context, project int64, appID uint32) (json.RawMessage, error) {
+	q := url.Values{}
+	if project != 0 {
+		q.Set("project", strconv.FormatInt(project, 10))
+	}
 	if appID != 0 {
-		q = url.Values{"appId": {strconv.FormatUint(uint64(appID), 10)}}
+		q.Set("appId", strconv.FormatUint(uint64(appID), 10))
 	}
 	return c.get(ctx, "/api/steam/status", q)
 }

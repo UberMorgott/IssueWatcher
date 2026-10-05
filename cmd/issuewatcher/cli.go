@@ -72,8 +72,9 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   publish status <taskId>
 
   Steam Workshop items of a code project (Steam client running, signed in as the owner):
-  workshop status [--app-id N]
-                      is the Steam client running and signed in (uploads need it); read-only, default app 480
+  workshop status [<project>] [--app-id N]
+                      is the Steam client running and signed in (uploads need it); read-only, as --app-id or else
+                      the project's Steam target app (code project or its Steam page); one of them required
   workshop item <project>
   workshop create <project> --app-id N [--dry-run]
                       create the project's Workshop item once (id recorded first; a retry reuses it)

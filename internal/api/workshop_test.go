@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
+	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
 type fakeWorkshop struct {
@@ -31,9 +32,6 @@ func (f *fakeWorkshop) Create(_ context.Context, _ string, app uint32, dry bool)
 }
 func (f *fakeWorkshop) ResetCreate(string) error { return nil }
 func (f *fakeWorkshop) Status(_ context.Context, app uint32) (steamugc.Status, error) {
-	if app == 0 {
-		app = steamugc.StatusAppID
-	}
 	return steamugc.Status{Running: true, LoggedOn: true, SteamID: "76561197996210591", AppID: app}, nil
 }
 func (f *fakeWorkshop) SetPage(_ context.Context, app uint32, item uint64, p steamugc.Page, _ string, dry bool) (steamugc.PageResult, error) {
@@ -102,17 +100,38 @@ func TestWorkshopCreateAndPage(t *testing.T) {
 	}
 }
 
+// TestSteamStatus: the app is appId or the project's Steam target; never a
+// default app (Steam would show the owner playing it).
 func TestSteamStatus(t *testing.T) {
-	e, _ := releaseEnv(t, func(o *Options) { o.Workshop = &fakeWorkshop{} })
+	e, id := releaseEnv(t, func(o *Options) { o.Workshop = &fakeWorkshop{} })
 	var out map[string]any
-	if code := e.call(t, http.MethodGet, "/api/steam/status", "", &out); code != http.StatusOK || out["loggedOn"] != true || out["running"] != true ||
-		out["steamId"] != "76561197996210591" || out["appId"] != float64(480) {
-		t.Fatalf("status %d %v", code, out)
+	for _, path := range []string{"/api/steam/status", "/api/steam/status?appId=x", "/api/steam/status?appId=0", "/api/steam/status?project=x",
+		"/api/steam/status?project=" + itoa(id)} { // no target yet
+		if code, c := e.callErr(t, http.MethodGet, path, ""); code != http.StatusBadRequest || c != "bad_request" {
+			t.Fatalf("%s: %d %q", path, code, c)
+		}
 	}
-	if code := e.call(t, http.MethodGet, "/api/steam/status?appId=839770", "", &out); code != http.StatusOK || out["appId"] != float64(839770) {
+	if code, _ := e.callErr(t, http.MethodGet, "/api/steam/status?project=999999", ""); code != http.StatusNotFound {
+		t.Fatalf("unknown project %d", code)
+	}
+	if code := e.call(t, http.MethodGet, "/api/steam/status?appId=839770", "", &out); code != http.StatusOK || out["loggedOn"] != true || out["running"] != true ||
+		out["steamId"] != "76561197996210591" || out["appId"] != float64(839770) {
 		t.Fatalf("status app %d %v", code, out)
 	}
-	if code := e.call(t, http.MethodGet, "/api/steam/status?appId=x", "", &out); code != http.StatusBadRequest {
-		t.Fatalf("bad app id %d %v", code, out)
+	if err := e.s.addSteamTarget("github:octo/app", "steam:3800000001", 839770); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.call(t, http.MethodGet, "/api/steam/status?project="+itoa(id), "", &out); code != http.StatusOK || out["appId"] != float64(839770) {
+		t.Fatalf("status project %d %v", code, out)
+	}
+	if code := e.call(t, http.MethodGet, "/api/steam/status?project="+itoa(id)+"&appId=294100", "", &out); code != http.StatusOK || out["appId"] != float64(294100) {
+		t.Fatalf("appId overrides %d %v", code, out)
+	}
+	// The Steam page project (key steam:<id>) resolves through the profile target too.
+	if got := e.s.steamAppID(store.Repo{Key: "steam:3800000001", Platform: "steam"}); got != 839770 {
+		t.Fatalf("steam page app %d", got)
+	}
+	if got := e.s.steamAppID(store.Repo{Key: "steam:1", Platform: "steam"}); got != 0 {
+		t.Fatalf("unknown steam page app %d", got)
 	}
 }

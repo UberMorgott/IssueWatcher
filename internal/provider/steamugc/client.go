@@ -415,10 +415,6 @@ func (c *Client) Upload(ctx context.Context, appID uint32, item uint64, dir, not
 	return out, fmt.Errorf("%w: %s", ErrSteam, res.Error)
 }
 
-// StatusAppID is the app the status check starts the API with by default:
-// Spacewar, Valve's test app every account may use.
-const StatusAppID = 480
-
 // Status is the running Steam client as the helper sees it.
 type Status struct {
 	Running  bool   `json:"running"`
@@ -429,12 +425,13 @@ type Status struct {
 	Code     string `json:"code,omitempty"` // init: the API did not start (Steam not running, …)
 }
 
-// Status starts the API once (no writes) for appID (0: StatusAppID): is the
-// Steam client running and signed in, and as whom. A client that is not
-// running is a Status, not an error.
+// Status starts the API once (no writes) as appID (the project's game; no
+// default: Steam shows the owner playing that app): is the Steam client
+// running and signed in, and as whom. A client that is not running is a
+// Status, not an error.
 func (c *Client) Status(ctx context.Context, appID uint32) (Status, error) {
 	if appID == 0 {
-		appID = StatusAppID
+		return Status{}, errors.New("steam: status needs the game's app id")
 	}
 	res, err := c.run(ctx, Job{Op: "status", AppID: appID})
 	if err != nil {

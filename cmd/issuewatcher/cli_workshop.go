@@ -17,14 +17,24 @@ func (c *cli) workshop(args []string) (json.RawMessage, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	switch sub {
 	case "status":
-		appID := fs.Uint("app-id", 0, "start the API as this app (default 480)")
-		if _, err := flags(fs, args[1:]); err != nil {
+		appID := fs.Uint("app-id", 0, "start the API as this app (default: the project's Steam target app)")
+		pos, err := flags(fs, args[1:])
+		if err != nil {
 			return nil, err
 		}
 		if *appID > 1<<31 {
 			return nil, usagef("workshop status: bad --app-id")
 		}
-		return c.c.SteamStatus(c.ctx, uint32(*appID))
+		var id int64
+		if len(pos) > 0 {
+			if id, err = c.project(cmd, pos); err != nil {
+				return nil, err
+			}
+		}
+		if id == 0 && *appID == 0 {
+			return nil, usagef("workshop status: want a project with a Steam target or --app-id")
+		}
+		return c.c.SteamStatus(c.ctx, id, uint32(*appID))
 	case "item":
 		pos, err := flags(fs, args[1:])
 		if err != nil {

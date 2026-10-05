@@ -33,7 +33,8 @@ type WorkshopItems interface {
 //	POST   /api/projects/{id}/steam/item          {appId, dryRun?} → {item, url, created, linked, target, needsLegalAgreement?}; 409 {code: create_unknown}
 //	DELETE /api/projects/{id}/steam/item/pending  drop an unanswered creation (after checking the Workshop files)
 //	POST   /api/projects/{id}/steam/page          {item?, appId?, title?, localeDir?, preview?, tags?, visibility?, changeNote?, dryRun?} → steamugc.PageResult
-//	GET    /api/steam/status?appId=               {running, loggedOn, steamId?, appId, error?, code?}: the running Steam client (read-only; default app 480)
+//	GET    /api/steam/status?project=|appId=      {running, loggedOn, steamId?, appId, error?, code?}: the running Steam client (read-only)
+//	                                              as appId, else the project's Steam target app (code project or its steam:<id> page); neither → 400
 func (s *Server) registerWorkshop(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/steam/status", s.handleSteamStatus)
 	mux.HandleFunc("GET /api/projects/{id}/steam/item", s.handleWorkshopItem)
@@ -61,13 +62,35 @@ func (s *Server) workshopError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) handleSteamStatus(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	var app uint64
-	if v := r.URL.Query().Get("appId"); v != "" {
+	if v := q.Get("appId"); v != "" {
 		var err error
-		if app, err = strconv.ParseUint(v, 10, 32); err != nil {
+		if app, err = strconv.ParseUint(v, 10, 32); err != nil || app == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "appId: a Steam app id", "code": "bad_request"})
 			return
 		}
+	}
+	if v := q.Get("project"); app == 0 && v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project: a project id", "code": "bad_request"})
+			return
+		}
+		rp, err := s.opts.Store.Repo(r.Context(), id)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			errJSON(w, http.StatusNotFound, "no such project")
+			return
+		case err != nil:
+			s.internalError(w, "project", err)
+			return
+		}
+		app = uint64(s.steamAppID(rp))
+	}
+	if app == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "want a project with a Steam target or appId", "code": "bad_request"})
+		return
 	}
 	st, err := s.opts.Workshop.Status(r.Context(), uint32(app))
 	if err != nil {
@@ -272,6 +295,37 @@ func (s *Server) handleWorkshopPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// steamAppID is the Steam app of a project from the publish profiles: a code
+// project's steam:<id> targets, or the target of a Steam project (key
+// steam:<id>) in any profile. 0 = none, or several different apps.
+func (s *Server) steamAppID(rp store.Repo) uint32 {
+	if s.opts.Settings == nil {
+		return 0
+	}
+	cur, err := s.opts.Settings.Settings()
+	if err != nil {
+		return 0
+	}
+	apps := map[int]bool{}
+	for key, p := range cur.Settings.Agents.Projects {
+		for target, tp := range p.PublishProfile.Targets {
+			if tp.AppID <= 0 || tp.AppID > 1<<31 || !strings.HasPrefix(target, "steam:") {
+				continue
+			}
+			if key == rp.Key || target == rp.Key {
+				apps[tp.AppID] = true
+			}
+		}
+	}
+	if len(apps) != 1 {
+		return 0
+	}
+	for a := range apps {
+		return uint32(max(0, min(a, 1<<31)))
+	}
+	return 0
 }
 
 // singleSteamTarget is the only steam:<id> target of the project's publish profile.

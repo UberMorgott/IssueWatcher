@@ -181,8 +181,9 @@ func TestCLIActionCommands(t *testing.T) {
 			apiCall{"POST", "/api/projects/69/steam/page", "", `{"title":"Content Tool","tags":["Tools","Gameplay"],"visibility":"public","dryRun":true}`}, `dryRun`},
 		{"", []string{"publish", "targets", "69"}, apiCall{"GET", "/api/projects/69/publish/targets", "", ""}, `"files"`},
 		{"", []string{"publish", "status", "t1"}, apiCall{"GET", "/api/publish/t1", "", ""}, `"done"`},
-		{"", []string{"workshop", "status"}, apiCall{"GET", "/api/steam/status", "", ""}, `"loggedOn": true`},
+		{"", []string{"workshop", "status", "69"}, apiCall{"GET", "/api/steam/status", "project=69", ""}, `"loggedOn": true`},
 		{"", []string{"workshop", "status", "--app-id", "839770"}, apiCall{"GET", "/api/steam/status", "appId=839770", ""}, `loggedOn`},
+		{"", []string{"workshop", "status", "69", "--app-id", "839770"}, apiCall{"GET", "/api/steam/status", "appId=839770&project=69", ""}, `loggedOn`},
 	} {
 		code, out, stderr := cliRun(tc.stdin, tc.args...)
 		if code != exitOK || !strings.Contains(out, tc.out) {
@@ -192,7 +193,7 @@ func TestCLIActionCommands(t *testing.T) {
 			t.Fatalf("%v: request %+v, want %+v", tc.args, got, tc.want)
 		}
 	}
-	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}} {
+	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}, {"workshop", "status"}, {"workshop", "status", "69", "70"}} {
 		if code, _, stderr := cliRun("", args...); code != exitUsage {
 			t.Fatalf("%v: %d %q", args, code, stderr)
 		}
