@@ -12,6 +12,8 @@ func TestCLIReleaseCommands(t *testing.T) {
 		"GET /api/projects":                   `200 [{"id":1,"name":"o/r","platform":"github","key":"github:o/r"}]`,
 		"GET /api/projects/1/publish-profile": `200 {"revision":7}`,
 		"PUT /api/projects/1/publish-profile": `200 {"revision":8}`,
+		"GET /api/projects/1/autopilot":       `200 {"revision":7,"autopilot":{"enabled":false}}`,
+		"PUT /api/projects/1/autopilot":       `200 {"revision":9}`,
 		"POST /api/projects/1/release/plan":   `200 {"ok":true}`,
 		"POST /api/projects/1/release":        `202 {"run":{"id":5,"state":"done"},"plan":{"ok":true}}`,
 		"GET /api/runs":                       `200 []`,
@@ -34,6 +36,13 @@ func TestCLIReleaseCommands(t *testing.T) {
 		{"", []string{"profile", "set", "1", "--file", profile}, apiCall{"PUT", "/api/projects/1/publish-profile", "", `{"publishProfile":{}}`}, `"revision": 8`},
 		{`{"revision":7,"autopilot":{"enabled":true}}`, []string{"profile", "set", "o/r", "-"},
 			apiCall{"PUT", "/api/projects/1/publish-profile", "", `{"revision":7,"autopilot":{"enabled":true}}`}, `"revision": 8`},
+		{"", []string{"profile", "set", "1", "--dry-run", "--file", profile},
+			apiCall{"PUT", "/api/projects/1/publish-profile", "", `{"dryRun":true,"publishProfile":{}}`}, `"revision": 8`},
+		{"", []string{"autopilot", "get", "o/r"}, apiCall{"GET", "/api/projects/1/autopilot", "", ""}, `"enabled": false`},
+		{`{"revision":7,"autopilot":{"autoFix":true}}`, []string{"autopilot", "set", "1", "-"},
+			apiCall{"PUT", "/api/projects/1/autopilot", "", `{"revision":7,"autopilot":{"autoFix":true}}`}, `"revision": 9`},
+		{`{"autopilot":{"autoPush":true}}`, []string{"autopilot", "set", "github:o/r", "--dry-run", "-"},
+			apiCall{"PUT", "/api/projects/1/autopilot", "", `{"autopilot":{"autoPush":true},"dryRun":true}`}, `"revision": 9`},
 		{"", []string{"release", "plan", "o/r", "--version", "1.2.0", "--items", "4, 6", "--targets", "nexus:g/2"},
 			apiCall{"POST", "/api/projects/1/release/plan", "", `{"version":"1.2.0","items":[4,6],"targets":["nexus:g/2"]}`}, `"ok": true`},
 		{"", []string{"release", "run", "1", "--dry-run", "--head", "abc"}, apiCall{"POST", "/api/projects/1/release", "", `{"head":"abc","dryRun":true}`}, `"run"`},
@@ -56,6 +65,8 @@ func TestCLIReleaseCommands(t *testing.T) {
 		{"release"}, {"release", "ship", "1"}, {"release", "plan"}, {"release", "plan", "1", "2"}, {"release", "plan", "1", "--items", "x"},
 		{"release", "plan", "1", "--wait"}, {"run"}, {"run", "x"}, {"run", "5", "bogus"}, {"run", "5", "skip"}, {"run", "5", "--target", "t"},
 		{"profile"}, {"profile", "get"}, {"profile", "set", "1"}, {"runs", "extra"},
+		{"autopilot"}, {"autopilot", "bogus"}, {"autopilot", "get"}, {"autopilot", "get", "1", "2"}, {"autopilot", "set", "1"},
+		{"autopilot", "set", "1", "--file", profile, "-"},
 	} {
 		if code, _, stderr := cliRun("", args...); code != exitUsage {
 			t.Fatalf("%v: %d %q", args, code, stderr)

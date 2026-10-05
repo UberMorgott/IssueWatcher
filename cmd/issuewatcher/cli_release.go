@@ -160,39 +160,86 @@ func (c *cli) profile(args []string) (json.RawMessage, error) {
 		}
 		return c.c.PublishProfile(c.ctx, id)
 	case "set":
-		fs := flag.NewFlagSet("profile set", flag.ContinueOnError)
-		file := fs.String("file", "", "JSON file {revision?, publishProfile?, autopilot?}")
-		pos, err := flags(fs, args[1:])
-		if err != nil {
-			return nil, err
-		}
-		stdin := len(pos) == 2 && pos[1] == "-"
-		if stdin {
-			pos = pos[:1]
-		}
-		if stdin == (*file != "") {
-			return nil, usagef("profile set: give the JSON with --file FILE or - (stdin)")
-		}
-		var b []byte
-		if stdin {
-			b, err = io.ReadAll(io.LimitReader(c.stdin, 256<<10))
-		} else {
-			b, err = os.ReadFile(*file)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read profile: %w", err)
-		}
-		b = trimBOM(b)
-		if !json.Valid(b) {
-			return nil, usagef("profile set: the profile is not valid JSON")
-		}
-		id, err := c.project("profile set", pos)
+		id, b, err := c.setBody("profile set", "JSON file {revision?, publishProfile?, autopilot?}", args[1:])
 		if err != nil {
 			return nil, err
 		}
 		return c.c.SetPublishProfile(c.ctx, id, b)
 	}
 	return nil, usagef("profile: want get or set")
+}
+
+// autopilot: `autopilot get <project>` · `autopilot set <project> (--file FILE | -) [--dry-run]`
+// (the MCP get_autopilot_settings / set_autopilot_settings).
+func (c *cli) autopilot(args []string) (json.RawMessage, error) {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "get":
+		pos, err := flags(flag.NewFlagSet("autopilot get", flag.ContinueOnError), args[1:])
+		if err != nil {
+			return nil, err
+		}
+		id, err := c.project("autopilot get", pos)
+		if err != nil {
+			return nil, err
+		}
+		return c.c.AutopilotSettings(c.ctx, id)
+	case "set":
+		id, b, err := c.setBody("autopilot set", "JSON file {revision?, autopilot}", args[1:])
+		if err != nil {
+			return nil, err
+		}
+		return c.c.SetAutopilotSettings(c.ctx, id, b)
+	}
+	return nil, usagef("autopilot: want get or set")
+}
+
+// setBody parses `<project> (--file FILE | -) [--dry-run]` of a settings PUT:
+// the project id and the JSON object body (dryRun: true added on --dry-run:
+// validated by the app, nothing written).
+func (c *cli) setBody(cmd, fileHelp string, args []string) (int64, []byte, error) {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	file := fs.String("file", "", fileHelp)
+	dry := fs.Bool("dry-run", false, "validate only, nothing is written")
+	pos, err := flags(fs, args)
+	if err != nil {
+		return 0, nil, err
+	}
+	stdin := len(pos) == 2 && pos[1] == "-"
+	if stdin {
+		pos = pos[:1]
+	}
+	if stdin == (*file != "") {
+		return 0, nil, usagef("%s: give the JSON with --file FILE or - (stdin)", cmd)
+	}
+	var b []byte
+	if stdin {
+		b, err = io.ReadAll(io.LimitReader(c.stdin, 256<<10))
+	} else {
+		b, err = os.ReadFile(*file)
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("%s: read: %w", cmd, err)
+	}
+	b = trimBOM(b)
+	var doc map[string]json.RawMessage
+	if json.Unmarshal(b, &doc) != nil || doc == nil {
+		return 0, nil, usagef("%s: the body is not a JSON object", cmd)
+	}
+	if *dry {
+		doc["dryRun"] = json.RawMessage("true")
+		if b, err = json.Marshal(doc); err != nil {
+			return 0, nil, err
+		}
+	}
+	id, err := c.project(cmd, pos)
+	if err != nil {
+		return 0, nil, err
+	}
+	return id, b, nil
 }
 
 // trimBOM drops a UTF-8 byte order mark (PowerShell's Set-Content writes one in 5.1).
