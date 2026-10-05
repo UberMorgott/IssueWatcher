@@ -292,6 +292,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	var testN atomic.Int64
 	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
+	releases := newReleaseEngine(log, dataDir, cfgs, st, gh, jobs, mods.Publisher, func() *api.Server { return srv })
 
 	focus := notify.FocusDashboard
 	var picker api.FolderPicker
@@ -365,6 +366,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Publishers:    mods.Publisher,
 		PageEditors:   mods.PageEditor,
 		Platforms:     mods,
+		Release:       releases,
 	})
 	if err != nil {
 		return err
@@ -416,6 +418,11 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		if err := jobs.Start(syncCtx); err != nil {
 			log.Error("agent jobs: start", "err", err)
 		}
+		// Release runs left by a previous process: sending steps are probed, then
+		// the running ones continue (docs/AUTOPILOT.md → crash resume).
+		if err := releases.Start(syncCtx); err != nil {
+			log.Error("release runs: start", "err", err)
+		}
 		go func() { sy.Run(syncCtx); close(syncDone) }()
 		go upd.Run(syncCtx) // automatic update checks (never installs)
 	}
@@ -429,7 +436,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		}
 		// Running agents are killed by the cancelled context; wait for their outcome to be stored.
 		stopped := make(chan struct{})
-		go func() { jobs.Wait(); close(stopped) }()
+		go func() { jobs.Wait(); releases.Wait(); close(stopped) }() // a release step left sending is probed at the next start
 		select {
 		case <-stopped:
 		case <-time.After(10 * time.Second):

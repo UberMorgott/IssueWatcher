@@ -28,8 +28,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/callerpid"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
+	"github.com/UberMorgott/issuewatcher/internal/release"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
@@ -86,6 +88,9 @@ type Options struct {
 	PageEditors func(platform string) provider.PageEditor
 	// Platforms reports and checks the platform accounts (/api/platforms); nil disables them.
 	Platforms Platforms
+	// Release runs autopilot release runs (/api/projects/{id}/release, /api/runs,
+	// /api/autopilot, publish-profile); nil disables them (needs Store and Settings).
+	Release *release.Engine
 }
 
 // Server serves the SPA and the loopback API.
@@ -109,6 +114,11 @@ type Server struct {
 	labels    labelRefresh // background label fetches (labels.go)
 	agents    agentDetect  // cached agent CLI detection (detect.go)
 	publishes publishTasks // running and finished publishes (publish.go)
+
+	// callerPID resolves the loopback client's process, inAgentJob tells an
+	// agent run's process (release.go: refuseAgent); tests may replace them.
+	callerPID  func(remoteAddr, localAddr string) (uint32, error)
+	inAgentJob func(pid uint32) bool
 
 	bg     context.Context // background work of the server (label fetches), ended by Shutdown
 	stopBg context.CancelFunc
@@ -138,6 +148,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		session:  cmp.Or(opts.SessionSecret, randomHex(32)),
 		launches: map[string]launch{},
 		hub:      newHub(),
+
+		callerPID:  callerpid.LoopbackPID,
+		inAgentJob: runner.InAgentJob,
 	}
 	s.bg, s.stopBg = context.WithCancel(context.WithoutCancel(ctx))
 	s.index, _ = fs.ReadFile(opts.Assets, "index.html") // nil → 503 "frontend not built"
@@ -185,6 +198,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Platforms != nil {
 		s.registerPlatforms(mux)
+	}
+	if opts.Release != nil && opts.Store != nil && opts.Settings != nil {
+		s.registerRelease(mux)
 	}
 	if opts.TestNotification != nil {
 		mux.HandleFunc("POST /api/notifications/test", s.handleTestNotification)

@@ -25,7 +25,7 @@ import (
 //	DELETE /api/publish/{taskId}       running: cancel (202 PublishTask; the publish
 //	                                   call itself is never aborted once sent); finished: forget (204)
 //
-// Errors: 404 project, 409 {code: unavailable | no_api_key | bad_api_key | busy},
+// Errors: 403 {code: agent_caller | caller_unknown} (non-dry-run from an agent run), 404 project, 409 {code: unavailable | no_api_key | bad_api_key | busy},
 // 400 {code: bad_request}. A failed task keeps uploadId: POST again with
 // {uploadId} (no path) to publish the uploaded archive without re-uploading.
 
@@ -139,6 +139,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	var req provider.PublishRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil {
 		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if !req.DryRun && s.refuseAgent(w, r) {
 		return
 	}
 	if err := pub.CheckPublish(project, req); err != nil {
