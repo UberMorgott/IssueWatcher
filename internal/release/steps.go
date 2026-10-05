@@ -867,7 +867,7 @@ func (e *Engine) publishProbe(ctx context.Context, c *rc, key string) (probeResu
 	if v.SHA1 != "" && c.art != nil && !strings.EqualFold(v.SHA1, c.art.SHA1) {
 		return probeResult{hold: HeldVersion}, nil // the same version with another archive
 	}
-	return probeResult{present: true, ref: cmpOrStr(v.ID, v.Version)}, nil
+	return probeResult{present: true, ref: cmpOrStr(v.ID, v.Version), pending: v.Pending}, nil
 }
 
 func (e *Engine) publisher(platform string) provider.Publisher {
@@ -899,6 +899,7 @@ func (e *Engine) publishRequest(c *rc, st store.Step, t Target) provider.Publish
 	case "factorio":
 	default:
 		req.FileID, req.Category, req.ArchivePrevious = t.Profile.FileID, t.Profile.Category, t.Profile.ArchivePrevious
+		req.AppID, req.GameVersions, req.ReleaseType = t.Profile.AppID, t.Profile.GameVersions, t.Profile.ReleaseType // steam, curseforge
 		if r := []rune(m.Changelog); len(r) > 2000 {
 			req.Changelog = string(r[:2000])
 		} else {
@@ -953,9 +954,9 @@ func authState(err error) string {
 	switch {
 	case err == nil:
 		return "ok"
-	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey):
+	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey), errors.Is(err, provider.ErrNoUploadAuth):
 		return "no_api_key"
-	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey):
+	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey), errors.Is(err, provider.ErrUploadAuthRefused):
 		return "bad_api_key"
 	}
 	return "error"
@@ -994,7 +995,7 @@ func (e *Engine) available(ctx context.Context, c *rc, st store.Step) localResul
 			return localResult{hold: "check:" + stepName(st), err: err}
 		case pr.hold != "":
 			return localResult{hold: pr.hold}
-		case pr.present:
+		case pr.present && !pr.pending:
 			return localResult{ref: pr.ref}
 		}
 		if e.d.Now().After(deadline) {

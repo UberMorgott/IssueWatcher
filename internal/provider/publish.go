@@ -13,6 +13,15 @@ import (
 // anything is uploaded).
 var ErrBadPublish = errors.New("bad publish request")
 
+// ErrNoUploadAuth: the platform's upload credentials are not set up (Steam:
+// no steamcmd sign-in, CurseForge: no upload token); the owner fills the form
+// in Settings › Платформы. ErrUploadAuthRefused: they are set up but refused
+// (expired steamcmd session, revoked token).
+var (
+	ErrNoUploadAuth      = errors.New("upload credentials not set up")
+	ErrUploadAuthRefused = errors.New("upload credentials refused")
+)
+
 // Publisher is a provider that uploads archives as new mod file versions.
 type Publisher interface {
 	// PublishTargets lists the project's files and their versions.
@@ -56,6 +65,8 @@ type PublishVersion struct {
 	// SHA1 is the uploaded archive's SHA-1 when the platform reports it
 	// (Factorio mod portal), so a probe can tell the same file from another.
 	SHA1 string `json:"sha1,omitempty"`
+	// Pending: uploaded but not downloadable yet (CurseForge moderation).
+	Pending bool `json:"pending,omitempty"`
 }
 
 // PublishRequest is what to publish.
@@ -82,7 +93,16 @@ type PublishRequest struct {
 	ShowRequirementsPopUp     *bool `json:"showRequirementsPopUp,omitempty"`
 
 	Changelog string `json:"changelog,omitempty"` // added for Version after the publish
-	DryRun    bool   `json:"dryRun,omitempty"`
+
+	// Steam Workshop: the game's app id (0 = the item's consumer app). Path is
+	// the content folder, or a zip that is unpacked into one.
+	AppID int `json:"appId,omitempty"`
+	// CurseForge: game version ids or names (none = the previous file's) and
+	// release | beta | alpha ("" = release).
+	GameVersions []string `json:"gameVersions,omitempty"`
+	ReleaseType  string   `json:"releaseType,omitempty"`
+
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
 // PublishStep is one planned request of a dry run.

@@ -511,6 +511,7 @@ type probeResult struct {
 	present bool
 	ref     string
 	hold    string // definite conflict: the step fails with this held reason
+	pending bool   // published but not downloadable yet (moderation): available waits
 }
 
 // step runs one pending step; hold != "" means the step ended failed / unknown.

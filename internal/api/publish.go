@@ -108,9 +108,9 @@ func (s *Server) publishErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, provider.ErrBadPublish):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_request"})
-	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey):
+	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey), errors.Is(err, provider.ErrNoUploadAuth):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "no_api_key"})
-	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey):
+	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey), errors.Is(err, provider.ErrUploadAuthRefused):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "bad_api_key"})
 	default:
 		s.opts.Log.Warn("api: publish", "err", err)
@@ -221,9 +221,9 @@ func (s *Server) finishPublish(t *publishTask, res provider.PublishResult, err e
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "publish_failed"
 	case cancelled:
 		t.State, t.Error, t.ErrorCode = PublishCancelled, err.Error(), "cancelled"
-	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey):
+	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey), errors.Is(err, provider.ErrNoUploadAuth):
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "no_api_key"
-	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey):
+	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey), errors.Is(err, provider.ErrUploadAuthRefused):
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "bad_api_key"
 	default:
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "upload_failed"
