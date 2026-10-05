@@ -84,6 +84,7 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
 
   Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
   profile get <project>
+                      profile + autopilot + a local plan (no network; release plan is the full one)
   profile set <project> [--file FILE | -] [--verify CMD] [--dry-run]
                       replace the given blocks of {revision?, publishProfile?, autopilot?, verify?};
                       --verify CMD sets the project's verify command ({name} {version} replaced)
@@ -91,8 +92,9 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   autopilot get <project>
                       the project's autopilot switches + revision + the global block
   autopilot set <project> (--file FILE | -) [--dry-run]
-                      replace the autopilot block from {revision?, autopilot} (left-out keys
-                      get their defaults); --dry-run validates only
+                      update the autopilot block from {revision?, autopilot}: the given keys
+                      change, left-out keys keep their values (publish is replaced whole);
+                      --dry-run validates only
   release plan <project> [--version V] [--head SHA] [--items ID,..] [--targets KEY,..]
                       dry-run plan: ok, refusals, version, steps, targets
   release run <project> [--version V] [--head SHA] [--items ID,..] [--targets KEY,..] [--dry-run] [--wait]

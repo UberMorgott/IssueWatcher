@@ -180,6 +180,9 @@ type Request struct {
 	// Claim are pushed fix runs the release answers for (the coalescing timer):
 	// claimed in the run's create transaction.
 	Claim []int64 `json:"-"`
+	// Local plans without a network call (the publish profile GET): no remote
+	// fetch, no default-branch lookup, targets from the last platform answers.
+	Local bool `json:"-"`
 }
 
 // PlanTarget is a target as the plan sees it.
@@ -233,6 +236,10 @@ type Plan struct {
 	Caps           Caps         `json:"caps"`
 	Paused         bool         `json:"paused"`
 	Enabled        bool         `json:"enabled"`
+	// Local: planned without network calls (the publish profile GET): the remote
+	// head and remote tags are not read, targets show the last platform answer
+	// (auth "unchecked" before the first one). POST …/release/plan is the full plan.
+	Local bool `json:"local,omitempty"`
 
 	manifest *Manifest // set when OK (start uses it)
 }

@@ -1175,6 +1175,8 @@ export interface ReleasePlan {
   caps: ReleaseCaps
   paused: boolean
   enabled: boolean
+  /** Planned without network calls (publish profile GET): no remote head; targets' auth / latest version from the last platform answer, else unchecked. */
+  local?: boolean
 }
 
 /** The build of a profile check: HEAD built in a temp worktree, nothing committed or sent. */

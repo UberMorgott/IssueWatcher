@@ -57,7 +57,7 @@ error, 2 usage, 3 app not running. `issuewatcher help` lists the flags.
 | `jobs create --flow fix\|reply\|label <itemId>...` | queue agent jobs |
 | `job cancel\|retry\|dismiss\|push\|pr <id>` · `job reply <id> (--body-file f \| -)` · `job labels <id> <name>...` | the job page buttons |
 | `publish <projectId> --path ARCHIVE --version V [--file-id ID \| --new-file] [--name N] [--category C] [--changelog-file f] [--archive-previous] [--update-mod-version] [--dry-run] [--wait]` · `publish targets <projectId>` · `publish status <taskId>` | upload an archive as a new mod version (Nexus, Factorio) with the app's stored credentials · the files/versions to publish to · a publish task |
-| `profile get <project>` · `profile set <project> (--file f \| -)` | a code project's publish profile + autopilot + resolved plan · replace its `{revision?, publishProfile?, autopilot?}` blocks |
+| `profile get <project>` · `profile set <project> (--file f \| -)` | a code project's publish profile + autopilot + local plan (no network; `release plan` is the full one) · replace its `{revision?, publishProfile?, autopilot?}` blocks |
 | `release plan <project> [--version --head --items 1,2 --targets k1,k2]` · `release run <project> [same] [--dry-run] [--wait]` | dry-run release plan · start an autopilot release run (background; `--wait` polls to done / held / failed) |
 | `runs [--project --state --kind --limit]` · `run <id> [resume \| cancel \| skip <step> [--target KEY]]` | release runs · one run with its steps, or act on it |
 

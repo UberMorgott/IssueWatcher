@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -15,7 +17,7 @@ import (
 
 // Autopilot release runs (docs/AUTOPILOT.md, Phase 1):
 //
-//	GET  /api/projects/{id}/publish-profile          → ProfileDoc (profile + autopilot + resolved plan)
+//	GET  /api/projects/{id}/publish-profile          → ProfileDoc (profile + autopilot + local plan)
 //	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?, verify?, dryRun?} → ProfileDoc   (agent callers refused)
 //	                                                 dryRun → ProfilePreview (validated, nothing written; agent callers allowed)
 //	POST /api/projects/{id}/publish-profile/check    release.Request? → release.CheckResult (plan + trial build at HEAD in a temp
@@ -176,8 +178,10 @@ type ProfileDoc struct {
 	Autopilot config.ProjectAutopilot `json:"autopilot"`
 	Global    config.AgentsAutopilot  `json:"global"`
 	Kinds     ProfileKinds            `json:"kinds"`
-	// Resolved is the dry-run plan: current / next version, changelog preview,
-	// targets with their latest versions and auth state, steps, refusals.
+	// Resolved is the local dry-run plan (no network: no remote head, targets'
+	// auth / latest version from the last platform answer, else unchecked):
+	// current / next version, changelog preview, steps, refusals.
+	// POST …/release/plan is the full plan.
 	Resolved release.Plan `json:"resolved"`
 }
 
@@ -188,7 +192,9 @@ func (s *Server) profileDoc(r *http.Request, rp store.Repo) (ProfileDoc, error) 
 	}
 	ag := doc.Settings.Agents
 	pa := ag.Projects[rp.Key]
-	plan, err := s.opts.Release.Plan(r.Context(), rp.ID, release.Request{Origin: s.origin(r)})
+	// Local: no remote fetch and no platform call, so the GET answers at once;
+	// POST …/release/plan is the full dry run.
+	plan, err := s.opts.Release.Plan(r.Context(), rp.ID, release.Request{Origin: s.origin(r), Local: true})
 	if err != nil {
 		return ProfileDoc{}, err
 	}
@@ -237,14 +243,14 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Revision       *int                     `json:"revision"`
-		PublishProfile *config.PublishProfile   `json:"publishProfile"`
-		Autopilot      *config.ProjectAutopilot `json:"autopilot"`
-		Verify         *string                  `json:"verify"`
-		DryRun         bool                     `json:"dryRun"`
+		Revision       *int                   `json:"revision"`
+		PublishProfile *config.PublishProfile `json:"publishProfile"`
+		Autopilot      json.RawMessage        `json:"autopilot"` // the keys to change (mergeAutopilot)
+		Verify         *string                `json:"verify"`
+		DryRun         bool                   `json:"dryRun"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil ||
-		(req.PublishProfile == nil && req.Autopilot == nil && req.Verify == nil) {
+		(req.PublishProfile == nil && len(req.Autopilot) == 0 && req.Verify == nil) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, publishProfile?, autopilot?, verify?, dryRun?}", "code": "bad_request"})
 		return
 	}
@@ -265,8 +271,14 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 	if req.PublishProfile != nil {
 		block["publishProfile"] = mergeDiff(toJSONValue(pa.PublishProfile), toJSONValue(*req.PublishProfile))
 	}
-	if req.Autopilot != nil {
-		block["autopilot"] = mergeDiff(toJSONValue(cur.Settings.Agents.AutopilotFor(rp.Key)), toJSONValue(*req.Autopilot))
+	if len(req.Autopilot) > 0 {
+		old := cur.Settings.Agents.AutopilotFor(rp.Key)
+		next, err := mergeAutopilot(old, req.Autopilot)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_request"})
+			return
+		}
+		block["autopilot"] = mergeDiff(toJSONValue(old), toJSONValue(next))
 	}
 	if req.Verify != nil {
 		block["verify"] = strings.TrimSpace(*req.Verify)
@@ -322,19 +334,39 @@ func (s *Server) handleAutopilotGet(w http.ResponseWriter, r *http.Request) {
 		Autopilot: ag.AutopilotFor(rp.Key), Global: ag.Autopilot})
 }
 
-// handleAutopilotPut replaces the project's autopilot block (it can switch the
-// project on, so agent callers are refused unless dryRun).
+// mergeAutopilot applies the keys given in raw (a JSON object) onto cur:
+// left-out keys keep their values, publish (a map) is replaced whole, unknown
+// keys are ignored. The settings store validates the result.
+func mergeAutopilot(cur config.ProjectAutopilot, raw json.RawMessage) (config.ProjectAutopilot, error) {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil || keys == nil {
+		return cur, errors.New("autopilot: want an object of the keys to change")
+	}
+	next := cur
+	next.Publish = maps.Clone(cur.Publish) // never write into the stored map
+	if _, ok := keys["publish"]; ok {
+		next.Publish = nil // replaced whole: a target left out is switched off
+	}
+	if err := json.Unmarshal(raw, &next); err != nil {
+		return cur, fmt.Errorf("autopilot: %w", err)
+	}
+	return next, nil
+}
+
+// handleAutopilotPut changes the project's autopilot block: the given keys,
+// the rest keep their values (it can switch the project on, so agent callers
+// are refused unless dryRun).
 func (s *Server) handleAutopilotPut(w http.ResponseWriter, r *http.Request) {
 	rp, ok := s.codeProject(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
-		Revision  *int                     `json:"revision"`
-		Autopilot *config.ProjectAutopilot `json:"autopilot"`
-		DryRun    bool                     `json:"dryRun"`
+		Revision  *int            `json:"revision"`
+		Autopilot json.RawMessage `json:"autopilot"`
+		DryRun    bool            `json:"dryRun"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.Autopilot == nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || len(req.Autopilot) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, autopilot, dryRun?}", "code": "bad_request"})
 		return
 	}
@@ -350,7 +382,13 @@ func (s *Server) handleAutopilotPut(w http.ResponseWriter, r *http.Request) {
 	if req.Revision != nil {
 		rev = *req.Revision
 	}
-	block := mergeDiff(toJSONValue(cur.Settings.Agents.AutopilotFor(rp.Key)), toJSONValue(*req.Autopilot))
+	old := cur.Settings.Agents.AutopilotFor(rp.Key)
+	next, err := mergeAutopilot(old, req.Autopilot)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_request"})
+		return
+	}
+	block := mergeDiff(toJSONValue(old), toJSONValue(next))
 	patch, _ := json.Marshal(map[string]any{"agents": map[string]any{"projects": map[string]any{rp.Key: map[string]any{"autopilot": block}}}})
 	var doc SettingsDoc
 	if req.DryRun {

@@ -222,6 +222,44 @@ func TestAutopilotSettingsAndDryRuns(t *testing.T) {
 	}
 }
 
+// A partial autopilot block changes only its keys: the rest keep their stored
+// values (no "must be 1–1440" for a left-out coalesceMinutes); publish is
+// replaced whole, so a target left out of it is switched off.
+func TestAutopilotPartialUpdate(t *testing.T) {
+	e, id := releaseEnv(t)
+	base := "/api/projects/" + itoa(id)
+	var doc AutopilotDoc
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": {"autoRelease": true}, "dryRun": true}`, &doc); code != http.StatusOK ||
+		!doc.DryRun || !doc.Autopilot.AutoRelease || doc.Autopilot.CoalesceMinutes != 60 || !doc.Autopilot.AutoTriage {
+		t.Fatalf("partial dry run %d %+v", code, doc)
+	}
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": {"coalesceMinutes": 30, "publish": {"steam:1": true, "nexus:g/2": true}}}`, &doc); code != http.StatusOK ||
+		doc.Autopilot.CoalesceMinutes != 30 || len(doc.Autopilot.Publish) != 2 || doc.Autopilot.MaxBatchAgeHours != 24 {
+		t.Fatalf("partial put %d %+v", code, doc)
+	}
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": {"enabled": true}}`, &doc); code != http.StatusOK ||
+		!doc.Autopilot.Enabled || doc.Autopilot.CoalesceMinutes != 30 || len(doc.Autopilot.Publish) != 2 {
+		t.Fatalf("publish kept %d %+v", code, doc)
+	}
+	doc = AutopilotDoc{} // decoding into a filled map would merge it
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": {"publish": {"steam:1": true}}}`, &doc); code != http.StatusOK ||
+		len(doc.Autopilot.Publish) != 1 || !doc.Autopilot.Publish["steam:1"] || !doc.Autopilot.Enabled {
+		t.Fatalf("publish replaced %d %+v", code, doc)
+	}
+	// The publish profile route merges its autopilot block the same way.
+	var pd ProfileDoc
+	if code := e.call(t, http.MethodPut, base+"/publish-profile", `{"autopilot": {"autoReply": true}}`, &pd); code != http.StatusOK ||
+		!pd.Autopilot.AutoReply || pd.Autopilot.CoalesceMinutes != 30 || !pd.Autopilot.Enabled {
+		t.Fatalf("profile partial autopilot %d %+v", code, pd.Autopilot)
+	}
+	// A given out-of-range value is still refused; a non-object too.
+	for _, body := range []string{`{"autopilot": {"coalesceMinutes": 0}}`, `{"autopilot": [1]}`, `{"autopilot": {"coalesceMinutes": "x"}}`} {
+		if code, out := e.callErr(t, http.MethodPut, base+"/autopilot", body); code != http.StatusBadRequest {
+			t.Errorf("%s: %d %q", body, code, out)
+		}
+	}
+}
+
 // New events and mark-read send autopilot.unread with the counts (top-bar badge).
 func TestAutopilotUnreadEvents(t *testing.T) {
 	e, id := releaseEnv(t)

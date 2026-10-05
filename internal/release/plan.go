@@ -35,7 +35,7 @@ func (e *RefusedError) Error() string {
 // auth state, the planned steps, and every refusal.
 func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, error) {
 	p := Plan{ProjectID: projectID, Refusals: []Refusal{}, Targets: []PlanTarget{}, Steps: []PlanStep{},
-		WritesVersion: []string{}, WritesLog: []string{}}
+		WritesVersion: []string{}, WritesLog: []string{}, Local: req.Local}
 	refuse := func(code, format string, a ...any) {
 		p.Refusals = append(p.Refusals, Refusal{Code: code, Message: fmt.Sprintf(format, a...)})
 	}
@@ -120,8 +120,13 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 		m.Items = []int64{}
 	}
 	branch := ""
-	if e.d.DefaultBranch != nil {
-		branch, _ = e.d.DefaultBranch(ctx, repoName)
+	switch {
+	case req.Local:
+		branch = e.targets.branch(repoName) // the last full plan's answer
+	case e.d.DefaultBranch != nil:
+		if branch, _ = e.d.DefaultBranch(ctx, repoName); branch != "" {
+			e.targets.setBranch(repoName, branch)
+		}
 	}
 	if branch == "" {
 		if h, err := e.folderGit(ctx, m, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
@@ -146,17 +151,21 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 		refuse(CodeDirtyFolder, "the folder has uncommitted changes: commit or remove them first")
 	}
 	mir := newMirror(e.d.Git, e.d.DataDir, repoName)
-	remoteHead := ""
-	if err := mir.ensure(ctx); err != nil {
-		return p, err
-	}
-	url, env, secret, err := e.remote(ctx, m)
-	if err == nil {
-		remoteHead, err = mir.fetchRemote(ctx, url, env, branch)
-		err = redact(err, secret)
-	}
-	if err != nil {
-		refuse(CodeRemote, "cannot read %s of the remote: %v", branch, err)
+	remoteHead, url := "", ""
+	var env []string
+	if !req.Local { // a local plan never fetches: no remote head, no remote tags
+		if err := mir.ensure(ctx); err != nil {
+			return p, err
+		}
+		var secret string
+		url, env, secret, err = e.remote(ctx, m)
+		if err == nil {
+			remoteHead, err = mir.fetchRemote(ctx, url, env, branch)
+			err = redact(err, secret)
+		}
+		if err != nil {
+			refuse(CodeRemote, "cannot read %s of the remote: %v", branch, err)
+		}
 	}
 	p.RemoteHead = remoteHead
 	if remoteHead != "" && head != remoteHead {
@@ -348,16 +357,17 @@ func (e *Engine) planTargets(ctx context.Context, repo store.Repo, ap config.Pro
 		if pub != nil {
 			t := Target{Key: mp.Key, Platform: mp.Platform, ExternalID: strings.TrimPrefix(mp.Key, mp.Platform+":"), Name: mp.Name,
 				URL: mp.URL, Profile: tp}
-			tctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			list, err := pub.PublishTargets(tctx, t.project())
-			cancel()
+			list, known, err := e.publishTargets(ctx, pub, t, req.Local)
 			pt.Auth = authState(err)
-			if err != nil {
+			switch {
+			case !known:
+				pt.Auth = "unchecked" // a local plan before the first platform answer
+			case err != nil:
 				pt.Error = err.Error()
 				if pt.Selected {
 					refuse(CodeRemote, "%s: %v", mp.Key, err)
 				}
-			} else {
+			default:
 				pt.LatestVersion = latestVersion(list, t)
 				if tp.FileID != "" && len(targetFiles(list, t)) == 0 && pt.Selected {
 					refuse(CodeNoProfile, "%s: file %s is not on the mod page", mp.Key, tp.FileID)

@@ -131,6 +131,8 @@ type Engine struct {
 	// queueMu makes "no other fix of the folder in flight → queue mine" one
 	// step: fix runs advance in their own goroutines.
 	queueMu sync.Mutex
+	// targets caches platform answers and default branches for local plans.
+	targets targetCache
 
 	// hook is called around every external send (tests simulate crashes):
 	// point "before" (after sending is committed, before the call) and "after"

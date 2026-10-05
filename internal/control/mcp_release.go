@@ -27,8 +27,9 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 	}
 	add(s, &mcp.Tool{Name: "get_publish_profile", Description: "Get a code project's release setup in one call: publishProfile (build, version " +
 		"and changelog sources, smoke, per-target settings such as the Nexus fileId), autopilot switches and caps, the global pause and caps, " +
-		"the project's verify command (verify), allowed source kinds, revision (pass it to set_publish_profile), and resolved: the dry-run plan (current and next version, " +
-		"changelog preview, targets with latest versions and auth state, steps, refusals). Read-only.", Annotations: ro},
+		"the project's verify command (verify), allowed source kinds, revision (pass it to set_publish_profile), and resolved: the local dry-run plan (current and next version, " +
+		"changelog preview, targets, steps, refusals; local: true = no network call, so the remote head is not read and targets' latest " +
+		"versions and auth state are the last platform answer, auth unchecked before the first: plan_release is the full plan). Read-only.", Annotations: ro},
 		func(ctx context.Context, in project) (json.RawMessage, error) {
 			return c.PublishProfile(ctx, in.Project)
 		})
@@ -85,17 +86,17 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 	type setAutopilot struct {
 		Project   int64          `json:"project" jsonschema:"the GitHub code project id from list_projects"`
 		Revision  int            `json:"revision,omitempty" jsonschema:"settings revision from get_autopilot_settings; a stale one fails with conflict (re-read and retry)"`
-		Autopilot map[string]any `json:"autopilot" jsonschema:"the full autopilot object (as returned by get_autopilot_settings, edited): it REPLACES the stored one"`
+		Autopilot map[string]any `json:"autopilot" jsonschema:"the autopilot keys to change (e.g. {autoRelease: true}); left-out keys keep their stored values, publish is replaced whole"`
 		DryRun    bool           `json:"dry_run,omitempty" jsonschema:"validate only: returns the block as it would be saved, nothing is written"`
 	}
-	add(s, &mcp.Tool{Name: "set_autopilot_settings", Description: "Replace a code project's autopilot block (the project's switches, publish " +
-		"targets, caps, publishWithoutSmoke). Send the whole object from get_autopilot_settings with your edits; keys left out get their " +
-		"defaults. Validated by the app (400 with the field on error). The global pause is not changed here (pause_autopilot). " +
+	add(s, &mcp.Tool{Name: "set_autopilot_settings", Description: "Change a code project's autopilot block (the project's switches, publish " +
+		"targets, caps, publishWithoutSmoke). Send only the keys to change; keys left out keep their stored values (publish, the " +
+		"{target key: on} map, is replaced whole when given). Validated by the app (400 with the field on error). The global pause is not changed here (pause_autopilot). " +
 		"dry_run validates and returns the block as it would be saved (allowed for agent runs). Returns {projectId, project, revision, " +
 		"autopilot, global}." + descCallerRefusal},
 		func(ctx context.Context, in setAutopilot) (json.RawMessage, error) {
 			if in.Autopilot == nil {
-				return nil, errors.New("autopilot: give the full autopilot object")
+				return nil, errors.New("autopilot: give the autopilot keys to change")
 			}
 			body := map[string]any{"autopilot": in.Autopilot}
 			if in.DryRun {

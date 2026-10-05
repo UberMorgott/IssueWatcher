@@ -743,6 +743,59 @@ func TestReleasePlanRefusals(t *testing.T) {
 	}
 }
 
+// A local plan (the publish profile GET) makes no network call: no default
+// branch lookup, no remote fetch, no platform call; targets show the last full
+// plan's answer (unchecked before one). Git-ignored files never make the folder
+// dirty, untracked ones do.
+func TestLocalPlan(t *testing.T) {
+	e := newEnv(t)
+	branches := 0
+	e.deps.DefaultBranch = func(context.Context, string) (string, error) { branches++; return "main", nil }
+	e.deps.GitURL = func(string) string { return filepath.Join(t.TempDir(), "no-remote.git") } // a fetch fails
+	en := e.engine(false)
+	defer en.Wait()
+	write(t, filepath.Join(e.folder, ".git", "info", "exclude"), ".codex/\n")
+	write(t, filepath.Join(e.folder, ".codex", "hooks.json"), "{}")
+
+	p, err := en.Plan(t.Context(), e.codeID, Request{Local: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := func(p Plan, code string) bool {
+		return slices.ContainsFunc(p.Refusals, func(r Refusal) bool { return r.Code == code })
+	}
+	if !p.Local || branches != 0 || p.RemoteHead != "" || p.Branch != "main" || p.Version != "1.0.1" ||
+		refused(p, CodeRemote) || refused(p, CodeDirtyFolder) || len(p.Targets) != 2 {
+		t.Fatalf("local plan %+v (default branch lookups %d)", p, branches)
+	}
+	for _, tg := range p.Targets {
+		if tg.Auth != "unchecked" || tg.LatestVersion != "" {
+			t.Fatalf("target before a full plan %+v", tg)
+		}
+	}
+
+	full, err := en.Plan(t.Context(), e.codeID, Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.Local || branches != 1 || !refused(full, CodeRemote) {
+		t.Fatalf("full plan %+v", full)
+	}
+	write(t, filepath.Join(e.folder, "notes.txt"), "untracked\n")
+	p, err = en.Plan(t.Context(), e.codeID, Request{Local: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branches != 1 || !refused(p, CodeDirtyFolder) {
+		t.Fatalf("local plan after a full one %+v", p)
+	}
+	for i, tg := range p.Targets {
+		if tg.Auth != full.Targets[i].Auth || tg.LatestVersion != full.Targets[i].LatestVersion || tg.Auth != "ok" {
+			t.Fatalf("cached target %+v, full %+v", tg, full.Targets[i])
+		}
+	}
+}
+
 // The owner's click bypasses the kill switch and the project switch; an MCP /
 // CLI release is refused by both.
 func TestReleaseOriginRules(t *testing.T) {
