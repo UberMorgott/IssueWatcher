@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
@@ -14,6 +14,8 @@ const toast = useToast()
 const { t, te } = useI18n()
 
 const list = ref<ToolStatus[]>([])
+const open = ref(false)
+const allReady = computed(() => list.value.length > 0 && list.value.every((x) => x.state === 'ready'))
 const busy = ref('')
 const error = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -59,50 +61,81 @@ onBeforeUnmount(() => clearTimeout(timer))
     role="group"
     :aria-label="t('platforms.tools.title')"
   >
-    <span class="label">{{ t('platforms.tools.title') }}</span>
-    <small class="muted">{{ t('platforms.tools.hint') }}</small>
+    <!-- all ready: one compact line; details (paths) on demand -->
     <div
-      v-for="x in list"
-      :key="x.name"
+      v-if="allReady && !open"
       class="row"
     >
       <span
-        class="state"
-        :class="x.state"
-        :title="x.path || x.error || undefined"
+        class="state ready"
+        :title="list.map((x) => label(x.name)).join('\n')"
+      ><i class="pi pi-check-circle" /> {{ t('platforms.tools.allReady') }}</span>
+      <button
+        type="button"
+        class="link"
+        :aria-expanded="false"
+        @click="open = true"
       >
-        <i
-          class="pi"
-          :class="{
-            'pi-check-circle': x.state === 'ready',
-            'pi-spin pi-spinner': x.state === 'working',
-            'pi-exclamation-triangle': x.state === 'error',
-            'pi-circle': x.state === 'missing',
-          }"
-        />
-        {{ label(x.name) }} · {{ t('platforms.tools.state.' + x.state) }}
-      </span>
-      <Button
-        v-if="x.state === 'missing' || x.state === 'error'"
-        :label="t(x.state === 'error' ? 'platforms.tools.retry' : 'platforms.tools.provision')"
-        icon="pi pi-download"
-        size="small"
-        severity="secondary"
-        outlined
-        :disabled="!!busy"
-        :loading="busy === x.name"
-        @click="provision(x.name)"
-      />
-      <small
-        v-if="x.state === 'error' && x.error"
-        class="err"
-      >{{ x.error }}</small>
-      <small
-        v-else-if="x.state === 'ready' && x.path"
-        class="muted mono path"
-        :title="x.source ? t('platforms.tools.source', { source: x.source }) : undefined"
-      >{{ x.path }}</small>
+        {{ t('platforms.tools.details') }}
+      </button>
     </div>
+    <template v-else>
+      <div class="row">
+        <span class="label">{{ t('platforms.tools.title') }}</span>
+        <button
+          v-if="allReady"
+          type="button"
+          class="link"
+          :aria-expanded="true"
+          @click="open = false"
+        >
+          {{ t('platforms.tools.hide') }}
+        </button>
+      </div>
+      <small class="muted">{{ t('platforms.tools.hint') }}</small>
+      <div
+        v-for="x in list"
+        :key="x.name"
+        class="row"
+      >
+        <span
+          class="state"
+          :class="x.state"
+          :title="x.path || x.error || undefined"
+        >
+          <i
+            class="pi"
+            :class="{
+              'pi-check-circle': x.state === 'ready',
+              'pi-spin pi-spinner': x.state === 'working',
+              'pi-exclamation-triangle': x.state === 'error',
+              'pi-circle': x.state === 'missing',
+            }"
+          />
+          {{ label(x.name) }} · {{ t('platforms.tools.state.' + x.state) }}
+        </span>
+        <Button
+          v-if="x.state === 'missing' || x.state === 'error'"
+          :label="t(x.state === 'error' ? 'platforms.tools.retry' : 'platforms.tools.provision')"
+          icon="pi pi-download"
+          size="small"
+          severity="secondary"
+          outlined
+          :disabled="!!busy"
+          :loading="busy === x.name"
+          @click="provision(x.name)"
+        />
+        <small
+          v-if="x.state === 'error' && x.error"
+          class="err"
+        >{{ x.error }}</small>
+        <small
+          v-else-if="x.state === 'ready' && x.path"
+          class="muted mono path"
+          :title="x.source ? t('platforms.tools.source', { source: x.source }) : undefined"
+        >{{ x.path }}</small>
+      </div>
+    </template>
     <p
       v-if="error"
       class="err small"
@@ -139,6 +172,26 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .state.error {
   color: var(--iw-danger);
+}
+
+.label {
+  font-size: calc(13px * var(--iw-fs, 1));
+  font-weight: 500;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: calc(12.5px * var(--iw-fs, 1));
+  color: var(--iw-muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--iw-text);
 }
 
 .path {

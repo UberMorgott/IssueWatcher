@@ -904,11 +904,23 @@ export interface CurseForgeUploadStatus {
   checkedAt?: string
 }
 
-/** idle | starting | need_code | confirm_mobile | ok | failed | cancelled. */
-export type SteamLoginStep = 'idle' | 'starting' | 'need_code' | 'confirm_mobile' | 'ok' | 'failed' | 'cancelled' | ''
+/** idle | starting | updating | logging_in | need_code | confirm_mobile | ok | failed | cancelled. */
+export type SteamLoginStep =
+  | 'idle'
+  | 'starting'
+  | 'updating'
+  | 'logging_in'
+  | 'need_code'
+  | 'confirm_mobile'
+  | 'ok'
+  | 'failed'
+  | 'cancelled'
+  | ''
 
 export interface SteamLoginState {
   state: SteamLoginStep
+  /** a failure's code (platforms.steamUpload.loginErrors.*); error is the English detail. */
+  code?: string
   error?: string
   at?: string
 }

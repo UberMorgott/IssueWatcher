@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { encode } from 'uqr'
 import PlatformIcon from '../../components/PlatformIcon.vue'
 import UploadCredentials from './UploadCredentials.vue'
+import CredentialBlock from './CredentialBlock.vue'
 import { api, type Result } from '../../api/client'
 import type { LoginStatus, ModPlatform, NativePlatform, NexusKeyStatus, PlatformStatus, SteamStatus } from '../../api/types'
 import { useAppStore } from '../../stores/app'
@@ -279,6 +280,8 @@ const steam = ref<SteamStatus | null>(null)
 // The detected account is shown read-only; steamId is only a manual override
 // (empty = keep the account from the QR sign-in).
 const steamDraft = reactive({ steamId: '', apiKey: '', loginSecure: '', sessionid: '' })
+/** A saved secret shows as «Сохранено · Изменить»; its fields only after «Изменить». */
+const steamEdit = reactive({ apiKey: false, cookies: false })
 async function loadSteam() {
   const r = await api.steam()
   if (r.ok) steam.value = r.data
@@ -321,6 +324,7 @@ async function saveSteam(extra: Record<string, string> = {}) {
   }
   steam.value = r.data
   steamDraft.steamId = steamDraft.apiKey = steamDraft.loginSecure = steamDraft.sessionid = ''
+  steamEdit.apiKey = steamEdit.cookies = false
   toast.add({ severity: 'success', summary: t('platforms.steamSaved'), life: 2000 })
   await app.loadPlatforms()
   if (r.data.configured) void check('steam')
@@ -331,6 +335,7 @@ async function saveSteam(extra: Record<string, string> = {}) {
 const nexusKey = ref<NexusKeyStatus | null>(null)
 const nexusKeyDraft = ref('')
 const nexusKeyBusy = ref<'' | 'save' | 'check' | 'remove'>('')
+const nexusKeyEditing = ref(false)
 const NEXUS_KEY_URL = 'https://www.nexusmods.com/users/myaccount?tab=api'
 async function loadNexusKey() {
   const r = await api.nexusKey()
@@ -356,6 +361,7 @@ async function saveNexusKey(remove = false) {
   }
   nexusKey.value = r.data
   nexusKeyDraft.value = ''
+  nexusKeyEditing.value = false
   toast.add({
     severity: 'success',
     summary: remove ? t('platforms.nexusKey.removed') : t('platforms.nexusKey.saved', { user: r.data.user ?? '' }),
@@ -534,37 +540,34 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
     ><i class="pi pi-info-circle" /> {{ t('platforms.factorioReplyOff') }}</small>
 
     <!-- Nexus: the API key for publishing (write-only; validated before it is stored) -->
-    <div
+    <CredentialBlock
       v-if="c.id === 'nexus'"
-      class="adv nexus-key"
-      role="group"
-      :aria-label="t('platforms.nexusKey.title')"
+      v-model:editing="nexusKeyEditing"
+      class="nexus-key"
+      :title="t('platforms.nexusKey.title')"
+      :configured="!!nexusKey?.hasApiKey"
+      :summary="nexusKey?.user ? t('platforms.nexusKey.verifiedAs', { user: nexusKey.user }) : t('platforms.nexusKey.stored')"
+      :empty="t('platforms.nexusKey.none')"
+      :checked-at="nexusKey?.checkedAt"
+      :busy="nexusKeyBusy"
+      :remove-label="t('platforms.nexusKey.remove')"
+      @check="checkNexusKey()"
+      @remove="removeNexusKey()"
     >
-      <div class="key-head">
-        <span class="label">{{ t('platforms.nexusKey.title') }}</span>
-        <span
-          v-if="nexusKey?.hasApiKey"
-          v-tooltip.top="nexusKey.checkedAt ? t('platforms.checked', { time: absTime(nexusKey.checkedAt) }) : undefined"
-          class="key-state ok"
-        ><i class="pi pi-check-circle" /> {{ nexusKey.user ? t('platforms.nexusKey.verifiedAs', { user: nexusKey.user }) : t('platforms.nexusKey.stored') }}</span>
-        <span
-          v-else
-          class="key-state muted"
-        ><i class="pi pi-key" /> {{ t('platforms.nexusKey.none') }}</span>
-      </div>
-      <small class="muted">{{ t('platforms.nexusKey.hint') }}
+      <template #hint>
+        {{ t('platforms.nexusKey.hint') }}
         <a
           :href="NEXUS_KEY_URL"
           target="_blank"
           rel="noopener noreferrer"
         >{{ t('platforms.nexusKey.getKey') }} <i class="pi pi-external-link" /></a>
-      </small>
+      </template>
       <div class="key-row">
         <InputText
           v-model="nexusKeyDraft"
           type="password"
           autocomplete="off"
-          :placeholder="nexusKey?.hasApiKey ? t('platforms.savedSecret') : t('platforms.nexusKey.placeholder')"
+          :placeholder="t('platforms.nexusKey.placeholder')"
           :aria-label="t('platforms.nexusKey.title')"
           fluid
           @keydown.enter="saveNexusKey()"
@@ -577,39 +580,16 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           @click="saveNexusKey()"
         />
       </div>
-      <div
-        v-if="nexusKey?.hasApiKey"
-        class="key-actions"
-      >
-        <Button
-          :label="t('platforms.check')"
-          icon="pi pi-refresh"
-          size="small"
-          severity="secondary"
-          outlined
-          :disabled="!!nexusKeyBusy"
-          :loading="nexusKeyBusy === 'check'"
-          @click="checkNexusKey()"
-        />
-        <Button
-          :label="t('platforms.nexusKey.remove')"
-          icon="pi pi-trash"
-          size="small"
-          severity="secondary"
-          text
-          :disabled="!!nexusKeyBusy"
-          :loading="nexusKeyBusy === 'remove'"
-          @click="removeNexusKey()"
-        />
-      </div>
-      <p
-        v-if="errors.nexusKey"
-        v-tooltip.top="errorDetail.nexusKey || undefined"
-        class="err small"
-      >
-        <i class="pi pi-exclamation-triangle" /> {{ errors.nexusKey }}
-      </p>
-    </div>
+      <template #after>
+        <p
+          v-if="errors.nexusKey"
+          v-tooltip.top="errorDetail.nexusKey || undefined"
+          class="err small"
+        >
+          <i class="pi pi-exclamation-triangle" /> {{ errors.nexusKey }}
+        </p>
+      </template>
+    </CredentialBlock>
 
     <!-- CurseForge: upload token; Steam: steamcmd sign-in (publishing) -->
     <UploadCredentials
@@ -682,25 +662,60 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
           />
           <small class="muted">{{ t('platforms.steamIdHint') }}</small>
         </label>
-        <label class="field">
+        <div
+          v-if="steam?.hasApiKey && !steamEdit.apiKey"
+          class="saved-row"
+        >
+          <span class="label">{{ t('platforms.apiKey') }}</span>
+          <span class="key-state ok"><i class="pi pi-check-circle" /> {{ t('platforms.secretSaved') }}</span>
+          <Button
+            :label="t('platforms.credential.change')"
+            icon="pi pi-pencil"
+            size="small"
+            severity="secondary"
+            text
+            @click="steamEdit.apiKey = true"
+          />
+        </div>
+        <label
+          v-else
+          class="field"
+        >
           <span class="label">{{ t('platforms.apiKey') }}</span>
           <InputText
             v-model="steamDraft.apiKey"
             type="password"
             autocomplete="off"
-            :placeholder="steam?.hasApiKey ? t('platforms.savedSecret') : ''"
             fluid
           />
           <small class="muted">{{ t('platforms.apiKeyHint') }}</small>
         </label>
-        <div class="field">
+        <div
+          v-if="steam?.hasCookies && !steamEdit.cookies"
+          class="saved-row"
+        >
+          <span class="label">{{ t('platforms.cookies') }}</span>
+          <span class="key-state ok"><i class="pi pi-check-circle" /> {{ t('platforms.secretSaved') }}</span>
+          <Button
+            :label="t('platforms.credential.change')"
+            icon="pi pi-pencil"
+            size="small"
+            severity="secondary"
+            text
+            @click="steamEdit.cookies = true"
+          />
+        </div>
+        <div
+          v-else
+          class="field"
+        >
           <span class="label">{{ t('platforms.cookies') }}</span>
           <div class="pair">
             <InputText
               v-model="steamDraft.loginSecure"
               type="password"
               autocomplete="off"
-              :placeholder="steam?.hasCookies ? 'steamLoginSecure · ' + t('platforms.savedSecret') : 'steamLoginSecure'"
+              placeholder="steamLoginSecure"
               aria-label="steamLoginSecure"
               fluid
             />
@@ -708,7 +723,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
               v-model="steamDraft.sessionid"
               type="password"
               autocomplete="off"
-              :placeholder="steam?.hasCookies ? 'sessionid · ' + t('platforms.savedSecret') : 'sessionid'"
+              placeholder="sessionid"
               aria-label="sessionid"
               fluid
             />
@@ -902,6 +917,13 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
 .label {
   font-size: calc(13px * var(--iw-fs, 1));
   font-weight: 500;
+}
+
+.saved-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
 }
 
 .pair {
