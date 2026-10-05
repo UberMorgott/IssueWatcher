@@ -37,17 +37,25 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 		Project        int64          `json:"project" jsonschema:"the GitHub code project id from list_projects"`
 		Revision       int            `json:"revision,omitempty" jsonschema:"settings revision from get_publish_profile; a stale one fails with conflict (re-read and retry)"`
 		PublishProfile map[string]any `json:"publish_profile" jsonschema:"the full publishProfile object (as returned by get_publish_profile, edited): it REPLACES the stored one"`
+		DryRun         bool           `json:"dry_run,omitempty" jsonschema:"validate only: returns the profile as it would be saved, nothing is written"`
 	}
 	add(s, &mcp.Tool{Name: "set_publish_profile", Description: "Replace a code project's publishProfile (build command and output, version source " +
 		"{kind, path, key, pattern}, changelog source, smoke, targets {key: {fileId, category, ...}}). Send the whole object from " +
 		"get_publish_profile with your edits; keys left out are removed. Validated by the app (400 with the field on error); no secrets " +
-		"are stored here (platform credentials stay in the app). Autopilot switches are not changed by this tool (owner only, in the app). " +
-		"No dry run: preview the result with plan_release after saving. Returns the new profile with its resolved plan." + descCallerRefusal},
+		"are stored here (platform credentials stay in the app). Autopilot switches are not changed by this tool (set_autopilot_settings). " +
+		"smoke: {kind: factorio|command|none, save (factorio: a save .zip; empty = a fresh map), ticks (default 600), install (factorio " +
+		"root or factorio.exe; empty = auto-detect), command (command: runs in a temp dir; {archive} {name} {version} are replaced)}; " +
+		"kind none holds every release unless the project's autopilot.publishWithoutSmoke is on. " +
+		"dry_run validates and returns {dryRun, ok, publishProfile, autopilot} without saving (allowed for agent runs). " +
+		"Otherwise returns the new profile with its resolved plan." + descCallerRefusal},
 		func(ctx context.Context, in setProfile) (json.RawMessage, error) {
 			if in.PublishProfile == nil {
 				return nil, errors.New("publish_profile: give the full publishProfile object")
 			}
 			body := map[string]any{"publishProfile": in.PublishProfile}
+			if in.DryRun {
+				body["dryRun"] = true
+			}
 			if in.Revision > 0 {
 				body["revision"] = in.Revision
 			}
@@ -56,6 +64,43 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 				return nil, err
 			}
 			return c.SetPublishProfile(ctx, in.Project, b)
+		})
+
+	add(s, &mcp.Tool{Name: "get_autopilot_settings", Description: "Get a code project's autopilot switches: {projectId, project, revision " +
+		"(pass it to set_autopilot_settings), autopilot {enabled, autoTriage, autoFix, autoPush, autoRelease, githubRelease, publish " +
+		"{target key: on}, autoReply, autoClose, coalesceMinutes, maxBatchAgeHours, maxReleasesPerDay, maxDiffLines, publishWithoutSmoke, " +
+		"regressionWindowHours}, global {paused, maxReleasesPerDay, maxPublishesPerDay}}. Read-only.", Annotations: ro},
+		func(ctx context.Context, in project) (json.RawMessage, error) {
+			return c.AutopilotSettings(ctx, in.Project)
+		})
+
+	type setAutopilot struct {
+		Project   int64          `json:"project" jsonschema:"the GitHub code project id from list_projects"`
+		Revision  int            `json:"revision,omitempty" jsonschema:"settings revision from get_autopilot_settings; a stale one fails with conflict (re-read and retry)"`
+		Autopilot map[string]any `json:"autopilot" jsonschema:"the full autopilot object (as returned by get_autopilot_settings, edited): it REPLACES the stored one"`
+		DryRun    bool           `json:"dry_run,omitempty" jsonschema:"validate only: returns the block as it would be saved, nothing is written"`
+	}
+	add(s, &mcp.Tool{Name: "set_autopilot_settings", Description: "Replace a code project's autopilot block (the project's switches, publish " +
+		"targets, caps, publishWithoutSmoke). Send the whole object from get_autopilot_settings with your edits; keys left out get their " +
+		"defaults. Validated by the app (400 with the field on error). The global pause is not changed here (pause_autopilot). " +
+		"dry_run validates and returns the block as it would be saved (allowed for agent runs). Returns {projectId, project, revision, " +
+		"autopilot, global}." + descCallerRefusal},
+		func(ctx context.Context, in setAutopilot) (json.RawMessage, error) {
+			if in.Autopilot == nil {
+				return nil, errors.New("autopilot: give the full autopilot object")
+			}
+			body := map[string]any{"autopilot": in.Autopilot}
+			if in.DryRun {
+				body["dryRun"] = true
+			}
+			if in.Revision > 0 {
+				body["revision"] = in.Revision
+			}
+			b, err := json.Marshal(body)
+			if err != nil {
+				return nil, err
+			}
+			return c.SetAutopilotSettings(ctx, in.Project, b)
 		})
 
 	type plan struct {
@@ -106,7 +151,8 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 		ID int64 `json:"id" jsonschema:"run id from release or list_runs"`
 	}
 	add(s, &mcp.Tool{Name: "get_run", Description: "Get one run {run, steps, items}: run.state and heldReason (check:<step> = unclear outcome, " +
-		"re-probed on resume, never resent; failed:<step>, auth:<platform>, foreign_commits, remote_moved, gate_failed, ...), and every step " +
+		"re-probed on resume, never resent; failed:<step>, auth:<platform>, foreign_commits, remote_moved, gate_failed, no_verify (no Aegis " +
+		"and no verify command), smoke_failed, smoke_missing (no smoke test, publishWithoutSmoke off), smoke_unavailable, ...), and every step " +
 		"(bump, build, archive_check, gate, smoke, push, tag, gh_release, gh_asset, publish:<target>, available:<target>) with its state " +
 		"(pending|sending|sent|failed|unknown|skipped), externalRef and error. Read-only.", Annotations: ro},
 		func(ctx context.Context, in runID) (json.RawMessage, error) { return c.Run(ctx, in.ID) })

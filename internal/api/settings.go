@@ -36,6 +36,8 @@ type SettingsDoc struct {
 type SettingsStore interface {
 	Settings() (SettingsDoc, error)
 	PatchSettings(revision int, patch json.RawMessage) (SettingsDoc, error)
+	// PreviewSettings validates patch like PatchSettings without writing it (dry run).
+	PreviewSettings(revision int, patch json.RawMessage) (SettingsDoc, error)
 	ResetSettings(revision int, section string) (SettingsDoc, error)
 }
 

@@ -26,6 +26,10 @@ func (c cfgStore) PatchSettings(rev int, p json.RawMessage) (SettingsDoc, error)
 	s, err := c.s.Patch(rev, p, nil)
 	return c.doc(s), err
 }
+func (c cfgStore) PreviewSettings(rev int, p json.RawMessage) (SettingsDoc, error) {
+	s, err := c.s.Preview(rev, p)
+	return c.doc(s), err
+}
 func (c cfgStore) ResetSettings(rev int, section string) (SettingsDoc, error) {
 	s, err := c.s.Reset(rev, section, nil)
 	return c.doc(s), err

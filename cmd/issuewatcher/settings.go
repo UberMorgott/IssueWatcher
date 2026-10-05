@@ -55,6 +55,15 @@ func (a *appSettings) Settings() (api.SettingsDoc, error) {
 	return a.doc(a.store.Get()), nil
 }
 
+// PreviewSettings validates patch without writing it (dry runs; no side effects).
+func (a *appSettings) PreviewSettings(rev int, patch json.RawMessage) (api.SettingsDoc, error) {
+	s, err := a.store.Preview(rev, patch)
+	if err != nil {
+		return api.SettingsDoc{}, err
+	}
+	return a.doc(s), nil
+}
+
 // PatchSettings writes the Run entry first when the patch names
 // general.startWithWindows, so a failed registry write saves nothing.
 func (a *appSettings) PatchSettings(rev int, patch json.RawMessage) (api.SettingsDoc, error) {

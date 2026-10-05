@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
@@ -134,6 +137,134 @@ func TestAgentCallerRefusedRoutes(t *testing.T) {
 		if code := e.call(t, c.method, c.path, c.body, nil); code == http.StatusForbidden {
 			t.Errorf("%s %s refused for an agent", c.method, c.path)
 		}
+	}
+}
+
+// The autopilot block has its own route; dry runs validate without writing.
+func TestAutopilotSettingsAndDryRuns(t *testing.T) {
+	e, id := releaseEnv(t)
+	base := "/api/projects/" + itoa(id)
+	var doc AutopilotDoc
+	if code := e.call(t, http.MethodGet, base+"/autopilot", "", &doc); code != http.StatusOK || doc.Autopilot.Enabled ||
+		doc.Autopilot.CoalesceMinutes != 60 || doc.Global.MaxReleasesPerDay != 5 {
+		t.Fatalf("get %d %+v", code, doc)
+	}
+	rev := doc.Revision
+	ap := doc.Autopilot
+	ap.Enabled, ap.PublishWithoutSmoke = true, true
+	body := `{"autopilot": ` + mustJSON(t, ap) + `, "dryRun": true}`
+	if code := e.call(t, http.MethodPut, base+"/autopilot", body, &doc); code != http.StatusOK || !doc.DryRun || !doc.Autopilot.Enabled ||
+		!doc.Autopilot.PublishWithoutSmoke || doc.Revision != rev {
+		t.Fatalf("dry run %d %+v", code, doc)
+	}
+	if code := e.call(t, http.MethodGet, base+"/autopilot", "", &doc); code != http.StatusOK || doc.Autopilot.Enabled || doc.Revision != rev {
+		t.Fatalf("the dry run saved: %d %+v", code, doc)
+	}
+	var bad apiErr
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": {"coalesceMinutes": 0}, "dryRun": true}`, &bad); code != http.StatusBadRequest {
+		t.Fatalf("invalid dry run: %d %+v", code, bad)
+	}
+	doc = AutopilotDoc{}
+	if code := e.call(t, http.MethodPut, base+"/autopilot", `{"autopilot": `+mustJSON(t, ap)+`}`, &doc); code != http.StatusOK ||
+		doc.DryRun || !doc.Autopilot.Enabled || doc.Revision != rev+1 {
+		t.Fatalf("put %d %+v", code, doc)
+	}
+
+	// Publish profile dry run: validated, returned, not written.
+	var pv ProfilePreview
+	put := `{"dryRun": true, "publishProfile": {"build": {"command": "build.cmd", "output": "dist/x.zip"},
+		"smoke": {"kind": "factorio", "install": "D:/Games/Factorio", "ticks": 300}}}`
+	if code := e.call(t, http.MethodPut, base+"/publish-profile", put, &pv); code != http.StatusOK || !pv.DryRun || !pv.OK ||
+		pv.PublishProfile.Smoke.Install != "D:/Games/Factorio" || !pv.Autopilot.Enabled {
+		t.Fatalf("profile dry run %d %+v", code, pv)
+	}
+	var pd ProfileDoc
+	if code := e.call(t, http.MethodGet, base+"/publish-profile", "", &pd); code != http.StatusOK || pd.PublishProfile.Smoke.Kind != "" {
+		t.Fatalf("the profile dry run saved: %d %+v", code, pd.PublishProfile)
+	}
+	if code := e.call(t, http.MethodPut, base+"/publish-profile", `{"dryRun": true, "publishProfile": {"smoke": {"kind": "command"}}}`, &bad); code != http.StatusBadRequest {
+		t.Fatalf("invalid profile dry run: %d %+v", code, bad)
+	}
+
+	// Agent callers: refused writes, allowed dry runs and reads.
+	e.s.inAgentJob = func(uint32) bool { return true }
+	if code, out := e.callErr(t, http.MethodPut, base+"/autopilot", `{"autopilot": {}}`); code != http.StatusForbidden || out != codeAgentCaller {
+		t.Fatalf("agent put: %d %q", code, out)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodGet, base + "/autopilot", ``},
+		{http.MethodPut, base + "/autopilot", `{"autopilot": ` + mustJSON(t, ap) + `, "dryRun": true}`},
+		{http.MethodPut, base + "/publish-profile", `{"publishProfile": {}, "dryRun": true}`},
+	} {
+		if code := e.call(t, c.method, c.path, c.body, nil); code != http.StatusOK {
+			t.Errorf("agent %s %s: %d", c.method, c.path, code)
+		}
+	}
+}
+
+// New events and mark-read send autopilot.unread with the counts (top-bar badge).
+func TestAutopilotUnreadEvents(t *testing.T) {
+	e, id := releaseEnv(t)
+	events := make(chan string, 8)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, e.s.BaseURL()+"/api/events", nil)
+	resp, err := e.browser.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		name := ""
+		for sc.Scan() {
+			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+				name = n
+			} else if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok && name != "" {
+				events <- name + " " + d
+			}
+		}
+	}()
+	for e.s.Clients() == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	next := func(prefix string) string {
+		t.Helper()
+		for {
+			select {
+			case ev := <-events:
+				if strings.HasPrefix(ev, prefix) {
+					return ev
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("no %s event", prefix)
+			}
+		}
+	}
+	add := func(sev string) store.AutopilotEvent {
+		ev, err := e.s.opts.Store.AddEvent(t.Context(), store.AutopilotEvent{ProjectID: id, Kind: "release.held", Severity: sev, Title: "held"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.s.AutopilotEvent(ev)
+		return ev
+	}
+	a := add(store.SeverityAttention)
+	next(EventAutopilotEvent)
+	if got := next(EventAutopilotUnread); !strings.Contains(got, `"unread":1`) || !strings.Contains(got, `"attention":1`) {
+		t.Fatalf("unread %s", got)
+	}
+	add(store.SeverityInfo)
+	if got := next(EventAutopilotUnread); !strings.Contains(got, `"unread":2`) || !strings.Contains(got, `"attention":1`) {
+		t.Fatalf("unread %s", got)
+	}
+	var read struct{ Marked, Unread, Attention int }
+	if code := e.call(t, http.MethodPost, "/api/autopilot/events/read", `{"ids": [`+itoa(a.ID)+`]}`, &read); code != http.StatusOK ||
+		read.Marked != 1 || read.Unread != 1 || read.Attention != 0 {
+		t.Fatalf("read %d %+v", code, read)
+	}
+	if got := next(EventAutopilotUnread); !strings.Contains(got, `"unread":1`) || !strings.Contains(got, `"attention":0`) {
+		t.Fatalf("unread after read %s", got)
 	}
 }
 

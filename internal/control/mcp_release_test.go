@@ -33,7 +33,11 @@ func releaseAPI(t *testing.T) (*Client, *[]string) {
 			_, _ = w.Write([]byte(`{"projectId":1,"revision":7}`))
 		case "PUT /api/projects/1/publish-profile":
 			_, _ = w.Write([]byte(`{"projectId":1,"revision":8}`))
-		case "PUT /api/projects/9/publish-profile", "POST /api/runs/5/skip":
+		case "GET /api/projects/1/autopilot":
+			_, _ = w.Write([]byte(`{"projectId":1,"revision":7,"autopilot":{"enabled":false}}`))
+		case "PUT /api/projects/1/autopilot":
+			_, _ = w.Write([]byte(`{"projectId":1,"revision":8,"autopilot":{"enabled":true}}`))
+		case "PUT /api/projects/9/publish-profile", "PUT /api/projects/9/autopilot", "POST /api/runs/5/skip":
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"refused: agent runs cannot release","code":"agent_caller"}`))
 		case "POST /api/projects/1/release/plan":
@@ -141,6 +145,15 @@ func TestMCPReleaseTools(t *testing.T) {
 			`PUT /api/projects/1/publish-profile? {"publishProfile":{"build":{"command":"make"}},"revision":7}`, `"revision":8`, false},
 		{"set_publish_profile", map[string]any{"project": 9, "publish_profile": map[string]any{}},
 			`PUT /api/projects/9/publish-profile? {"publishProfile":{}}`, "code agent_caller", true},
+		{"set_publish_profile", map[string]any{"project": 1, "dry_run": true, "publish_profile": map[string]any{"smoke": map[string]any{"kind": "factorio"}}},
+			`PUT /api/projects/1/publish-profile? {"dryRun":true,"publishProfile":{"smoke":{"kind":"factorio"}}}`, `"revision":8`, false},
+		{"get_autopilot_settings", map[string]any{"project": 1}, "GET /api/projects/1/autopilot? ", `"enabled":false`, false},
+		{"set_autopilot_settings", map[string]any{"project": 1, "revision": 7, "autopilot": map[string]any{"enabled": true, "publishWithoutSmoke": true}},
+			`PUT /api/projects/1/autopilot? {"autopilot":{"enabled":true,"publishWithoutSmoke":true},"revision":7}`, `"enabled":true`, false},
+		{"set_autopilot_settings", map[string]any{"project": 1, "dry_run": true, "autopilot": map[string]any{"enabled": true}},
+			`PUT /api/projects/1/autopilot? {"autopilot":{"enabled":true},"dryRun":true}`, `"revision":8`, false},
+		{"set_autopilot_settings", map[string]any{"project": 9, "autopilot": map[string]any{"enabled": true}},
+			`PUT /api/projects/9/autopilot? {"autopilot":{"enabled":true}}`, "code agent_caller", true},
 		{"plan_release", map[string]any{"project": 1, "version": "1.2.0", "items": []int64{4}, "targets": []string{"nexus:g/2"}},
 			`POST /api/projects/1/release/plan? {"version":"1.2.0","items":[4],"targets":["nexus:g/2"]}`, "dirty_folder", false},
 		{"release", map[string]any{"project": 1, "dry_run": true},

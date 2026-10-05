@@ -50,6 +50,22 @@ func (c *Client) SetPublishProfile(ctx context.Context, project int64, body json
 	return c.Do(ctx, http.MethodPut, idPath("/api/projects/%d/publish-profile", project), nil, body)
 }
 
+// AutopilotSettings returns the project's AutopilotDoc {projectId, project,
+// revision, autopilot, global}.
+func (c *Client) AutopilotSettings(ctx context.Context, project int64) (json.RawMessage, error) {
+	return c.get(ctx, idPath("/api/projects/%d/autopilot", project), nil)
+}
+
+// SetAutopilotSettings PUTs {revision?, autopilot, dryRun?}: the autopilot
+// block replaces the stored one. Refused (403 agent_caller) for agent runs unless dryRun.
+func (c *Client) SetAutopilotSettings(ctx context.Context, project int64, body json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(body, &doc); err != nil || doc == nil {
+		return nil, errors.New("control: autopilot body must be a JSON object {revision?, autopilot, dryRun?}")
+	}
+	return c.Do(ctx, http.MethodPut, idPath("/api/projects/%d/autopilot", project), nil, body)
+}
+
 // ReleasePlan returns the dry-run plan (ok, refusals, version, steps, targets, caps).
 func (c *Client) ReleasePlan(ctx context.Context, project int64, req ReleaseRequest) (json.RawMessage, error) {
 	return c.post(ctx, idPath("/api/projects/%d/release/plan", project), req)

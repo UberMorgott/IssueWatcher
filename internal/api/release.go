@@ -16,9 +16,13 @@ import (
 // Autopilot release runs (docs/AUTOPILOT.md, Phase 1):
 //
 //	GET  /api/projects/{id}/publish-profile          → ProfileDoc (profile + autopilot + resolved plan)
-//	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?} → ProfileDoc   (agent callers refused)
+//	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?, dryRun?} → ProfileDoc   (agent callers refused)
+//	                                                 dryRun → ProfilePreview (validated, nothing written; agent callers allowed)
 //	POST /api/projects/{id}/publish-profile/check    release.Request? → release.CheckResult (plan + trial build at HEAD in a temp
 //	                                                 worktree, archive check, per-target publisher dry run; nothing committed or sent)
+//	GET  /api/projects/{id}/autopilot                → AutopilotDoc (the project's autopilot block + the global one)
+//	PUT  /api/projects/{id}/autopilot                {revision?, autopilot, dryRun?} → AutopilotDoc   (agent callers refused
+//	                                                 unless dryRun: validated, nothing written)
 //	POST /api/projects/{id}/release/plan             release.Request → release.Plan
 //	POST /api/projects/{id}/release                  release.Request: dryRun → 200 Plan; else 202 {run, plan}  (agent callers refused)
 //	                                                 refused → 409 {error, code, refusals, plan}
@@ -29,15 +33,18 @@ import (
 //	POST /api/runs/{id}/skip {step, target}          → store.Run   (agent callers refused)
 //	POST /api/autopilot/pause {project?, paused}     → {paused, project?, enabled?}  (clearing refused for agent callers)
 //	GET  /api/autopilot/events?unreadOnly=&limit=    → {events, unread, attention}
-//	POST /api/autopilot/events/read {ids?, all?}     → {marked}
+//	POST /api/autopilot/events/read {ids?, all?}     → {marked, unread, attention}
 //
 // SSE: autopilot.run (release.RunView) on every run / step change,
-// autopilot.event (store.AutopilotEvent) on every activity log entry.
+// autopilot.event (store.AutopilotEvent) on every activity log entry,
+// autopilot.unread (Unread) after every new event and every mark-read.
 
 // SSE events of the autopilot.
 const (
 	EventAutopilotRun   = "autopilot.run"
 	EventAutopilotEvent = "autopilot.event"
+	// EventAutopilotUnread carries Unread after every new event and every mark-read.
+	EventAutopilotUnread = "autopilot.unread"
 )
 
 // codeAgentCaller is the 403 code for a refused agent run caller.
@@ -47,6 +54,8 @@ func (s *Server) registerRelease(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{id}/publish-profile", s.handleProfileGet)
 	mux.HandleFunc("PUT /api/projects/{id}/publish-profile", s.handleProfilePut)
 	mux.HandleFunc("POST /api/projects/{id}/publish-profile/check", s.handleCheck)
+	mux.HandleFunc("GET /api/projects/{id}/autopilot", s.handleAutopilotGet)
+	mux.HandleFunc("PUT /api/projects/{id}/autopilot", s.handleAutopilotPut)
 	mux.HandleFunc("POST /api/projects/{id}/release/plan", s.handlePlan)
 	mux.HandleFunc("POST /api/projects/{id}/release", s.handleRelease)
 	mux.HandleFunc("GET /api/runs", s.handleRuns)
@@ -105,8 +114,27 @@ func (s *Server) RunChanged(id int64) {
 	s.Publish(EventAutopilotRun, v)
 }
 
-// AutopilotEvent publishes autopilot.event (release.Deps.OnEvent).
-func (s *Server) AutopilotEvent(ev store.AutopilotEvent) { s.Publish(EventAutopilotEvent, ev) }
+// AutopilotEvent publishes autopilot.event (release.Deps.OnEvent) and the new unread counts.
+func (s *Server) AutopilotEvent(ev store.AutopilotEvent) {
+	s.Publish(EventAutopilotEvent, ev)
+	s.publishUnread()
+}
+
+// Unread is the activity log's unread counter (top-bar badge).
+type Unread struct {
+	Unread    int `json:"unread"`
+	Attention int `json:"attention"`
+}
+
+// publishUnread sends autopilot.unread with the current counts.
+func (s *Server) publishUnread() {
+	u, a, err := s.opts.Store.UnreadEventCount(s.bg)
+	if err != nil {
+		s.opts.Log.Warn("api: unread events", "err", err)
+		return
+	}
+	s.Publish(EventAutopilotUnread, Unread{Unread: u, Attention: a})
+}
 
 // codeProject resolves {id} to a GitHub code project; false = answered.
 func (s *Server) codeProject(w http.ResponseWriter, r *http.Request) (store.Repo, bool) {
@@ -183,21 +211,39 @@ func (s *Server) handleProfileGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, doc)
 }
 
+// ProfilePreview is the dry run of PUT …/publish-profile: the blocks as they
+// would be saved (validated, nothing written).
+type ProfilePreview struct {
+	DryRun         bool                    `json:"dryRun"`
+	OK             bool                    `json:"ok"`
+	ProjectID      int64                   `json:"projectId"`
+	Project        string                  `json:"project"`
+	Revision       int                     `json:"revision"` // the revision it was validated against
+	PublishProfile config.PublishProfile   `json:"publishProfile"`
+	Autopilot      config.ProjectAutopilot `json:"autopilot"`
+}
+
 // handleProfilePut replaces the project's publishProfile and/or autopilot
 // blocks (a missing one stays); validation errors → 400, a stale revision → 409.
+// dryRun validates the change and answers ProfilePreview without writing it
+// (allowed for agent callers: nothing changes).
 func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 	rp, ok := s.codeProject(w, r)
-	if !ok || s.refuseAgent(w, r) {
+	if !ok {
 		return
 	}
 	var req struct {
 		Revision       *int                     `json:"revision"`
 		PublishProfile *config.PublishProfile   `json:"publishProfile"`
 		Autopilot      *config.ProjectAutopilot `json:"autopilot"`
+		DryRun         bool                     `json:"dryRun"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil ||
 		(req.PublishProfile == nil && req.Autopilot == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, publishProfile?, autopilot?}", "code": "bad_request"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, publishProfile?, autopilot?, dryRun?}", "code": "bad_request"})
+		return
+	}
+	if !req.DryRun && s.refuseAgent(w, r) {
 		return
 	}
 	cur, err := s.opts.Settings.Settings()
@@ -218,6 +264,17 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		block["autopilot"] = mergeDiff(toJSONValue(cur.Settings.Agents.AutopilotFor(rp.Key)), toJSONValue(*req.Autopilot))
 	}
 	patch, _ := json.Marshal(map[string]any{"agents": map[string]any{"projects": map[string]any{rp.Key: block}}})
+	if req.DryRun {
+		doc, err := s.opts.Settings.PreviewSettings(rev, patch)
+		if err != nil {
+			s.settingsResult(w, doc, err)
+			return
+		}
+		ag := doc.Settings.Agents
+		writeJSON(w, http.StatusOK, ProfilePreview{DryRun: true, OK: true, ProjectID: rp.ID, Project: rp.Key, Revision: rev,
+			PublishProfile: ag.Projects[rp.Key].PublishProfile, Autopilot: ag.AutopilotFor(rp.Key)})
+		return
+	}
 	doc, err := s.opts.Settings.PatchSettings(rev, patch)
 	if err != nil {
 		s.settingsResult(w, doc, err)
@@ -230,6 +287,79 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// AutopilotDoc is GET/PUT /api/projects/{id}/autopilot (MCP get/set_autopilot_settings).
+type AutopilotDoc struct {
+	DryRun    bool                    `json:"dryRun,omitempty"`
+	ProjectID int64                   `json:"projectId"`
+	Project   string                  `json:"project"`
+	Revision  int                     `json:"revision"`
+	Autopilot config.ProjectAutopilot `json:"autopilot"`
+	Global    config.AgentsAutopilot  `json:"global"`
+}
+
+func (s *Server) handleAutopilotGet(w http.ResponseWriter, r *http.Request) {
+	rp, ok := s.codeProject(w, r)
+	if !ok {
+		return
+	}
+	doc, err := s.opts.Settings.Settings()
+	if err != nil {
+		s.internalError(w, "read settings", err)
+		return
+	}
+	ag := doc.Settings.Agents
+	writeJSON(w, http.StatusOK, AutopilotDoc{ProjectID: rp.ID, Project: rp.Key, Revision: doc.Revision,
+		Autopilot: ag.AutopilotFor(rp.Key), Global: ag.Autopilot})
+}
+
+// handleAutopilotPut replaces the project's autopilot block (it can switch the
+// project on, so agent callers are refused unless dryRun).
+func (s *Server) handleAutopilotPut(w http.ResponseWriter, r *http.Request) {
+	rp, ok := s.codeProject(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Revision  *int                     `json:"revision"`
+		Autopilot *config.ProjectAutopilot `json:"autopilot"`
+		DryRun    bool                     `json:"dryRun"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil || req.Autopilot == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, autopilot, dryRun?}", "code": "bad_request"})
+		return
+	}
+	if !req.DryRun && s.refuseAgent(w, r) {
+		return
+	}
+	cur, err := s.opts.Settings.Settings()
+	if err != nil {
+		s.internalError(w, "read settings", err)
+		return
+	}
+	rev := cur.Revision
+	if req.Revision != nil {
+		rev = *req.Revision
+	}
+	block := mergeDiff(toJSONValue(cur.Settings.Agents.AutopilotFor(rp.Key)), toJSONValue(*req.Autopilot))
+	patch, _ := json.Marshal(map[string]any{"agents": map[string]any{"projects": map[string]any{rp.Key: map[string]any{"autopilot": block}}}})
+	var doc SettingsDoc
+	if req.DryRun {
+		doc, err = s.opts.Settings.PreviewSettings(rev, patch)
+	} else {
+		doc, err = s.opts.Settings.PatchSettings(rev, patch)
+	}
+	if err != nil {
+		s.settingsResult(w, doc, err)
+		return
+	}
+	if !req.DryRun {
+		s.Publish(EventSettingsChanged, doc)
+	}
+	ag := doc.Settings.Agents
+	writeJSON(w, http.StatusOK, AutopilotDoc{DryRun: req.DryRun, ProjectID: rp.ID, Project: rp.Key, Revision: doc.Revision,
+		Autopilot: ag.AutopilotFor(rp.Key), Global: ag.Autopilot})
 }
 
 // toJSONValue is v as decoded JSON (maps, slices, scalars).
@@ -530,5 +660,13 @@ func (s *Server) handleAutopilotEventsRead(w http.ResponseWriter, r *http.Reques
 		s.internalError(w, "mark events read", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]int64{"marked": n})
+	u, a, err := s.opts.Store.UnreadEventCount(r.Context())
+	if err != nil {
+		s.internalError(w, "mark events read", err)
+		return
+	}
+	if n > 0 {
+		s.Publish(EventAutopilotUnread, Unread{Unread: u, Attention: a})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"marked": n, "unread": u, "attention": a})
 }

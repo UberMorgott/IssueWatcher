@@ -115,6 +115,24 @@ func (s *Store) Patch(rev int, patch json.RawMessage, before func(old, next Sett
 	return s.change(rev, func(raw map[string]any) { mergePatch(raw, p) }, before)
 }
 
+// errPreview vetoes the write of a Preview after validation passed.
+var errPreview = errors.New("config: preview")
+
+// Preview validates patch on revision rev like Patch and returns the result
+// without writing it (dry run). A stale rev → ErrConflict.
+func (s *Store) Preview(rev int, patch json.RawMessage) (Settings, error) {
+	var out Settings
+	cur, err := s.Patch(rev, patch, func(_, next Settings) error {
+		out = next
+		return errPreview
+	})
+	if errors.Is(err, errPreview) {
+		out.Revision = rev
+		return out, nil
+	}
+	return cur, err // ErrConflict carries the current settings
+}
+
 // Reset restores the defaults of one top-level section at revision rev.
 func (s *Store) Reset(rev int, section string, before func(old, next Settings) error) (Settings, error) {
 	def, err := toMap(Defaults())
