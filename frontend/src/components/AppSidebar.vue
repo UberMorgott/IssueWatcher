@@ -18,6 +18,7 @@ const items: { to: string; icon: string; label: string; match: string[]; badge?:
   { to: '/comments', icon: 'pi pi-comments', label: 'nav.comments', match: ['comments', 'item:comment'], badge: () => app.unreadComments },
   { to: '/projects', icon: 'pi pi-folder', label: 'nav.projects', match: ['projects'] },
   { to: '/jobs', icon: 'pi pi-microchip-ai', label: 'nav.jobs', match: ['jobs', 'job'], badge: () => jobs.activeCount },
+  { to: '/runs', icon: 'pi pi-send', label: 'nav.releases', match: ['runs', 'run'] },
   { to: '/connections', icon: 'pi pi-link', label: 'nav.connections', match: ['connections'] },
   { to: '/settings', icon: 'pi pi-cog', label: 'nav.settings', match: ['settings'] },
 ]

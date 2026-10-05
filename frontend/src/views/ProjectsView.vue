@@ -15,6 +15,7 @@ import FolderDialog from '../components/FolderDialog.vue'
 import LinkDialog from '../components/LinkDialog.vue'
 import PublishDialog from '../components/PublishDialog.vue'
 import ModPageDialog from '../components/ModPageDialog.vue'
+import ReleaseDialog from '../components/ReleaseDialog.vue'
 import Menu from 'primevue/menu'
 import type { MenuItem } from 'primevue/menuitem'
 import { isModPlatform, platformName } from '../lib/platforms'
@@ -295,6 +296,14 @@ function openNexusMenu(e: Event, r: Repo) {
   nexusMenu.value?.toggle(e)
 }
 
+// «Выпустить релиз» of a code project: the release dry-run dialog.
+const releaseOpen = ref(false)
+const releaseProject = ref<{ id: number; name: string } | null>(null)
+function openRelease(r: Repo) {
+  releaseProject.value = { id: r.id, name: r.name }
+  releaseOpen.value = true
+}
+
 const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.open + r.closed)) * 100) : 0)
 </script>
 
@@ -350,6 +359,10 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
         <ModPageDialog
           v-model:visible="pageOpen"
           :target="pageTarget"
+        />
+        <ReleaseDialog
+          v-model:visible="releaseOpen"
+          :project="releaseProject"
         />
         <Menu
           ref="nexusMenu"
@@ -553,6 +566,17 @@ const closedShare = (r: Repo) => (r.open + r.closed ? Math.round((r.closed / (r.
                   aria-haspopup="menu"
                   :aria-label="t('projects.nexusMenu')"
                   @click.stop="openNexusMenu($event, data)"
+                />
+                <Button
+                  v-if="!isModPlatform(data.platform)"
+                  v-tooltip.top="t('release.actionTip')"
+                  icon="pi pi-send"
+                  size="small"
+                  severity="secondary"
+                  text
+                  rounded
+                  :aria-label="t('release.action')"
+                  @click.stop="openRelease(data)"
                 />
                 <span
                   v-if="!isModPlatform(data.platform)"

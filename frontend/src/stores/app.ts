@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 import { api } from '../api/client'
-import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, PublishTask, Repo, SyncProgress, SyncStatus } from '../api/types'
+import type { Capabilities, DataChange, LiveItemEvent, PlatformStatus, Provider, PublishTask, Repo, RunView, SyncProgress, SyncStatus } from '../api/types'
 import { fallbackCaps } from '../lib/platforms'
 import { t } from '../i18n'
 import { theme, type Theme } from '../lib/appearance'
@@ -172,6 +172,11 @@ export const useAppStore = defineStore('app', () => {
   function onPublishProgress(t: PublishTask | null) {
     if (t?.id) lastPublish.value = t
   }
+  /** The latest autopilot.run view as it arrived (Runs pages patch their rows; watch with flush 'sync'). */
+  const lastRun = shallowRef<RunView | null>(null)
+  function onRun(v: RunView | null) {
+    if (v?.run?.id) lastRun.value = v
+  }
   let refreshTimer: number | undefined
   async function refreshAfterSync() {
     void loadRepos() // unread badge, per-project last sync
@@ -278,6 +283,8 @@ export const useAppStore = defineStore('app', () => {
     lastProgress,
     lastPublish,
     onPublishProgress,
+    lastRun,
+    onRun,
     repos,
     reposLoaded,
     reposAvailable,

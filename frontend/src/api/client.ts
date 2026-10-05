@@ -40,6 +40,15 @@ import type {
   PublishResult,
   PublishTargets,
   PublishTask,
+  CancelResult,
+  CheckResult,
+  ProfileDoc,
+  ProjectAutopilot,
+  PublishProfile,
+  ReleasePlan,
+  ReleaseRequest,
+  ReleaseRun,
+  RunView,
 } from './types'
 import { t, te } from '../i18n'
 
@@ -291,6 +300,32 @@ export const api = {
   unlink: (id: number) => call<void>('DELETE', `/api/projects/${id}/links`),
   automationLog: (cursor = '', limit = 50) =>
     call<AutomationChunk>('GET', `/api/automation/log?limit=${limit}${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`),
+
+  // --- autopilot releases (docs/AUTOPILOT.md): publish profile, plan / start, runs
+  publishProfile: (id: number) => call<ProfileDoc>('GET', `/api/projects/${id}/publish-profile`),
+  /** Each given block replaces the stored one; 400 = validation (settings error shape), 409 = stale revision, 403 agent_caller. */
+  savePublishProfile: (id: number, body: { revision?: number; publishProfile?: PublishProfile; autopilot?: ProjectAutopilot }) =>
+    call<ProfileDoc>('PUT', `/api/projects/${id}/publish-profile`, body),
+  checkPublishProfile: (id: number, req: ReleaseRequest = {}) => call<CheckResult>('POST', `/api/projects/${id}/publish-profile/check`, req),
+  releasePlan: (id: number, req: ReleaseRequest = {}) => call<ReleasePlan>('POST', `/api/projects/${id}/release/plan`, req),
+  /** 202 {run, plan}; refused → 409 body {error, code, refusals, plan}. */
+  release: (id: number, req: ReleaseRequest) => call<{ run: ReleaseRun; plan: ReleasePlan }>('POST', `/api/projects/${id}/release`, { ...req, dryRun: false }),
+  runs(q: { project?: number; kind?: string; state?: string; limit?: number } = {}) {
+    const p = new URLSearchParams()
+    if (q.project) p.set('project', String(q.project))
+    if (q.kind) p.set('kind', q.kind)
+    if (q.state) p.set('state', q.state)
+    if (q.limit) p.set('limit', String(q.limit))
+    const qs = p.toString()
+    return call<ReleaseRun[]>('GET', '/api/runs' + (qs ? '?' + qs : ''))
+  },
+  run: (id: number | string) => call<RunView>('GET', `/api/runs/${encodeURIComponent(String(id))}`),
+  resumeRun: (id: number) => call<ReleaseRun>('POST', `/api/runs/${id}/resume`),
+  cancelRun: (id: number) => call<CancelResult>('POST', `/api/runs/${id}/cancel`),
+  skipStep: (id: number, step: string, target: string) => call<ReleaseRun>('POST', `/api/runs/${id}/skip`, { step, target }),
+  /** project → that project's autopilot.enabled = !paused; none → the global kill switch. */
+  pauseAutopilot: (paused: boolean, project?: number) =>
+    call<{ paused: boolean; project?: number; enabled?: boolean }>('POST', '/api/autopilot/pause', project ? { project, paused } : { paused }),
 }
 
 /** Job rows always carry a result object (the column may hold null). */
@@ -354,10 +389,18 @@ async function settingsCall(method: string, url: string, body: unknown): Promise
   if (res.ok) return { ok: true, status: res.status, data: j as unknown as SettingsDoc }
   const code = typeof j.code === 'string' ? j.code : undefined
   const field = typeof j.field === 'string' ? j.field : undefined
-  let error = typeof j.error === 'string' ? j.error : res.statusText || `HTTP ${res.status}`
+  const error = settingsErrorText(j, res.statusText || `HTTP ${res.status}`)
+  return { ok: false, status: res.status, error, current: j.current as SettingsDoc | undefined, field, code }
+}
+
+/** Localised reason of a rejected settings change ({error, code, field, params}); fallback when the body names none. */
+export function settingsErrorText(body: unknown, fallback: string): string {
+  const j = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  const code = typeof j.code === 'string' ? j.code : undefined
+  const field = typeof j.field === 'string' ? j.field : undefined
   if (code && te('settings.errors.' + code)) {
     const params = (j.params as Record<string, unknown> | undefined) ?? {}
-    error = (field ? fieldLabel(field) + ': ' : '') + t('settings.errors.' + code, params)
+    return (field ? fieldLabel(field) + ': ' : '') + t('settings.errors.' + code, params)
   }
-  return { ok: false, status: res.status, error, current: j.current as SettingsDoc | undefined, field, code }
+  return typeof j.error === 'string' && j.error ? j.error : fallback
 }

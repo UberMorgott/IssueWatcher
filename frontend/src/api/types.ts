@@ -1040,3 +1040,259 @@ export interface ProjectLinks {
   linkedTo?: number
   links?: number[]
 }
+// --- autopilot release runs (internal/release, internal/store autopilot; docs/AUTOPILOT.md) ---
+
+/** Why a plan cannot start (refusal codes: no_profile, no_folder, dirty_folder, … remote_error). */
+export interface Refusal {
+  code: string
+  message: string
+}
+
+/** POST /api/projects/{id}/release (and release/plan, publish-profile/check). */
+export interface ReleaseRequest {
+  /** Explicit version (minor/major allowed); missing = next patch. */
+  version?: string
+  head?: string
+  items?: number[]
+  /** Subset of the enabled targets (platform:external_id); missing = all. */
+  targets?: string[]
+  dryRun?: boolean
+}
+
+/** ok | no_api_key | bad_api_key | error | unavailable | unchecked. */
+export type TargetAuth = 'ok' | 'no_api_key' | 'bad_api_key' | 'error' | 'unavailable' | 'unchecked' | ''
+
+/** A linked mod page as the plan sees it. */
+export interface PlanTarget {
+  key: string
+  projectId: number
+  platform: string
+  name: string
+  url: string
+  /** autopilot.publish[key]. */
+  enabled: boolean
+  /** publishProfile.targets[key] (Nexus: with a fileId). */
+  configured: boolean
+  /** The platform has an uploader. */
+  publishable: boolean
+  /** Part of this release. */
+  selected: boolean
+  latestVersion: string
+  auth: TargetAuth
+  error?: string
+}
+
+export interface PlanStep {
+  step: string
+  target?: string
+  idemKey?: string
+  request: string
+  note?: string
+}
+
+export interface ReleaseCaps {
+  projectReleasesToday: number
+  projectMaxReleases: number
+  releasesToday: number
+  maxReleases: number
+  publishesToday: number
+  maxPublishes: number
+}
+
+/** The dry run of a release (and the resolved publish profile). */
+export interface ReleasePlan {
+  ok: boolean
+  refusals: Refusal[] | null
+  projectId: number
+  project: string
+  folder: string
+  branch: string
+  head: string
+  remoteHead: string
+  baseTag: string
+  currentVersion: string
+  version: string
+  tag: string
+  writesVersion: string[] | null
+  writesChangelog: string[] | null
+  changelog: string
+  asset: string
+  githubRelease: boolean
+  smokeKind: string
+  targets: PlanTarget[] | null
+  steps: PlanStep[] | null
+  caps: ReleaseCaps
+  paused: boolean
+  enabled: boolean
+}
+
+/** The build of a profile check: HEAD built in a temp worktree, nothing committed or sent. */
+export interface CheckBuild {
+  ok: boolean
+  /** Why the build was skipped (no git folder / version / build profile). */
+  skipped: string
+  head: string
+  writes: string[] | null
+  command: { command: string; ok: boolean; exitCode: number; output: string; durationMs: number; timedOut: boolean } | null
+  artifact: { path: string; name: string; size: number; sha256: string; sha1: string; md5: string } | null
+  error: string
+}
+
+/** One target's planned upload requests (dry run). */
+export interface CheckTargetPlan {
+  key: string
+  ok: boolean
+  plan: { method: string; url: string; body?: unknown; note?: string }[] | null
+  error: string
+  /** bad_request | no_api_key | bad_api_key | platform_error | unavailable. */
+  code?: string
+}
+
+/** POST …/publish-profile/check: the plan plus the build, archive check and per-target dry runs. */
+export interface CheckResult extends ReleasePlan {
+  build?: CheckBuild | null
+  archiveCheck?: { ok: boolean; skipped: string; note: string; error: string } | null
+  targetPlans?: CheckTargetPlan[] | null
+}
+
+export interface BuildProfile {
+  command?: string
+  output?: string
+  path?: string
+}
+export interface VersionProfile {
+  kind?: string
+  path?: string
+  key?: string
+  pattern?: string
+}
+export interface ChangelogProfile {
+  kind?: string
+  path?: string
+}
+export interface SmokeProfile {
+  kind?: string
+  save?: string
+  ticks?: number
+  command?: string
+}
+/** One publish target's settings; each platform reads its own fields. */
+export interface TargetProfile {
+  fileId?: string
+  category?: string
+  archivePrevious?: boolean
+  appId?: number
+  gameVersions?: string[]
+  releaseType?: string
+}
+/** agents.projects.<key>.publishProfile (no secrets). */
+export interface PublishProfile {
+  build?: BuildProfile
+  steamContent?: string
+  version?: VersionProfile
+  changelog?: ChangelogProfile
+  smoke?: SmokeProfile
+  targets?: Record<string, TargetProfile>
+}
+
+/** agents.projects.<key>.autopilot. */
+export interface ProjectAutopilot {
+  enabled: boolean
+  autoTriage: boolean
+  autoFix: boolean
+  autoPush: boolean
+  autoRelease: boolean
+  githubRelease: boolean
+  publish?: Record<string, boolean>
+  autoReply: boolean
+  autoClose: boolean
+  coalesceMinutes: number
+  maxBatchAgeHours: number
+  maxReleasesPerDay: number
+  maxDiffLines: number
+  publishWithoutSmoke: boolean
+  regressionWindowHours: number
+}
+
+/** GET/PUT /api/projects/{id}/publish-profile. */
+export interface ProfileDoc {
+  projectId: number
+  project: string
+  revision: number
+  publishProfile: PublishProfile
+  autopilot: ProjectAutopilot
+  global: { paused: boolean; maxReleasesPerDay: number; maxPublishesPerDay: number }
+  kinds: { version: string[]; changelog: string[]; smoke: string[] }
+  resolved: ReleasePlan
+}
+
+/** A release run's frozen input (Run.manifest). */
+export interface ReleaseManifest {
+  projectId: number
+  project: string
+  repo: string
+  repoUrl: string
+  folder: string
+  branch: string
+  head: string
+  baseTag: string
+  fromVersion: string
+  version: string
+  tag: string
+  modName: string
+  asset: string
+  githubRelease: boolean
+  targets: { key: string; projectId: number; platform: string; externalId: string; name: string; url: string }[] | null
+  items: number[] | null
+  bumpSha?: string
+  changelog?: string
+}
+
+export type RunState = 'pending' | 'running' | 'held' | 'done' | 'cancelled' | 'failed'
+export type RunStepState = 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped'
+
+export interface ReleaseRun {
+  id: number
+  kind: string
+  projectId: number
+  state: RunState
+  origin: 'manual' | 'mcp' | 'auto' | string
+  releaseId?: number
+  manifest: Partial<ReleaseManifest> | null
+  version: string
+  artifactSha256: string
+  /** check:<step>[:<target>] | failed:<step>[:<target>] | auth:<platform> | tag_conflict | … */
+  heldReason: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RunStep {
+  id: number
+  runId: number
+  seq: number
+  step: string
+  target: string
+  state: RunStepState
+  attempt: number
+  idemKey: string
+  /** Raw JSON: a string or an object. */
+  request: unknown
+  externalRef: string
+  error: string
+  startedAt: string
+  finishedAt: string
+}
+
+/** GET /api/runs/{id}, SSE autopilot.run. */
+export interface RunView {
+  run: ReleaseRun
+  steps: RunStep[] | null
+  items: { itemId: number; role: string }[] | null
+}
+
+export interface CancelResult {
+  run: ReleaseRun
+  bumpDropped: boolean
+  note: string
+}

@@ -16,6 +16,9 @@ export const router = createRouter({
     // Agent jobs; /jobs/:id is the deep link of the tray's «agent finished» card.
     { path: '/jobs', name: 'jobs', component: () => import('./views/JobsView.vue'), meta: { title: 'jobs' } },
     { path: '/jobs/:id', name: 'job', component: () => import('./views/JobView.vue'), props: true, meta: { title: 'job' } },
+    // Autopilot release runs: list + step timeline (docs/AUTOPILOT.md → UI).
+    { path: '/runs', name: 'runs', component: () => import('./views/RunsView.vue'), meta: { title: 'runs' } },
+    { path: '/runs/:id', name: 'run', component: () => import('./views/RunView.vue'), props: true, meta: { title: 'run' } },
     { path: '/agents', redirect: '/settings/agents' },
     // One page for every account (GitHub + mod platforms); Settings › Подключения links here, the old path redirects.
     { path: '/connections', name: 'connections', component: () => import('./views/ConnectionsView.vue'), meta: { title: 'connections' } },
