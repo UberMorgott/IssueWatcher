@@ -9,7 +9,12 @@ import { platformName } from './platforms'
 /** Targets that name a key (manifest targets, plan targets). */
 export type NamedTargets = readonly { key: string; name: string; platform: string }[] | null
 
-export const RUN_STATES: RunState[] = ['pending', 'running', 'held', 'done', 'cancelled', 'failed']
+export const RUN_STATES: RunState[] = ['pending', 'running', 'held', 'pushed', 'released', 'done', 'cancelled', 'failed']
+
+/** Run kind as text: «Релиз» / «Исправление»; unknown kinds as is. */
+export function runKindText(kind: string): string {
+  return te('release.kind.' + kind) ? t('release.kind.' + kind) : kind
+}
 
 /** Unfinished runs (cancel allowed). */
 export const runActive = (s: RunState) => s === 'pending' || s === 'running' || s === 'held'
@@ -22,6 +27,8 @@ export const RUN_TONE: Record<RunState, string> = {
   done: 'done',
   cancelled: 'cancelled',
   failed: 'failed',
+  pushed: 'running',
+  released: 'done',
 }
 
 export const RUN_ICON: Record<RunState, string> = {
@@ -31,6 +38,8 @@ export const RUN_ICON: Record<RunState, string> = {
   done: 'pi pi-check-circle',
   cancelled: 'pi pi-ban',
   failed: 'pi pi-times-circle',
+  pushed: 'pi pi-upload',
+  released: 'pi pi-check-circle',
 }
 
 export const STEP_ICON: Record<RunStepState, string> = {
@@ -47,6 +56,9 @@ export function refusalText(r: Refusal): string {
   return te('release.refusal.' + r.code) ? t('release.refusal.' + r.code) : r.message || r.code
 }
 
+/** Release steps whose target is an item id (the reply to / closing of an issue). */
+export const ITEM_STEPS = ['reply', 'close']
+
 /** Name of a step (bump, build, publish, …) without its target. */
 export function stepName(step: string): string {
   return te('release.step.' + step) ? t('release.step.' + step) : step
@@ -60,9 +72,10 @@ export function targetLabel(key: string, targets?: NamedTargets): string {
   return tg?.name ? `${name} «${tg.name}»` : name || key
 }
 
-/** A step with its target (publish · Nexus Mods «X»; gh_asset · file name). */
+/** A step with its target (publish · Nexus Mods «X»; gh_asset · file name; reply / close · #item). */
 export function stepLabel(s: { step: string; target?: string }, targets?: NamedTargets): string {
   if (!s.target) return stepName(s.step)
+  if (ITEM_STEPS.includes(s.step)) return `${stepName(s.step)} · #${s.target}`
   return `${stepName(s.step)} · ${s.step === 'gh_asset' ? s.target : targetLabel(s.target, targets)}`
 }
 

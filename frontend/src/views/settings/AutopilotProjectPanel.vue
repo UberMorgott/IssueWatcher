@@ -39,8 +39,9 @@ import { useSettingsStore } from '../../stores/settings'
 // (disabled with the reason), the daily release cap; the publish profile
 // editor + «Проверить настройку» (dry run, nothing public); Phase 2: the smoke
 // block (factorio save / ticks / install, command) and «Публиковать без
-// смоук-теста». Fix / push / auto
-// release / reply switches come with later phases (shown disabled).
+// смоук-теста»; Phase 3: fix / push / auto release / reply / close switches,
+// the release timer and diff limit, the accepted-risk notice. Auto triage
+// comes with phase 4 (shown disabled).
 const { t, te } = useI18n()
 const app = useAppStore()
 const settings = useSettingsStore()
@@ -146,21 +147,38 @@ function setPublish(key: string, on: boolean) {
   else delete cur[key]
   void saveAutopilot({ publish: cur })
 }
-let capTimer: number | undefined
-function setCap(v: number | null) {
-  window.clearTimeout(capTimer)
-  if (!v) return
-  capTimer = window.setTimeout(() => void saveAutopilot({ maxReleasesPerDay: v }), 700)
+/** Numeric autopilot fields: saved 700 ms after the last change, within their range. */
+type NumKey = 'maxReleasesPerDay' | 'coalesceMinutes' | 'maxBatchAgeHours' | 'maxDiffLines'
+const numTimers: Partial<Record<NumKey, number>> = {}
+function setNum(key: NumKey, v: number | null, min: number, max: number) {
+  window.clearTimeout(numTimers[key])
+  if (!v || v < min || v > max) return
+  numTimers[key] = window.setTimeout(() => void saveAutopilot({ [key]: v }), 700)
+}
+const setCap = (v: number | null) => setNum('maxReleasesPerDay', v, 1, 50)
+/** Phase 3 numbers: fix push limit and the auto release timer. */
+const NUMS: { key: NumKey; min: number; max: number }[] = [
+  { key: 'coalesceMinutes', min: 1, max: 1440 },
+  { key: 'maxBatchAgeHours', min: 1, max: 168 },
+  { key: 'maxDiffLines', min: 1, max: 100000 },
+]
+/** Phase 3 switches (fix → push → release → reply → close). */
+type SwitchKey = 'autoFix' | 'autoPush' | 'autoRelease' | 'autoReply' | 'autoClose'
+const SWITCHES: SwitchKey[] = ['autoFix', 'autoPush', 'autoRelease', 'autoReply', 'autoClose']
+function switchText(key: SwitchKey): string {
+  const a = ap.value
+  return t('release.autopilot.' + key + 'Text', { coalesce: a?.coalesceMinutes ?? 0, age: a?.maxBatchAgeHours ?? 0 })
 }
 /** Later phases: shown, not switchable yet. */
-const LATER: { key: keyof ProjectAutopilot; phase: number }[] = [
-  { key: 'autoTriage', phase: 4 },
-  { key: 'autoFix', phase: 3 },
-  { key: 'autoPush', phase: 3 },
-  { key: 'autoRelease', phase: 3 },
-  { key: 'autoReply', phase: 3 },
-  { key: 'autoClose', phase: 3 },
-]
+const LATER: { key: keyof ProjectAutopilot; phase: number }[] = [{ key: 'autoTriage', phase: 4 }]
+/**
+ * Accepted risk (docs/AUTOPILOT.md → Safety rails → Agent isolation): the fixing
+ * agent runs as the owner while a publish target is on.
+ */
+const showRisk = computed(() => {
+  const a = ap.value
+  return !!a?.autoFix && (a.githubRelease || Object.values(a.publish ?? {}).some(Boolean))
+})
 
 const targets = computed<PlanTarget[]>(() => doc.value?.resolved?.targets ?? [])
 /** «Загружать на …» can be switched on: uploader, key, profile entry. */
@@ -395,6 +413,43 @@ const name = (k: string) => platformName(k)
             :disabled="!!saving"
             :aria-label="t('release.autopilot.publishWithoutSmoke')"
             @update:model-value="(v: boolean) => saveAutopilot({ publishWithoutSmoke: v })"
+          />
+        </SettingRow>
+        <SettingRow
+          v-for="k in SWITCHES"
+          :key="k"
+          :title="t('release.autopilot.' + k)"
+          :text="switchText(k)"
+        >
+          <ToggleSwitch
+            :model-value="!!ap[k]"
+            :disabled="!!saving"
+            :aria-label="t('release.autopilot.' + k)"
+            @update:model-value="(v: boolean) => saveAutopilot({ [k]: v })"
+          />
+        </SettingRow>
+        <Message
+          v-if="showRisk"
+          severity="warn"
+          :closable="false"
+          class="risk"
+        >
+          <b>{{ t('release.autopilot.riskTitle') }}</b> {{ t('release.autopilot.riskText') }}
+        </Message>
+        <SettingRow
+          v-for="n in NUMS"
+          :key="n.key"
+          :title="t('release.autopilot.' + n.key)"
+          :text="t('release.autopilot.' + n.key + 'Text')"
+        >
+          <InputNumber
+            :model-value="ap[n.key]"
+            :min="n.min"
+            :max="n.max"
+            show-buttons
+            input-class="num-input"
+            :aria-label="t('release.autopilot.' + n.key)"
+            @update:model-value="(v: number | null) => setNum(n.key, v, n.min, n.max)"
           />
         </SettingRow>
         <SettingRow
@@ -821,5 +876,9 @@ const name = (k: string) => platformName(k)
 
 :deep(.num-input) {
   width: 90px;
+}
+
+.risk {
+  margin: 6px 0;
 }
 </style>

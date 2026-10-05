@@ -14,7 +14,7 @@ import RunBadge from '../components/RunBadge.vue'
 import { api } from '../api/client'
 import type { ReleaseRun, RunView } from '../api/types'
 import { absTime, relTime } from '../lib/format'
-import { RUN_STATES, heldText } from '../lib/release'
+import { RUN_STATES, heldText, runKindText } from '../lib/release'
 import { useAppStore } from '../stores/app'
 
 // Release runs (newest first) with live state (SSE autopilot.run); a row opens
@@ -248,6 +248,7 @@ function open(e: { data: ReleaseRun }) {
                 @click.stop
               >
                 <span class="mono muted">#{{ data.id }}</span> {{ projectName(data) }}
+                <span class="kind muted">· {{ runKindText(data.kind) }}</span>
               </RouterLink>
               <div
                 v-if="data.state === 'held' && data.heldReason"

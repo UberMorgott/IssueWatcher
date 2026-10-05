@@ -13,7 +13,7 @@ import { api } from '../api/client'
 import type { RunStep, RunView } from '../api/types'
 import { useCrumbs } from '../lib/crumbs'
 import { absTime, elapsed, relTime } from '../lib/format'
-import { STEP_ICON, bytes, heldText, noteText, releaseError, requestText, runActive, shortSha, stepLabel, targetLabel } from '../lib/release'
+import { STEP_ICON, bytes, heldText, noteText, releaseError, requestText, runActive, runKindText, shortSha, stepLabel, targetLabel } from '../lib/release'
 import { safeUrl } from '../lib/safeUrl'
 import { useAppStore } from '../stores/app'
 
@@ -153,7 +153,7 @@ function stepRef(s: RunStep): Ref | null {
   if (!x) return null
   const repoUrl = m.value?.repoUrl ?? ''
   if (/^https?:\/\//.test(x)) return { text: x, href: x }
-  if (s.step === 'bump' || s.step === 'push' || s.step === 'tag') {
+  if (s.step === 'bump' || s.step === 'fix' || s.step === 'push' || s.step === 'tag') {
     return { text: shortSha(x), href: repoUrl && /^[0-9a-f]{7,}$/i.test(x) ? `${repoUrl}/commit/${x}` : undefined, mono: true }
   }
   if (s.step === 'build') {
@@ -164,13 +164,13 @@ function stepRef(s: RunStep): Ref | null {
       return { text: x, mono: true }
     }
   }
-  if (s.step === 'gate') return null // shown as details below
+  if (s.step === 'gate' || (s.step === 'verify' && x.startsWith('{'))) return null // shown as details below
   if (s.step === 'smoke') return x.startsWith('{') ? null : { text: noteText(x) } // a JSON log → details below
   if (s.step === 'publish') return { text: t('release.publishedVersion', { id: x }), mono: true }
   return { text: x, mono: true }
 }
 function gateDetails(s: RunStep): string {
-  if (!s.externalRef || !(s.step === 'gate' || (s.step === 'smoke' && s.externalRef.startsWith('{')))) return ''
+  if (!s.externalRef || !(s.step === 'gate' || ((s.step === 'smoke' || s.step === 'verify') && s.externalRef.startsWith('{')))) return ''
   try {
     return JSON.stringify(JSON.parse(s.externalRef), null, 2)
   } catch {
@@ -214,6 +214,7 @@ function took(s: RunStep): string {
           <div class="head-main">
             <div class="head-line">
               <RunBadge :state="run.state" />
+              <span class="kind">{{ runKindText(run.kind) }}</span>
               <span class="muted">{{ t('release.origin.' + run.origin) }}</span>
               <span
                 v-tooltip.top="absTime(run.createdAt)"
@@ -543,6 +544,10 @@ function took(s: RunStep): string {
 
 .small {
   font-size: calc(12px * var(--iw-fs, 1));
+}
+
+.kind {
+  font-weight: 500;
 }
 
 .card {

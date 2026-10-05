@@ -1250,11 +1250,13 @@ export interface ReleaseManifest {
   changelog?: string
 }
 
-export type RunState = 'pending' | 'running' | 'held' | 'done' | 'cancelled' | 'failed'
+/** pushed / released: a fix run (kind fix) on the default branch, then claimed by a release run. */
+export type RunState = 'pending' | 'running' | 'held' | 'done' | 'cancelled' | 'failed' | 'pushed' | 'released'
 export type RunStepState = 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped'
 
 export interface ReleaseRun {
   id: number
+  /** release | fix */
   kind: string
   projectId: number
   state: RunState
