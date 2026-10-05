@@ -121,6 +121,15 @@ func (g *Group) Run(ctx context.Context) {
 	g.wg.Wait()
 }
 
+// Source is the store source of platform's only syncer, 0 when there is no
+// syncer, several, or its account is not known yet (no sync so far).
+func (g *Group) Source(platform string) int64 {
+	if s := syncerFor(g.Syncers(), platform, -1); s != nil {
+		return s.sourceID()
+	}
+	return 0
+}
+
 // Trigger requests a full sync of every source.
 func (g *Group) Trigger() {
 	for _, s := range g.Syncers() {

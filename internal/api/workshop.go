@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
@@ -154,12 +155,21 @@ func (s *Server) handleWorkshopCreate(w http.ResponseWriter, r *http.Request) {
 		out["targetError"] = err.Error()
 	}
 	linked, err := s.linkSteamItem(r.Context(), rp, target)
+	if err == nil && !linked {
+		// Not synced yet: record the mod page now (the Steam account's source),
+		// so this call links it; the sync fills in its title and comments.
+		if err = s.addSteamPage(r.Context(), rp, c.Item); err == nil {
+			linked, err = s.linkSteamItem(r.Context(), rp, target)
+		}
+	}
 	out["linked"] = linked
 	if err != nil {
 		out["linkError"] = err.Error()
 	}
-	if !linked && s.opts.Sync != nil {
-		s.opts.Sync.Trigger() // the item shows up after the next Steam sync; call again to link it
+	if s.opts.Sync != nil {
+		s.opts.Sync.Trigger() // the new page's title, items and comments
+	}
+	if !linked {
 		out["linkNote"] = "the item is linked once the Steam sync lists it: call create again (it reuses the item)"
 	}
 	s.opts.Log.Info("workshop item", "project", rp.Key, "item", c.Item, "created", c.Created, "linked", linked)
@@ -191,6 +201,22 @@ func (s *Server) addSteamTarget(key, target string, appID uint32) error {
 		}
 	}
 	return errors.New("settings kept changing: add the target in the publish profile")
+}
+
+// addSteamPage records Workshop item as a mod page of the signed-in Steam
+// account's source before a sync lists it. No Steam syncer with a known
+// account → nothing (the next sync lists it; create links it then).
+func (s *Server) addSteamPage(ctx context.Context, rp store.Repo, item uint64) error {
+	if s.opts.Sync == nil || s.opts.Store == nil {
+		return nil
+	}
+	src := s.opts.Sync.Source("steam")
+	if src == 0 {
+		return nil
+	}
+	_, err := s.opts.Store.AddProject(ctx, src, provider.Project{ExternalID: strconv.FormatUint(item, 10), Name: rp.Name,
+		URL: steamugc.ItemURL(item)})
+	return err
 }
 
 // linkSteamItem links the synced mod page of target to the code project.

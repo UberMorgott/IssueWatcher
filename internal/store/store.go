@@ -165,6 +165,22 @@ func (s *Store) SyncProjects(ctx context.Context, sourceID int64, list []provide
 	return out, nil
 }
 
+// AddProject upserts one active project of a source without touching the
+// others (a project the app just created on its platform, before the next sync
+// lists it; the sync then updates the same row).
+func (s *Store) AddProject(ctx context.Context, sourceID int64, p provider.Project) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `INSERT INTO projects (source_id, external_id, name, url, game, code_url, active)
+		VALUES (?, ?, ?, ?, ?, ?, 1)
+		ON CONFLICT (source_id, external_id) DO UPDATE SET active = 1
+		RETURNING id`, sourceID, p.ExternalID, p.Name, p.URL, p.Game, p.CodeURL).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("store: add project %s: %w", p.ExternalID, err)
+	}
+	s.changes.Add(1)
+	return id, nil
+}
+
 // activeProjects maps external id → name+"\x00"+url of the active projects of a source.
 func activeProjects(ctx context.Context, tx *sql.Tx, sourceID int64) (map[string]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT external_id, name, url FROM projects WHERE source_id = ? AND active = 1`, sourceID)

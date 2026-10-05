@@ -2,13 +2,18 @@ package api
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 	"github.com/UberMorgott/issuewatcher/internal/store"
+	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
 
 type fakeWorkshop struct {
@@ -97,6 +102,48 @@ func TestWorkshopCreateAndPage(t *testing.T) {
 	}
 	if code := e.call(t, http.MethodPost, base+"/page", `{"dryRun": true}`, &res); code != http.StatusOK || !res.DryRun {
 		t.Fatalf("agent dry run %d", code)
+	}
+}
+
+// steamProvider is a signed-in Steam account that lists no Workshop items yet.
+type steamProvider struct{}
+
+func (steamProvider) Platform() string                                         { return "steam" }
+func (steamProvider) Capabilities() provider.Capabilities                      { return provider.Capabilities{} }
+func (steamProvider) Account(context.Context) (string, error)                  { return "76561197996210591", nil }
+func (steamProvider) ListProjects(context.Context) ([]provider.Project, error) { return nil, nil }
+func (steamProvider) SyncItems(context.Context, provider.Project, time.Time) ([]provider.Item, error) {
+	return nil, nil
+}
+func (steamProvider) Reply(context.Context, string, string) (provider.Comment, error) {
+	return provider.Comment{}, errors.New("no replies")
+}
+
+// TestWorkshopCreateLinksAtOnce: one create call records the new item as a
+// mod page of the Steam account and links it, before any sync lists it.
+func TestWorkshopCreateLinksAtOnce(t *testing.T) {
+	ws := &fakeWorkshop{}
+	var steam *syncer.Syncer
+	e, id := releaseEnv(t, func(o *Options) {
+		o.Workshop = ws
+		steam = syncer.New(syncer.Options{Store: o.Store, Provider: steamProvider{}, Log: slog.New(slog.DiscardHandler)})
+		o.Sync.Add(steam)
+	})
+	if err := steam.SyncOnce(t.Context()); err != nil { // learns the account's source
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if code := e.call(t, http.MethodPost, "/api/projects/"+itoa(id)+"/steam/item", `{"appId": 839770}`, &out); code != http.StatusOK ||
+		out["linked"] != true || out["linkError"] != nil || out["linkNote"] != nil {
+		t.Fatalf("create %d %v", code, out)
+	}
+	rp, err := e.store.Repo(t.Context(), id)
+	if err != nil || len(rp.Links) != 1 {
+		t.Fatalf("code project links %+v %v", rp.Links, err)
+	}
+	page, err := e.store.Repo(t.Context(), rp.Links[0])
+	if err != nil || page.Key != "steam:3800000001" || page.URL != steamugc.ItemURL(3800000001) || page.LinkedTo != id {
+		t.Fatalf("mod page %+v %v", page, err)
 	}
 }
 
