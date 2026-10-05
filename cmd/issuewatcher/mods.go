@@ -57,7 +57,8 @@ type modPlatforms struct {
 	onUpdate func([]store.Event, int)
 	dataDir  string
 	// nexusKeys is the Nexus API key (data\secrets\nexus-api.json) the v3 upload API takes.
-	nexusKeys *nexus.Keys
+	nexusKeys    *nexus.Keys
+	factorioKeys *factorio.Keys
 
 	// native replaces building a native provider (tests: fake sites).
 	native func(id string, author func() string) (provider.Provider, *signin.Manager)
@@ -156,7 +157,7 @@ func (m *modPlatforms) buildNative(id string, author func() string) (provider.Pr
 		return nexus.New(nexus.Options{Native: &nexus.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log, Keys: m.nexusKeys}), mgr
 	case factorio.Platform:
 		mgr := signin.New(factorio.SignInSpec(nil, m.log), jar, br)
-		return factorio.New(factorio.Options{Session: mgr, Author: author, Log: m.log}), mgr
+		return factorio.New(factorio.Options{Session: mgr, Author: author, Log: m.log, Keys: m.factorioKeys}), mgr
 	}
 	mgr := signin.New(curseforge.SignInSpecBrowser(nil, m.log, br), jar, br)
 	return curseforge.New(curseforge.Options{Native: &curseforge.NativeOptions{Browser: br, Session: mgr}, Author: author, Log: m.log}), mgr

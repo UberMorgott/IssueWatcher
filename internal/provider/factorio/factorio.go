@@ -60,9 +60,11 @@ type Options struct {
 	Site string
 	// ReadBackWaits are the pauses before each further read-back of a reply.
 	ReadBackWaits []time.Duration
+	// Keys is the upload API key store; nil = no publishing.
+	Keys *Keys
 }
 
-// Provider implements provider.Provider and provider.Poller.
+// Provider implements provider.Provider, provider.Poller and (with Options.Keys) provider.Publisher.
 type Provider struct {
 	opts Options
 
@@ -100,6 +102,7 @@ func (p *Provider) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
 		ListProjects: true, SyncItems: true, ListComments: true, Reply: canReply,
 		Auth: provider.AuthCookieSession, Kinds: []string{store.KindComment, store.KindBug}, ReplyThreaded: true,
+		Publish: p.opts.Keys != nil,
 	}
 }
 

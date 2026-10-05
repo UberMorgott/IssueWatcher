@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/factorio"
 	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
@@ -107,9 +108,9 @@ func (s *Server) publishErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, provider.ErrBadPublish):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_request"})
-	case errors.Is(err, nexus.ErrNoAPIKey):
+	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "no_api_key"})
-	case errors.Is(err, nexus.ErrBadAPIKey):
+	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "bad_api_key"})
 	default:
 		s.opts.Log.Warn("api: publish", "err", err)
@@ -217,9 +218,9 @@ func (s *Server) finishPublish(t *publishTask, res provider.PublishResult, err e
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "publish_failed"
 	case cancelled:
 		t.State, t.Error, t.ErrorCode = PublishCancelled, err.Error(), "cancelled"
-	case errors.Is(err, nexus.ErrNoAPIKey):
+	case errors.Is(err, nexus.ErrNoAPIKey), errors.Is(err, factorio.ErrNoAPIKey):
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "no_api_key"
-	case errors.Is(err, nexus.ErrBadAPIKey):
+	case errors.Is(err, nexus.ErrBadAPIKey), errors.Is(err, factorio.ErrBadAPIKey):
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "bad_api_key"
 	default:
 		t.State, t.Error, t.ErrorCode = PublishFailed, err.Error(), "upload_failed"
