@@ -236,10 +236,49 @@ func TestMCPE2E(t *testing.T) {
 		} `json:"tools"`
 	}
 	m.call("tools/list", map[string]any{}, &tools)
-	if len(tools.Tools) != 16 {
-		t.Fatalf("tools/list: %d tools", len(tools.Tools))
+	var names []string
+	for _, tl := range tools.Tools {
+		names = append(names, tl.Name)
 	}
-	r := m.tool("list_items", map[string]any{"limit": 5})
+	for _, want := range []string{"list_items", "publish_version", "get_publish_profile", "set_publish_profile", "plan_release", "release",
+		"list_runs", "get_run", "resume_run", "cancel_run", "skip_step", "pause_autopilot", "list_autopilot_events"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("tools/list: no %s in %v", want, names)
+		}
+	}
+
+	// Release tools against the real API: the project has no publish profile.
+	var projects []struct {
+		ID int64 `json:"id"`
+	}
+	if r := m.tool("list_projects", map[string]any{}); r.IsError || json.Unmarshal([]byte(r.Content[0].Text), &projects) != nil || len(projects) != 1 {
+		t.Fatalf("list_projects: %+v", r)
+	}
+	var plan struct {
+		OK       bool `json:"ok"`
+		Refusals []struct {
+			Code string `json:"code"`
+		} `json:"refusals"`
+	}
+	r := m.tool("plan_release", map[string]any{"project": projects[0].ID})
+	if err := json.Unmarshal([]byte(r.Content[0].Text), &plan); r.IsError || err != nil || plan.OK || len(plan.Refusals) == 0 {
+		t.Fatalf("plan_release: %+v", r)
+	}
+	r = m.tool("release", map[string]any{"project": projects[0].ID, "dry_run": true})
+	if !r.IsError || !strings.Contains(r.Content[0].Text, "(HTTP 409, code "+plan.Refusals[0].Code+")") {
+		t.Fatalf("release dry run: %+v", r)
+	}
+	if r := m.tool("list_runs", map[string]any{}); r.IsError || strings.TrimSpace(r.Content[0].Text) != "[]" {
+		t.Fatalf("list_runs: %+v", r)
+	}
+	if r := m.tool("list_autopilot_events", map[string]any{"unread_only": true}); r.IsError || !strings.Contains(r.Content[0].Text, `"unread":0`) {
+		t.Fatalf("list_autopilot_events: %+v", r)
+	}
+	if r := m.tool("get_publish_profile", map[string]any{"project": projects[0].ID}); r.IsError || !strings.Contains(r.Content[0].Text, `"resolved"`) {
+		t.Fatalf("get_publish_profile: %+v", r)
+	}
+
+	r = m.tool("list_items", map[string]any{"limit": 5})
 	var page struct {
 		Items []struct {
 			ID int64 `json:"id"`
@@ -344,7 +383,11 @@ func TestJobMCPE2E(t *testing.T) {
 		} `json:"tools"`
 	}
 	m.call("tools/list", map[string]any{}, &tools)
-	if len(tools.Tools) != 2 {
+	if len(tools.Tools) != 2 || slices.ContainsFunc(tools.Tools, func(tl struct {
+		Name string `json:"name"`
+	}) bool {
+		return tl.Name == "release" || tl.Name == "pause_autopilot"
+	}) {
 		t.Fatalf("scoped tools/list: %+v", tools)
 	}
 	if r := m.tool("get_item", map[string]any{}); r.IsError || !strings.Contains(r.Content[0].Text, "Crash on start") {
@@ -473,6 +516,21 @@ func TestControlE2E(t *testing.T) {
 		t.Fatalf("second job reply: %d %s", code, stderr)
 	}
 	c.ok(t, "", nil, "sync")
+
+	// Release CLI: plan by key, a refused run exits 1 with its code.
+	var plan struct {
+		OK       bool
+		Refusals []struct{ Code string }
+	}
+	c.ok(t, "", &plan, "release", "plan", "github:"+e2eRepo)
+	if plan.OK || len(plan.Refusals) == 0 {
+		t.Fatalf("release plan: %+v", plan)
+	}
+	if code, _, stderr := c.cli(t, "", "release", "run", e2eRepo, "--dry-run"); code != exitAPI || !strings.Contains(stderr, "code "+plan.Refusals[0].Code) {
+		t.Fatalf("release run --dry-run: %d %s", code, stderr)
+	}
+	c.ok(t, "", nil, "runs", "--project", e2eRepo)
+	c.ok(t, "", nil, "profile", "get", strconv.FormatInt(projects[0].ID, 10))
 
 	cmd := exec.CommandContext(t.Context(), c.exe, "status") //nolint:gosec // our test build
 	cmd.Env = append(os.Environ(), "IW_DATA_DIR="+t.TempDir())

@@ -57,6 +57,14 @@ error, 2 usage, 3 app not running. `issuewatcher help` lists the flags.
 | `jobs create --flow fix\|reply\|label <itemId>...` | queue agent jobs |
 | `job cancel\|retry\|dismiss\|push\|pr <id>` · `job reply <id> (--body-file f \| -)` · `job labels <id> <name>...` | the job page buttons |
 | `publish <projectId> --path ARCHIVE --version V [--file-id ID \| --new-file] [--name N] [--changelog-file f] [--dry-run] [--wait]` · `publish targets <projectId>` · `publish status <taskId>` | upload an archive as a new mod version (Nexus, Factorio) with the app's stored credentials · the files/versions to publish to · a publish task |
+| `profile get <project>` · `profile set <project> (--file f \| -)` | a code project's publish profile + autopilot + resolved plan · replace its `{revision?, publishProfile?, autopilot?}` blocks |
+| `release plan <project> [--version --head --items 1,2 --targets k1,k2]` · `release run <project> [same] [--dry-run] [--wait]` | dry-run release plan · start an autopilot release run (background; `--wait` polls to done / held / failed) |
+| `runs [--project --state --kind --limit]` · `run <id> [resume \| cancel \| skip <step> [--target KEY]]` | release runs · one run with its steps, or act on it |
+
+`<project>` of the release commands is the GitHub code project: its id, key
+(`github:owner/repo`) or name (`owner/repo`). A refused release exits 1 with
+`code <refusal>` and every refusal on stderr (`no_profile`, `dirty_folder`,
+`busy`, `cap_reached`, `paused`, `disabled`, ...).
 
 MCP server (stdio): **don't register it globally or per project** (`claude mcp add`,
 `~/.codex/config.toml`) — every other session in that folder would carry its
@@ -71,7 +79,19 @@ claude --mcp-config iw-mcp.json
 Tools: `list_projects, list_items, get_item, list_item_comments, list_jobs, get_job, get_job_log,
 sync_now, reply_item, start_jobs, cancel_job, retry_job, send_job_reply,
 apply_job_labels, push_job, create_pr, list_publish_targets, publish_version,
-get_publish_task` (local ids, pages ≤ 50; logs in `data\logs\mcp.log`).
+get_publish_task`, and the autopilot release tools `get_publish_profile,
+set_publish_profile, plan_release, release, list_runs, get_run, resume_run,
+cancel_run, skip_step, pause_autopilot, list_autopilot_events` (local ids,
+pages ≤ 50; logs in `data\logs\mcp.log`).
+`release` is not owner approval: the same gate, caps and rails apply, it runs
+in the background (poll `get_run`), and `plan_release` / `dry_run` show the
+plan first. Refusals come back as tool errors with their code (`no_profile`,
+`busy`, `cap_reached`, `paused`, `disabled`, ...). `pause_autopilot` can only
+pause (un-pausing is the owner's, in the app); `set_publish_profile` changes the
+publish profile only, not the autopilot switches. Release, profile changes,
+skip and un-pause are refused (`agent_caller`) when called from inside an
+IssueWatcher agent run, and job servers (`mcp --item` / `--project`) never
+carry these tools.
 Publishing tools (comment, push, PR, mod version) have no extra gate: approve
 them in your MCP client. `publish_version` takes a mod project id, an absolute
 archive path and the version; run it with `dry_run` first. Nexus uses the API

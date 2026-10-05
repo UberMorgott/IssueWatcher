@@ -68,6 +68,18 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
                       upload an archive as a new mod version on the project's platform
                       (nexus, factorio); public unless --dry-run; --wait polls to the end
   publish status <taskId>
+
+  Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
+  profile get <project>
+  profile set <project> (--file FILE | -)
+                      replace the given blocks of {revision?, publishProfile?, autopilot?}
+  release plan <project> [--version V] [--head SHA] [--items ID,..] [--targets KEY,..]
+                      dry-run plan: ok, refusals, version, steps, targets
+  release run <project> [--version V] [--head SHA] [--items ID,..] [--targets KEY,..] [--dry-run] [--wait]
+                      start a release run in the background (public once pushed); refusals exit 1
+                      with their codes; --wait polls until done, cancelled, failed or held
+  runs [--project P] [--state S] [--kind K] [--limit N]
+  run <id> [resume | cancel | skip <step> [--target KEY]]
 `
 
 // isCLI reports whether args start with a subcommand (a word, not a flag):
@@ -232,6 +244,14 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.job(rest)
 	case "publish":
 		return c.publish(rest)
+	case "release":
+		return c.release(rest)
+	case "runs":
+		return c.runs(rest)
+	case "run":
+		return c.runCmd(rest)
+	case "profile":
+		return c.profile(rest)
 	}
 	return nil, usagef("unknown command %q", cmd)
 }

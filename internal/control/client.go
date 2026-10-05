@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,14 +42,36 @@ var ErrNotRunning = errors.New("IssueWatcher is not running (start the app first
 // the item or job before retrying.
 var ErrOutcomeUnknown = errors.New("no answer from the app: it may have done it anyway, check the item or job state before retrying")
 
-// APIError is a non-2xx answer of the API; Message is its {error} text.
+// APIError is a non-2xx answer of the API; Message is its {error} text, Code
+// its machine code (agent_caller, bad_state, no_profile, ...) and Refusals the
+// release refusals [{code, message}] of a refused release.
 type APIError struct {
-	Status  int
-	Message string
+	Status   int
+	Message  string
+	Code     string
+	Refusals []Refusal
+}
+
+// Refusal is one reason a release plan refuses to run.
+type Refusal struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
+	if e.Code == "" {
+		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.Status)
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "%s (HTTP %d, code %s)", e.Message, e.Status, e.Code)
+	for i, r := range e.Refusals {
+		sep := "; "
+		if i == 0 {
+			sep = "; refusals: "
+		}
+		s.WriteString(sep + r.Code + ": " + r.Message)
+	}
+	return s.String()
 }
 
 // Client talks to the app that owns DataDir.
@@ -140,7 +163,9 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var e struct {
-			Error string `json:"error"`
+			Error    string    `json:"error"`
+			Code     string    `json:"code"`
+			Refusals []Refusal `json:"refusals"`
 		}
 		msg := resp.Status
 		if json.Unmarshal(b, &e) == nil && e.Error != "" {
@@ -148,7 +173,7 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		} else if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			msg = "unexpected redirect to " + resp.Header.Get("Location")
 		}
-		return nil, &APIError{Status: resp.StatusCode, Message: msg}
+		return nil, &APIError{Status: resp.StatusCode, Message: msg, Code: e.Code, Refusals: e.Refusals}
 	}
 	if len(bytes.TrimSpace(b)) == 0 {
 		return nil, nil

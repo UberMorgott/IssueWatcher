@@ -40,7 +40,7 @@ func fakeAPI(t *testing.T, answers map[string]string) *[]apiCall {
 			return
 		}
 		status, body, _ := strings.Cut(a, " ")
-		code := map[string]int{"200": 200, "201": 201, "202": 202, "400": 400, "409": 409, "502": 502}[status]
+		code := map[string]int{"200": 200, "201": 201, "202": 202, "400": 400, "403": 403, "409": 409, "502": 502}[status]
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(body))
 	}))
