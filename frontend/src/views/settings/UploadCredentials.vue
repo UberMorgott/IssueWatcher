@@ -8,10 +8,11 @@ import { useI18n } from 'vue-i18n'
 import { api, type Result } from '../../api/client'
 import type { CurseForgeUploadStatus, SteamUploadStatus } from '../../api/types'
 import { absTime } from '../../lib/format'
+import ToolsStatus from './ToolsStatus.vue'
 
 // Upload credentials of one platform card (Settings › Платформы), Phase 5:
 // CurseForge — the upload API token (write-only, checked before it is stored);
-// Steam — steamcmd (found on the PC or downloaded from Valve on a click) and
+// Steam — steamcmd (the app's own copy in data\tools, set up automatically) and
 // its one-time sign-in: the login, password and Steam Guard code go straight
 // to steamcmd's console; only steamcmd's own cached sign-in is kept.
 const props = defineProps<{ platform: 'curseforge' | 'steam' }>()
@@ -74,8 +75,7 @@ async function checkToken() {
 
 // --- Steam (steamcmd)
 const steam = ref<SteamUploadStatus | null>(null)
-const form = reactive({ user: '', password: '', code: '', path: '' })
-const showPath = ref(false)
+const form = reactive({ user: '', password: '', code: '' })
 const running = computed(() => ['starting', 'need_code', 'confirm_mobile'].includes(steam.value?.login.state ?? ''))
 let timer: ReturnType<typeof setTimeout> | undefined
 async function loadSteam() {
@@ -129,9 +129,7 @@ async function steamCall(kind: string, call: () => Promise<Result<SteamUploadSta
   steam.value = r.data
   if (done) toast.add({ severity: 'success', summary: t(done, { user: r.data.user ?? '' }), life: 2500 })
 }
-const install = () => steamCall('install', api.steamUploadInstall, 'platforms.steamUpload.installed')
 const checkSteam = () => steamCall('check', api.steamUploadCheck, 'platforms.steamUpload.verified')
-const savePath = () => steamCall('path', () => api.steamUploadPath(form.path.trim()))
 function forget() {
   confirm.require({
     header: t('platforms.steamUpload.forgetTitle'),
@@ -258,56 +256,14 @@ onBeforeUnmount(() => clearTimeout(timer))
     </div>
     <small class="muted">{{ t('platforms.steamUpload.hint') }}</small>
 
-    <!-- steamcmd -->
-    <div class="tool">
-      <span
-        v-if="steam?.steamcmd"
-        class="muted small mono path"
-        :title="steam.steamcmd"
-      ><i class="pi pi-wrench" /> {{ steam.steamcmd }} · {{ t('platforms.steamUpload.source.' + (steam.source ?? 'configured')) }}</span>
-      <span
-        v-else
-        class="muted small"
-      ><i class="pi pi-info-circle" /> {{ t('platforms.steamUpload.noSteamcmd') }}</span>
-      <div class="key-actions">
-        <Button
-          v-if="!steam?.steamcmd"
-          :label="t('platforms.steamUpload.install')"
-          icon="pi pi-download"
-          size="small"
-          :disabled="!!busy || running"
-          :loading="busy === 'install'"
-          @click="install()"
-        />
-        <Button
-          :label="t('platforms.steamUpload.setPath')"
-          icon="pi pi-folder-open"
-          size="small"
-          severity="secondary"
-          text
-          @click="showPath = !showPath"
-        />
-      </div>
-      <div
-        v-if="showPath"
-        class="key-row"
-      >
-        <InputText
-          v-model="form.path"
-          :placeholder="t('platforms.steamUpload.pathPlaceholder')"
-          :aria-label="t('platforms.steamUpload.setPath')"
-          fluid
-          @keydown.enter="savePath()"
-        />
-        <Button
-          :label="t('common.save')"
-          icon="pi pi-check"
-          :disabled="!!busy"
-          :loading="busy === 'path'"
-          @click="savePath()"
-        />
-      </div>
-    </div>
+    <!-- helpers in data\tools: steamcmd, steam_api64.dll (set up automatically) -->
+    <ToolsStatus @ready="loadSteam()" />
+    <p
+      v-if="steam && !steam.steamcmd"
+      class="muted small"
+    >
+      <i class="pi pi-info-circle" /> {{ t('platforms.steamUpload.noSteamcmd') }}
+    </p>
 
     <!-- sign-in in progress -->
     <template v-if="running">
@@ -463,15 +419,10 @@ onBeforeUnmount(() => clearTimeout(timer))
   gap: 8px;
 }
 
-.tool,
 .login {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.path {
-  overflow-wrap: anywhere;
 }
 
 .err {

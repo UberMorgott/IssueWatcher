@@ -94,7 +94,14 @@ func (e *Engine) subjects(ctx context.Context, dir, base, head string) []string 
 // change, on a temporary copy of the version and changelog files (the folder
 // is not touched).
 func (e *Engine) changelogPreview(dir string, p config.PublishProfile, version string, subjects []string) (text string, vfiles, cfiles []string, err error) {
-	tmp, err := os.MkdirTemp("", "iw-release-")
+	base := "" // the system temp folder only without a data dir (tests)
+	if e.d.DataDir != "" {
+		base = filepath.Join(e.d.DataDir, "release") // portable: scratch stays in the app folder
+		if err := os.MkdirAll(base, 0o750); err != nil {
+			return "", nil, nil, err
+		}
+	}
+	tmp, err := os.MkdirTemp(base, "preview-")
 	if err != nil {
 		return "", nil, nil, err
 	}

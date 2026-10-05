@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/secret"
+	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
 // ErrCreateUnknown: an earlier creation was started and its answer is lost:
@@ -23,7 +24,7 @@ import (
 // usable steam_api64.dll was found.
 var (
 	ErrCreateUnknown = errors.New("steam: an earlier Workshop item creation has no recorded answer")
-	ErrNoSteamAPI    = errors.New("steam: no steam_api64.dll (Steamworks SDK 1.57+) found in the Steam library")
+	ErrNoSteamAPI    = errors.New("steam: steam_api64.dll is not set up: no installed Steam game has one (Steamworks SDK 1.57+) to copy into tools\\steamworks")
 	ErrSteam         = errors.New("steam: the Steam client refused")
 )
 
@@ -31,11 +32,13 @@ const itemsFile = "steam-items.json"
 
 // Options configures the Client.
 type Options struct {
-	DataDir string // data dir: secrets\steam-items.json, tools\steamugc
+	DataDir string // data dir: secrets\steam-items.json, tools\steamugc, tools\steamworks
 	Exe     string // the helper binary (default: this executable)
-	DLL     string // steam_api64.dll override (default: found in the Steam library)
-	// Spawn runs the helper (tests: a fake); default exec with a timeout.
-	Spawn func(ctx context.Context, exe string, env []string, stdin []byte) ([]byte, error)
+	// Find locates a steam_api64.dll to copy into tools\steamworks once
+	// (default: the newest usable one of the installed Steam games; tests: a fake).
+	Find func() (string, error)
+	// Spawn runs the helper in dir (tests: a fake); default exec with a timeout.
+	Spawn func(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error)
 	Now   func() time.Time
 }
 
@@ -43,6 +46,8 @@ type Options struct {
 type Client struct {
 	opts Options
 	mu   sync.Mutex
+	pmu  sync.Mutex     // provisioning steam_api64.dll
+	prog tools.Progress // its status
 }
 
 // New returns the client.
@@ -53,16 +58,19 @@ func New(opts Options) *Client {
 	if opts.Spawn == nil {
 		opts.Spawn = spawn
 	}
+	if opts.Find == nil {
+		opts.Find = findDLL
+	}
 	return &Client{opts: opts}
 }
 
-func spawn(ctx context.Context, exe string, env []string, stdin []byte) ([]byte, error) {
+func spawn(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, HelperArg)
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = bytes.NewReader(stdin)
-	cmd.Dir = os.TempDir()
+	cmd.Dir = dir
 	hideWindow(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -92,14 +100,6 @@ func (c *Client) items() (map[string]item, error) {
 
 func (c *Client) saveItems(m map[string]item) error { return secret.WriteJSON(c.itemsPath(), m) }
 
-// steamAPI resolves the DLL.
-func (c *Client) steamAPI() (string, error) {
-	if c.opts.DLL != "" {
-		return c.opts.DLL, nil
-	}
-	return findDLL()
-}
-
 func (c *Client) exe() (string, error) {
 	if c.opts.Exe != "" {
 		return c.opts.Exe, nil
@@ -119,7 +119,7 @@ func (c *Client) run(ctx context.Context, job Job) (Result, error) {
 	}
 	in, _ := json.Marshal(job)
 	app := strconv.FormatUint(uint64(job.AppID), 10)
-	out, runErr := c.opts.Spawn(ctx, exe, []string{EnvDLL + "=" + dll, "SteamAppId=" + app, "SteamGameId=" + app}, in)
+	out, runErr := c.opts.Spawn(ctx, exe, filepath.Dir(dll), []string{EnvDLL + "=" + dll, "SteamAppId=" + app, "SteamGameId=" + app}, in)
 	var res Result
 	if err := json.Unmarshal(bytes.TrimSpace(out), &res); err != nil {
 		if runErr == nil {
@@ -202,7 +202,7 @@ func (c *Client) Create(ctx context.Context, key string, appID uint32, dryRun bo
 			ErrCreateUnknown, e.StartedAt.UTC().Format(time.RFC3339), key, e.AppID, e.AppID)
 	}
 	if dryRun {
-		_, derr := c.steamAPI()
+		derr := c.canProvision()
 		plan := fmt.Sprintf("ISteamUGC::CreateItem(app %d, community) through the running Steam client, sent once; the new id is recorded before anything else", appID)
 		if derr != nil {
 			plan += "; not ready: " + derr.Error()
@@ -305,7 +305,7 @@ func (c *Client) SetPage(ctx context.Context, appID uint32, id uint64, p Page, c
 		for _, t := range p.Texts {
 			out.Plan = append(out.Plan, PlanText{Language: t.Language, Title: t.Title, Chars: len([]rune(t.Description))})
 		}
-		if _, err := c.steamAPI(); err != nil {
+		if err := c.canProvision(); err != nil {
 			return out, err
 		}
 		return out, nil

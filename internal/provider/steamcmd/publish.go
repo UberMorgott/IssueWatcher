@@ -139,7 +139,7 @@ func (w *Workshop) ready() error {
 	if s.Expired {
 		return ErrRelogin
 	}
-	_, _, err = w.steamcmd()
+	_, err = w.steamcmd()
 	return err
 }
 
@@ -404,7 +404,7 @@ func (w *Workshop) Publish(ctx context.Context, project provider.Project, req pr
 	vdfPath := filepath.Join(w.opts.DataDir, "tools", "steamcmd", "builds", id+".vdf")
 
 	s, uerr := w.user()
-	exe, _, xerr := w.steamcmd()
+	exe, xerr := w.steamcmd()
 	if req.DryRun {
 		res.Plan = w.plan(id, appID, dir, note, m, s.User, errors.Join(uerr, xerr))
 		return res, nil

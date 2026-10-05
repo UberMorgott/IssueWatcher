@@ -13,13 +13,13 @@ package steamcmd
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -29,6 +29,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/conpty"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/secret"
+	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
 // Platform is the provider id the publisher serves.
@@ -44,7 +45,7 @@ const settingsFile = "steamcmd.json"
 var (
 	ErrNoLogin    = fmt.Errorf("steam: no steamcmd sign-in (Settings › Платформы › Steam › Вход для загрузки): %w", provider.ErrNoUploadAuth)
 	ErrRelogin    = fmt.Errorf("steam: the steamcmd sign-in expired, sign in again (Settings › Платформы › Steam › Вход для загрузки): %w", provider.ErrUploadAuthRefused)
-	ErrNoSteamCMD = fmt.Errorf("steam: steamcmd not found (Settings › Платформы › Steam › Вход для загрузки › Скачать): %w", provider.ErrNoUploadAuth)
+	ErrNoSteamCMD = fmt.Errorf("steam: steamcmd is not set up yet (Settings › Платформы › Steam › Инструменты): %w", provider.ErrNoUploadAuth)
 	ErrBusy       = errors.New("steam: steamcmd is busy (a sign-in or an upload is running)")
 )
 
@@ -62,10 +63,8 @@ type Options struct {
 	Site     string // https://steamcommunity.com (tests)
 	Download string // DownloadURL override (tests)
 	Run      Runner // default conpty.Start
-	// Candidates are extra places to look for steamcmd.exe (default: the
-	// drives' top three folder levels, see locate).
-	Candidates func() []string
-	Now        func() time.Time
+	Log      func(msg string, err error)
+	Now      func() time.Time
 	// OnRelogin is called once when a run finds the cached sign-in expired.
 	OnRelogin func()
 	// Timeouts: sign-in (default 10 min: the first run updates steamcmd),
@@ -80,6 +79,7 @@ type Workshop struct {
 	mu   sync.Mutex // settings + login state
 	cur  *loginRun
 	last LoginState
+	prog tools.Progress // steamcmd's provisioning
 }
 
 var _ provider.Publisher = (*Workshop)(nil)
@@ -103,8 +103,8 @@ func New(opts Options) *Workshop {
 			return conpty.Start(exe, args, conpty.Options{Dir: dir})
 		}
 	}
-	if opts.Candidates == nil {
-		opts.Candidates = driveCandidates
+	if opts.Log == nil {
+		opts.Log = func(string, error) {}
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -125,9 +125,11 @@ func New(opts Options) *Workshop {
 
 // settings is data\secrets\steamcmd.json (owner-only, DPAPI): no password.
 type settings struct {
-	User       string    `json:"user,omitempty"`
-	Path       string    `json:"path,omitempty"`  // steamcmd.exe
-	Found      bool      `json:"found,omitempty"` // Path was found on the drives, not set
+	User string `json:"user,omitempty"`
+	// Path / Found: a steamcmd outside the app folder used by older versions;
+	// only read once to carry its sign-in cache over (migrate), then dropped.
+	Path       string    `json:"path,omitempty"`
+	Found      bool      `json:"found,omitempty"`
 	LoggedInAt time.Time `json:"loggedInAt,omitzero"`
 	CheckedAt  time.Time `json:"checkedAt,omitzero"`
 	Expired    bool      `json:"expired,omitempty"`
@@ -159,55 +161,34 @@ func (w *Workshop) update(f func(*settings)) (settings, error) {
 
 // Status is the non-secret view for Settings › Платформы.
 type Status struct {
-	SteamCMD   string     `json:"steamcmd,omitempty"` // steamcmd.exe in use ("" = none)
-	Source     string     `json:"source,omitempty"`   // app | found | path | configured
-	User       string     `json:"user,omitempty"`
-	LoggedIn   bool       `json:"loggedIn"` // a cached sign-in that last worked
-	Expired    bool       `json:"expired,omitempty"`
-	LoggedInAt string     `json:"loggedInAt,omitempty"`
-	CheckedAt  string     `json:"checkedAt,omitempty"`
-	Login      LoginState `json:"login"`
+	SteamCMD   string       `json:"steamcmd,omitempty"` // the app's steamcmd.exe ("" = not set up yet)
+	Tool       tools.Status `json:"tool"`
+	User       string       `json:"user,omitempty"`
+	LoggedIn   bool         `json:"loggedIn"` // a cached sign-in that last worked
+	Expired    bool         `json:"expired,omitempty"`
+	LoggedInAt string       `json:"loggedInAt,omitempty"`
+	CheckedAt  string       `json:"checkedAt,omitempty"`
+	Login      LoginState   `json:"login"`
 }
 
-func stamp(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
+func stamp(t time.Time) string { return tools.Stamp(t) }
 
-// Status reports steamcmd and the sign-in (finds steamcmd when none is set).
+// Status reports steamcmd and the sign-in.
 func (w *Workshop) Status() (Status, error) {
-	exe, src, _ := w.steamcmd()
+	exe, _ := w.steamcmd()
+	tool := w.Tool()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	s, err := w.load()
 	if err != nil {
 		return Status{}, err
 	}
-	st := Status{SteamCMD: exe, Source: src, User: s.User, LoggedIn: s.User != "" && !s.Expired && !s.LoggedInAt.IsZero(),
+	st := Status{SteamCMD: exe, Tool: tool, User: s.User, LoggedIn: s.User != "" && !s.Expired && !s.LoggedInAt.IsZero(),
 		Expired: s.Expired, LoggedInAt: stamp(s.LoggedInAt), CheckedAt: stamp(s.CheckedAt), Login: w.last}
 	if w.cur != nil {
 		st.Login = w.cur.state()
 	}
 	return st, nil
-}
-
-// SetPath sets steamcmd.exe ("" = find it again).
-func (w *Workshop) SetPath(path string) (Status, error) {
-	path = strings.TrimSpace(path)
-	if path != "" {
-		if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Base(path), "steamcmd.exe") {
-			return Status{}, fmt.Errorf("%w: the full path of steamcmd.exe", provider.ErrBadPublish)
-		}
-		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
-			return Status{}, fmt.Errorf("%w: %s not found", provider.ErrBadPublish, path)
-		}
-	}
-	if _, err := w.update(func(s *settings) { s.Path, s.Found = path, false }); err != nil {
-		return Status{}, err
-	}
-	return w.Status()
 }
 
 // Forget drops the stored user and sign-in state (steamcmd's own cache stays
@@ -219,10 +200,13 @@ func (w *Workshop) Forget() (Status, error) {
 	return w.Status()
 }
 
-// --- locating and installing steamcmd -----------------------------------------
+// --- provisioning steamcmd ----------------------------------------------------
 
+// steamcmd lives only in data\tools\steamcmd (portable: no PATH lookup, no
+// other program's folder); its sign-in cache (config\config.vdf) and its
+// self-update stay there too.
 func (w *Workshop) appExe() string {
-	return filepath.Join(w.opts.DataDir, "tools", "steamcmd", "steamcmd.exe")
+	return filepath.Join(tools.Dir(w.opts.DataDir, "steamcmd"), "steamcmd.exe")
 }
 
 func isFile(p string) bool {
@@ -230,91 +214,105 @@ func isFile(p string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-// steamcmd is the steamcmd.exe to use: the configured one, the app's own
-// download, one on PATH, else one found on the drives (remembered).
-func (w *Workshop) steamcmd() (string, string, error) {
-	w.mu.Lock()
-	s, err := w.load()
-	w.mu.Unlock()
-	if err != nil {
-		return "", "", err
-	}
-	if s.Path != "" && isFile(s.Path) {
-		if strings.EqualFold(filepath.Clean(s.Path), filepath.Clean(w.appExe())) {
-			return s.Path, "app", nil
-		}
-		if s.Found {
-			return s.Path, "found", nil
-		}
-		return s.Path, "configured", nil
-	}
+// steamcmd is the app's own steamcmd.exe (ErrNoSteamCMD until provisioned).
+func (w *Workshop) steamcmd() (string, error) {
 	if p := w.appExe(); isFile(p) {
-		return p, "app", nil
+		return p, nil
 	}
-	if p, err := exec.LookPath("steamcmd.exe"); err == nil {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs, "path", nil
-		}
-	}
-	for _, p := range w.opts.Candidates() {
-		if isFile(p) {
-			_, _ = w.update(func(s *settings) { s.Path, s.Found = p, true })
-			return p, "found", nil
-		}
-	}
-	return "", "", ErrNoSteamCMD
+	return "", ErrNoSteamCMD
 }
 
-// candidatePatterns are where people unpack steamcmd: <drive>\steamcmd,
-// <drive>\<dir>\steamcmd, <drive>\<dir>\<dir>\steamcmd.
-var candidatePatterns = []string{`steamcmd\steamcmd.exe`, `*\steamcmd\steamcmd.exe`, `*\*\steamcmd\steamcmd.exe`}
-
-// driveCandidates globs candidatePatterns on every drive letter that exists.
-func driveCandidates() []string {
-	var out []string
-	for d := 'C'; d <= 'Z'; d++ {
-		root := string(d) + `:\`
-		if _, err := os.Stat(root); err != nil {
-			continue
-		}
-		for _, pat := range candidatePatterns {
-			m, _ := filepath.Glob(root + pat)
-			out = append(out, m...)
+// Tool is steamcmd's provisioning status.
+func (w *Workshop) Tool() tools.Status {
+	st := tools.Status{Name: "steamcmd", Source: w.opts.Download}
+	ready := isFile(w.appExe())
+	if ready {
+		st.Path = w.appExe()
+		if fi, err := os.Stat(st.Path); err == nil {
+			st.At = tools.Stamp(fi.ModTime())
 		}
 	}
-	return out
+	w.prog.Apply(&st, ready)
+	return st
 }
 
-// Install downloads Valve's steamcmd.zip into data\tools\steamcmd (the
-// owner's click) and uses it. steamcmd updates itself on its first run.
+// ensure provisions steamcmd when it is missing (a sign-in or an upload
+// before the startup provisioning finished).
+func (w *Workshop) ensure(ctx context.Context) (string, error) {
+	if p, err := w.steamcmd(); err == nil {
+		return p, nil
+	}
+	if _, err := w.Install(ctx); err != nil {
+		return "", err
+	}
+	return w.steamcmd()
+}
+
+// Provision sets steamcmd up once (startup, in the background; the
+// Settings button): downloads it when missing and carries an older setup's
+// sign-in over. Errors also show in Tool.
+func (w *Workshop) Provision(ctx context.Context) (tools.Status, error) {
+	_, err := w.Install(ctx)
+	if err != nil && !errors.Is(err, tools.ErrBusy) {
+		w.opts.Log("steamcmd provisioning failed", err)
+	}
+	return w.Tool(), err
+}
+
+// Install downloads Valve's steamcmd.zip into data\tools\steamcmd when it is
+// not there yet (automatic at startup; Settings › Платформы retries it) and
+// takes over the sign-in cache of a steamcmd the app used before. steamcmd
+// updates itself in that folder on its first run.
 func (w *Workshop) Install(ctx context.Context) (Status, error) {
-	if !w.run.TryLock() {
-		return Status{}, ErrBusy
+	if !w.prog.Begin() {
+		return Status{}, tools.ErrBusy
 	}
-	defer w.run.Unlock()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.opts.Download, nil)
+	err := w.install(ctx)
+	w.prog.End(err)
 	if err != nil {
 		return Status{}, err
 	}
+	return w.Status()
+}
+
+func (w *Workshop) install(ctx context.Context) error {
+	if !isFile(w.appExe()) {
+		if !w.run.TryLock() {
+			return tools.ErrBusy
+		}
+		err := w.download(ctx)
+		w.run.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+	return w.migrate()
+}
+
+func (w *Workshop) download(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.opts.Download, nil)
+	if err != nil {
+		return err
+	}
 	res, err := w.opts.HTTP.Do(req)
 	if err != nil {
-		return Status{}, fmt.Errorf("steam: download steamcmd: %w", err)
+		return fmt.Errorf("steam: download steamcmd: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return Status{}, fmt.Errorf("steam: download steamcmd: HTTP %d", res.StatusCode)
+		return fmt.Errorf("steam: download steamcmd: HTTP %d", res.StatusCode)
 	}
 	const maxZip = 32 << 20
 	b, err := io.ReadAll(io.LimitReader(res.Body, maxZip+1))
 	if err != nil {
-		return Status{}, fmt.Errorf("steam: download steamcmd: %w", err)
+		return fmt.Errorf("steam: download steamcmd: %w", err)
 	}
 	if len(b) > maxZip {
-		return Status{}, errors.New("steam: download steamcmd: unexpectedly large")
+		return errors.New("steam: download steamcmd: unexpectedly large")
 	}
-	zr, err := zip.NewReader(strings.NewReader(string(b)), int64(len(b)))
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
 	if err != nil {
-		return Status{}, fmt.Errorf("steam: steamcmd.zip: %w", err)
+		return fmt.Errorf("steam: steamcmd.zip: %w", err)
 	}
 	var exe *zip.File
 	for _, f := range zr.File {
@@ -323,36 +321,58 @@ func (w *Workshop) Install(ctx context.Context) (Status, error) {
 		}
 	}
 	if exe == nil {
-		return Status{}, errors.New("steam: steamcmd.zip has no steamcmd.exe")
+		return errors.New("steam: steamcmd.zip has no steamcmd.exe")
 	}
 	dst := w.appExe()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return Status{}, err
+		return err
 	}
 	rc, err := exe.Open()
 	if err != nil {
-		return Status{}, err
+		return err
 	}
 	defer func() { _ = rc.Close() }()
 	tmp := dst + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o700) //nolint:gosec // G302: an executable
 	if err != nil {
-		return Status{}, err
+		return err
 	}
 	if _, err := io.Copy(f, io.LimitReader(rc, maxZip)); err != nil {
 		_ = f.Close()
-		return Status{}, err
+		_ = os.Remove(tmp)
+		return err
 	}
 	if err := f.Close(); err != nil {
-		return Status{}, err
+		_ = os.Remove(tmp)
+		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		return Status{}, err
+	return os.Rename(tmp, dst)
+}
+
+// migrate: an older version ran a steamcmd from another folder (settings
+// Path). Its sign-in cache (config\*.vdf) is copied into the app's steamcmd
+// once, when the app's has none, and the old path is dropped for good. A
+// cache that does not carry over is an expired sign-in: the owner signs in
+// once more in the UI.
+func (w *Workshop) migrate() error {
+	s, err := w.update(func(*settings) {})
+	if err != nil || s.Path == "" {
+		return err
 	}
-	if _, err := w.update(func(s *settings) { s.Path, s.Found = dst, false }); err != nil {
-		return Status{}, err
+	old := filepath.Dir(s.Path)
+	if !strings.EqualFold(filepath.Clean(old), filepath.Clean(filepath.Dir(w.appExe()))) {
+		dst := filepath.Join(filepath.Dir(w.appExe()), "config")
+		if !isFile(filepath.Join(dst, "config.vdf")) {
+			ms, _ := filepath.Glob(filepath.Join(old, "config", "*.vdf"))
+			for _, m := range ms {
+				if _, err := tools.CopyFile(m, filepath.Join(dst, filepath.Base(m)), 16<<20); err != nil {
+					w.opts.Log("steamcmd: sign-in cache not carried over", err)
+				}
+			}
+		}
 	}
-	return w.Status()
+	_, err = w.update(func(s *settings) { s.Path, s.Found = "", false })
+	return err
 }
 
 // --- console output -----------------------------------------------------------

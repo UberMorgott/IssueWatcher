@@ -915,15 +915,26 @@ export interface SteamLoginState {
 
 /** GET /api/providers/steam/upload: steamcmd and its cached sign-in for Workshop uploads (no password stored). */
 export interface SteamUploadStatus {
-  /** steamcmd.exe in use (absent = none found). */
+  /** the app's own steamcmd.exe in data\\tools\\steamcmd (absent = not set up yet). */
   steamcmd?: string
-  source?: 'app' | 'found' | 'path' | 'configured'
+  tool: ToolStatus
   user?: string
   loggedIn: boolean
   expired?: boolean
   loggedInAt?: string
   checkedAt?: string
   login: SteamLoginState
+}
+
+/** A helper the app provisions next to its binary (data\\tools): GET /api/tools. */
+export interface ToolStatus {
+  name: 'steamcmd' | 'steamworks' | string
+  state: 'missing' | 'working' | 'ready' | 'error'
+  path?: string
+  /** where it came from: the download URL or the game folder it was copied from */
+  source?: string
+  error?: string
+  at?: string
 }
 
 // --- Publishing a mod file version (Nexus, Phase 7): internal/provider/publish.go, internal/api/publish.go.

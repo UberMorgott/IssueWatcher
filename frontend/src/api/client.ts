@@ -36,6 +36,7 @@ import type {
   CurseForgeUploadStatus,
   SteamLoginState,
   SteamUploadStatus,
+  ToolStatus,
   ModPage,
   ModPageEdit,
   ModPageSave,
@@ -301,8 +302,10 @@ export const api = {
   steamUploadCancel: () => call<void>('POST', '/api/providers/steam/upload/cancel'),
   steamUploadCheck: () => call<SteamUploadStatus>('POST', '/api/providers/steam/upload/check'),
   steamUploadInstall: () => call<SteamUploadStatus>('POST', '/api/providers/steam/upload/install'),
-  steamUploadPath: (path: string) => call<SteamUploadStatus>('PUT', '/api/providers/steam/upload/path', { path }),
   steamUploadForget: () => call<SteamUploadStatus>('DELETE', '/api/providers/steam/upload'),
+  /** Helpers in data\\tools (steamcmd, steam_api64.dll): status and a manual retry. */
+  tools: () => call<{ tools: ToolStatus[] }>('GET', '/api/tools'),
+  provisionTool: (name: string) => call<ToolStatus>('POST', `/api/tools/${encodeURIComponent(name)}/provision`),
   // --- publishing (Nexus): targets, dry run (200 PublishResult) / start (202 PublishTask), task, cancel/forget
   publishTargets: (id: number) => call<PublishTargets>('GET', `/api/projects/${id}/publish/targets`),
   publishPlan: (id: number, req: PublishRequest) => call<PublishResult>('POST', `/api/projects/${id}/publish`, { ...req, dryRun: true }),

@@ -90,7 +90,7 @@ func newModPlatforms(cfgs *config.Store, st *store.Store, log *slog.Logger, grou
 		nexusKeys:    nexus.NewKeys(nexus.KeysOptions{Dir: filepath.Join(dataDir, "secrets"), Version: Version}),
 		factorioKeys: factorio.NewKeys(factorio.KeysOptions{Dir: filepath.Join(dataDir, "secrets")}),
 		cfUpload:     curseforge.NewUploader(curseforge.UploadOptions{Dir: filepath.Join(dataDir, "secrets")})}
-	m.workshop = steamcmd.New(steamcmd.Options{DataDir: dataDir, OnRelogin: func() {
+	m.workshop = steamcmd.New(steamcmd.Options{DataDir: dataDir, Log: func(msg string, err error) { log.Warn(msg, "err", err) }, OnRelogin: func() {
 		log.Warn("steamcmd sign-in expired: sign in again in Settings › Платформы › Steam")
 		if m.onRelogin != nil {
 			m.onRelogin(steam.Platform, "Steam (steamcmd)")
@@ -892,5 +892,21 @@ func checkState(err error) (string, string, string) {
 		return api.PlatformSignedOut, err.Error(), api.CodeNotSignedIn
 	default:
 		return api.PlatformError, err.Error(), api.ErrorCode(err)
+	}
+}
+
+// provisionTools sets the helpers up in data\tools once, in the background
+// (portable: nothing is installed or used outside the app folder). Failures
+// show in Settings › Платформы, which retries them.
+func provisionTools(log *slog.Logger, ts ...api.Tool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	for _, t := range ts {
+		st, err := t.Provision(ctx)
+		if err != nil {
+			log.Warn("tool not ready", "tool", st.Name, "err", err)
+			continue
+		}
+		log.Info("tool ready", "tool", st.Name, "path", st.Path)
 	}
 }

@@ -345,6 +345,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	if err != nil {
 		log.Error("session secret: per-run fallback", "err", err) // tabs sign in again after a restart
 	}
+	ugc := steamugc.New(steamugc.Options{DataDir: dataDir})
 	srv, err = api.New(context.Background(), api.Options{
 		Assets:         issuewatcher.Assets(),
 		PreferredPort:  preferred,
@@ -375,7 +376,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		NexusKey:         mods.nexusKeys,
 		CurseForgeUpload: mods.cfUpload,
 		SteamUpload:      mods.workshop,
-		Workshop:         steamugc.New(steamugc.Options{DataDir: dataDir}),
+		Workshop:         ugc,
+		Tools:            []api.Tool{mods.workshop, ugc},
 		Publishers:       mods.Publisher,
 		PageEditors:      mods.PageEditor,
 		Platforms:        mods,
@@ -385,6 +387,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		return err
 	}
 	serving.Store(true)
+	if !headless {
+		go provisionTools(log, mods.workshop, ugc)
+	}
 	if err := instance.WritePort(dataDir, srv.Port()); err != nil {
 		log.Error("remember port", "err", err)
 	}

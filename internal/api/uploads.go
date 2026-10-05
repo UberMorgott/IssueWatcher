@@ -9,6 +9,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steamcmd"
+	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
 // CurseForgeUpload is the CurseForge upload token store (curseforge.Uploader).
@@ -26,7 +27,6 @@ type SteamUpload interface {
 	CancelLogin()
 	CheckSession(ctx context.Context) (steamcmd.Status, error)
 	Install(ctx context.Context) (steamcmd.Status, error)
-	SetPath(path string) (steamcmd.Status, error)
 	Forget() (steamcmd.Status, error)
 }
 
@@ -42,8 +42,7 @@ type SteamUpload interface {
 //	POST   /api/providers/steam/upload/code        {code} → login state
 //	POST   /api/providers/steam/upload/cancel      → 204
 //	POST   /api/providers/steam/upload/check       cached sign-in → status; 409 {code: relogin|no_login|no_steamcmd|busy}
-//	POST   /api/providers/steam/upload/install     downloads Valve's steamcmd.zip → status
-//	PUT    /api/providers/steam/upload/path        {path} ("" = find again) → status
+//	POST   /api/providers/steam/upload/install     sets steamcmd up in data\tools\steamcmd (Valve's steamcmd.zip) → status
 //	DELETE /api/providers/steam/upload             forget the account → status
 func (s *Server) registerUploads(mux *http.ServeMux) {
 	if s.opts.CurseForgeUpload != nil {
@@ -58,7 +57,6 @@ func (s *Server) registerUploads(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/providers/steam/upload/cancel", s.handleSteamUploadCancel)
 		mux.HandleFunc("POST /api/providers/steam/upload/check", s.handleSteamUploadCheck)
 		mux.HandleFunc("POST /api/providers/steam/upload/install", s.handleSteamUploadInstall)
-		mux.HandleFunc("PUT /api/providers/steam/upload/path", s.handleSteamUploadPath)
 		mux.HandleFunc("DELETE /api/providers/steam/upload", s.handleSteamUploadForget)
 	}
 }
@@ -136,7 +134,7 @@ func (s *Server) steamUploadError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, steamcmd.ErrBadLogin), errors.Is(err, provider.ErrBadPublish):
 		code, status = "bad_login", http.StatusBadRequest
-	case errors.Is(err, steamcmd.ErrBusy):
+	case errors.Is(err, steamcmd.ErrBusy), errors.Is(err, tools.ErrBusy):
 		code, status = "busy", http.StatusConflict
 	case errors.Is(err, steamcmd.ErrNoSteamCMD):
 		code, status = "no_steamcmd", http.StatusConflict
@@ -216,24 +214,6 @@ func (s *Server) handleSteamUploadInstall(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.opts.Log.Info("steamcmd installed", "path", st.SteamCMD)
-	writeJSON(w, http.StatusOK, st)
-}
-
-func (s *Server) handleSteamUploadPath(w http.ResponseWriter, r *http.Request) {
-	if s.refuseAgent(w, r) {
-		return
-	}
-	var req struct {
-		Path string `json:"path"`
-	}
-	if !decodeBody(w, r, &req) {
-		return
-	}
-	st, err := s.opts.SteamUpload.SetPath(req.Path)
-	if err != nil {
-		s.steamUploadError(w, err)
-		return
-	}
 	writeJSON(w, http.StatusOK, st)
 }
 

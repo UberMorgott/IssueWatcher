@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
 // The test binary doubles as the helper (os.Args[1] == HelperArg): with
@@ -75,7 +77,9 @@ type harness struct {
 	dir   string
 	data  string
 	mode  string
+	src   string // the fake game's steam_api64.dll
 	spawn atomic.Int32
+	finds atomic.Int32
 }
 
 func newHarness(t *testing.T) *harness {
@@ -85,11 +89,28 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.c = New(Options{DataDir: h.data, Exe: exe, DLL: `D:\Steam\steamapps\common\Game\steam_api64.dll`,
+	h.src = filepath.Join(t.TempDir(), "Game", "steam_api64.dll")
+	if err := os.MkdirAll(filepath.Dir(h.src), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.src, []byte("MZ fake steam_api64"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.c = New(Options{DataDir: h.data, Exe: exe,
+		Find: func() (string, error) {
+			h.finds.Add(1)
+			if h.src == "" {
+				return "", ErrNoSteamAPI
+			}
+			return h.src, nil
+		},
 		Now: func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) },
-		Spawn: func(ctx context.Context, exe string, env []string, stdin []byte) ([]byte, error) {
+		Spawn: func(ctx context.Context, exe, dir string, env []string, stdin []byte) ([]byte, error) {
 			h.spawn.Add(1)
-			return spawn(ctx, exe, append(env, "FAKE_UGC="+h.dir, "FAKE_UGC_MODE="+h.mode), stdin)
+			if dir != filepath.Join(h.data, "tools", "steamworks") {
+				t.Errorf("helper runs in %s", dir)
+			}
+			return spawn(ctx, exe, dir, append(env, "FAKE_UGC="+h.dir, "FAKE_UGC_MODE="+h.mode), stdin)
 		}})
 	return h
 }
@@ -124,7 +145,7 @@ func TestCreateOnceAndReuse(t *testing.T) {
 		t.Fatalf("create: %+v %v", got, err)
 	}
 	cs := h.calls(t)
-	if len(cs) != 2 || cs[0]["appEnv"] != "839770" || cs[0]["dll"] != `D:\Steam\steamapps\common\Game\steam_api64.dll` || cs[1]["call"] != "create" {
+	if len(cs) != 2 || cs[0]["appEnv"] != "839770" || cs[0]["dll"] != filepath.Join(h.data, "tools", "steamworks", "steam_api64.dll") || cs[1]["call"] != "create" {
 		t.Fatalf("calls %v", cs)
 	}
 	again, err := h.c.Create(context.Background(), key, 839770, false)
@@ -290,8 +311,12 @@ func TestRealWhoAmI(t *testing.T) {
 		t.Skip("STEAMUGC_REAL not set")
 	}
 	exe, _ := os.Executable()
-	c := New(Options{DataDir: t.TempDir(), Exe: exe})
+	data := t.TempDir()
+	c := New(Options{DataDir: data, Exe: exe})
 	dll, err := c.steamAPI()
+	if err == nil && !strings.HasPrefix(dll, filepath.Join(data, "tools", "steamworks")) {
+		t.Fatalf("dll %s outside the tools folder", dll)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,4 +330,74 @@ func TestRealWhoAmI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("signed in as %s", sid)
+}
+
+// TestProvisionCopiesOnceAndChecksTheHash: the game's DLL is copied into
+// tools\steamworks once (the source is not looked up again), a changed copy
+// is replaced, and the helper only ever gets the tools copy.
+func TestProvisionCopiesOnceAndChecksTheHash(t *testing.T) {
+	h := newHarness(t)
+	if st := h.c.Tool(); st.State != tools.Missing || st.Path != "" {
+		t.Fatalf("before: %+v", st)
+	}
+	st, err := h.c.Provision(context.Background())
+	dst := filepath.Join(h.data, "tools", "steamworks", "steam_api64.dll")
+	if err != nil || st.State != tools.Ready || st.Path != dst || st.Source != h.src || st.At == "" {
+		t.Fatalf("provision: %+v %v", st, err)
+	}
+	if b := h.toolFile(t); b != "MZ fake steam_api64" {
+		t.Fatalf("copy %q", b)
+	}
+	if _, err := h.c.Provision(context.Background()); err != nil || h.finds.Load() != 1 {
+		t.Fatalf("second provision: %v finds %d", err, h.finds.Load())
+	}
+	if _, err := h.c.WhoAmI(context.Background(), 839770); err != nil || h.finds.Load() != 1 {
+		t.Fatalf("whoami: %v finds %d", err, h.finds.Load())
+	}
+	if err := os.WriteFile(dst, []byte("tampered"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.c.Tool(); st.State != tools.Missing {
+		t.Fatalf("tampered copy counts: %+v", st)
+	}
+	if _, err := h.c.WhoAmI(context.Background(), 839770); err != nil || h.finds.Load() != 2 {
+		t.Fatalf("recopy: %v finds %d", err, h.finds.Load())
+	}
+	if b := h.toolFile(t); b != "MZ fake steam_api64" {
+		t.Fatalf("recopied %q", b)
+	}
+}
+
+// TestProvisionNoSourceAndDryRunWritesNothing: without a game DLL the tool
+// reports the error; a dry run plans without copying anything.
+func TestProvisionNoSourceAndDryRunWritesNothing(t *testing.T) {
+	h := newHarness(t)
+	if dry, err := h.c.Create(context.Background(), key, 839770, true); err != nil || !dry.DryRun || strings.Contains(dry.Plan, "not ready") {
+		t.Fatalf("dry run: %+v %v", dry, err)
+	}
+	if _, err := os.Stat(filepath.Join(h.data, "tools", "steamworks")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry run wrote the tools folder: %v", err)
+	}
+	h.src = ""
+	if _, err := h.c.Provision(context.Background()); !errors.Is(err, ErrNoSteamAPI) {
+		t.Fatalf("no source: %v", err)
+	}
+	if st := h.c.Tool(); st.State != tools.Failed || st.Error == "" {
+		t.Fatalf("status after failure: %+v", st)
+	}
+	if _, err := h.c.WhoAmI(context.Background(), 839770); !errors.Is(err, ErrNoSteamAPI) || h.spawn.Load() != 0 {
+		t.Fatalf("whoami without a DLL: %v spawns %d", err, h.spawn.Load())
+	}
+}
+
+// toolFile is the app's copy of steam_api64.dll ("" = none).
+func (h *harness) toolFile(t *testing.T) string {
+	t.Helper()
+	root, err := os.OpenRoot(h.data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	b, _ := root.ReadFile(filepath.Join("tools", "steamworks", "steam_api64.dll"))
+	return string(b)
 }

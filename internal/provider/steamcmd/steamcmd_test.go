@@ -22,6 +22,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/conpty"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/tools"
 )
 
 // The test binary doubles as a fake steamcmd (FAKE_STEAMCMD=<state dir>),
@@ -178,8 +179,8 @@ func newHarness(t *testing.T, env ...string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A steamcmd.exe the publisher finds (the runner starts the test binary).
-	h.exeDir = t.TempDir()
+	// The app's own steamcmd.exe (the runner starts the test binary).
+	h.exeDir = filepath.Join(h.data, "tools")
 	fakeExe := filepath.Join(h.exeDir, "steamcmd", "steamcmd.exe")
 	if err := os.MkdirAll(filepath.Dir(fakeExe), 0o700); err != nil {
 		t.Fatal(err)
@@ -189,8 +190,7 @@ func newHarness(t *testing.T, env ...string) *harness {
 	}
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	h.w = New(Options{DataDir: h.data, HTTP: srv.Client(), APIURL: srv.URL, Site: srv.URL, Now: func() time.Time { return now },
-		Candidates: func() []string { return []string{filepath.Join(h.exeDir, "missing", "steamcmd.exe"), fakeExe} },
-		OnRelogin:  func() { h.relog.Add(1) },
+		OnRelogin: func() { h.relog.Add(1) },
 		Run: func(exe string, args []string, dir string) (Proc, error) {
 			if exe != fakeExe || dir != filepath.Dir(fakeExe) {
 				t.Errorf("runs %s in %s", exe, dir)
@@ -247,7 +247,7 @@ func TestLoginTypesPasswordAndGuardCodeIntoTheConsole(t *testing.T) {
 		t.Fatalf("typed %q", got)
 	}
 	st, _ := h.w.Status()
-	if !st.LoggedIn || st.User != "owner_acc" || st.Source != "found" || !strings.HasSuffix(st.SteamCMD, `steamcmd\steamcmd.exe`) {
+	if !st.LoggedIn || st.User != "owner_acc" || st.Tool.State != tools.Ready || !strings.HasSuffix(st.SteamCMD, `steamcmd\steamcmd.exe`) {
 		t.Fatalf("status %+v", st)
 	}
 	b, _ := os.ReadFile(filepath.Join(h.data, "secrets", settingsFile))
@@ -461,15 +461,89 @@ func TestInstallDownloadsSteamCMD(t *testing.T) {
 	}))
 	defer srv.Close()
 	data := t.TempDir()
-	ws := New(Options{DataDir: data, HTTP: srv.Client(), Download: srv.URL + "/client/installer/steamcmd.zip", Candidates: func() []string { return nil }})
+	ws := New(Options{DataDir: data, HTTP: srv.Client(), Download: srv.URL + "/client/installer/steamcmd.zip"})
 	if st, _ := ws.Status(); st.SteamCMD != "" {
 		t.Fatalf("found before install: %+v", st)
 	}
 	st, err := ws.Install(context.Background())
-	if err != nil || st.Source != "app" || st.SteamCMD != filepath.Join(data, "tools", "steamcmd", "steamcmd.exe") {
+	if err != nil || st.Tool.State != tools.Ready || st.SteamCMD != filepath.Join(data, "tools", "steamcmd", "steamcmd.exe") {
 		t.Fatalf("install: %+v %v", st, err)
 	}
 	if b, _ := os.ReadFile(st.SteamCMD); string(b) != "MZ steamcmd" {
 		t.Fatalf("exe %q", b)
+	}
+}
+
+// TestProvisionDownloadsOnceAndCarriesTheSignInOver: the startup provisioning
+// downloads steamcmd into data\tools\steamcmd once, copies the sign-in cache
+// of the steamcmd an older version used (settings path) and drops that path;
+// a failed download shows in the tool status and the next attempt retries.
+func TestProvisionDownloadsOnceAndCarriesTheSignInOver(t *testing.T) {
+	var zb bytes.Buffer
+	zw := zip.NewWriter(&zb)
+	w, _ := zw.Create("steamcmd.exe")
+	_, _ = io.WriteString(w, "MZ steamcmd")
+	_ = zw.Close()
+	var hits atomic.Int32
+	var down atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write(zb.Bytes())
+	}))
+	defer srv.Close()
+	data := t.TempDir()
+	// An older version's steamcmd outside the app folder with a cached sign-in.
+	old := filepath.Join(t.TempDir(), "steamcmd")
+	if err := os.MkdirAll(filepath.Join(old, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"steamcmd.exe": "MZ old", filepath.Join("config", "config.vdf"): `"InstallConfigStore" { "ConnectCache" { "x" "y" } }`} {
+		if err := os.WriteFile(filepath.Join(old, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ws := New(Options{DataDir: data, HTTP: srv.Client(), Download: srv.URL})
+	if _, err := ws.update(func(s *settings) { s.User, s.Path, s.Found = "owner_acc", filepath.Join(old, "steamcmd.exe"), true }); err != nil {
+		t.Fatal(err)
+	}
+	if exe, err := ws.steamcmd(); !errors.Is(err, ErrNoSteamCMD) || exe != "" {
+		t.Fatalf("the old steamcmd must not be used: %q %v", exe, err)
+	}
+	down.Store(true)
+	if _, err := ws.Provision(context.Background()); err == nil {
+		t.Fatal("a failed download reports no error")
+	}
+	if st := ws.Tool(); st.State != tools.Failed || !strings.Contains(st.Error, "HTTP 503") {
+		t.Fatalf("failed download: %+v", st)
+	}
+	down.Store(false)
+	if _, err := ws.Provision(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(data, "tools", "steamcmd", "steamcmd.exe")
+	st, err := ws.Status()
+	if err != nil || st.Tool.State != tools.Ready || st.SteamCMD != exe || st.Tool.Path != exe || st.User != "owner_acc" {
+		t.Fatalf("after provisioning: %+v %v", st, err)
+	}
+	root, err := os.OpenRoot(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if b, _ := root.ReadFile(filepath.Join("tools", "steamcmd", "config", "config.vdf")); !strings.Contains(string(b), "ConnectCache") {
+		t.Fatalf("sign-in cache not carried over: %q", b)
+	}
+	if s, _ := ws.load(); s.Path != "" || s.Found {
+		t.Fatalf("old path kept: %+v", s)
+	}
+	if st, err := ws.Provision(context.Background()); err != nil || st.State != tools.Ready {
+		t.Fatalf("again: %+v %v", st, err)
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("downloads %d, want 2 (one failed, one ok, none once ready)", hits.Load())
 	}
 }

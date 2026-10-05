@@ -48,7 +48,7 @@ func addWorkshopTools(s *mcp.Server, c *Client) {
 		"create_unknown (the owner checks his Workshop files). On success the item is added to the project's publish profile as target " +
 		"steam:<id> {appId} and linked to the project once the Steam sync lists it (call again to link). The item starts without content " +
 		"or page: then set_workshop_page, and publish versions with release / publish_version. Public effect unless dry_run: run dry_run first." +
-		" Codes: no_steam_api (no steam_api64.dll in the Steam library), steam_refused (Steam not running / not signed in / not owning the game)." + descCallerRefusal},
+		" Codes: no_steam_api (steam_api64.dll not set up: no installed Steam game has one to copy into the app's tools folder), steam_refused (Steam not running / not signed in / not owning the game)." + descCallerRefusal},
 		func(ctx context.Context, in create) (json.RawMessage, error) {
 			return c.CreateWorkshopItem(ctx, in.Project, in.AppID, in.DryRun)
 		})

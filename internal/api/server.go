@@ -86,6 +86,8 @@ type Options struct {
 	SteamUpload      SteamUpload
 	// Workshop creates Steam Workshop items and writes their pages (/api/projects/{id}/steam/*); nil disables it.
 	Workshop WorkshopItems
+	// Tools are the helpers provisioned into data\tools (GET /api/tools).
+	Tools []Tool
 	// Publishers returns the provider that publishes new versions for a
 	// platform, nil when none (/api/projects/{id}/publish, needs Store); nil disables them.
 	Publishers func(platform string) provider.Publisher
@@ -197,6 +199,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		s.registerNexus(mux)
 	}
 	s.registerUploads(mux)
+	s.registerTools(mux)
 	if opts.Workshop != nil && opts.Store != nil {
 		s.registerWorkshop(mux)
 	}

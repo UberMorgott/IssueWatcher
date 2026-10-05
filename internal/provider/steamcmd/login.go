@@ -70,7 +70,9 @@ func (w *Workshop) StartLogin(user, password, code string) (LoginState, error) {
 	case code != "" && !codeRe.MatchString(code):
 		return LoginState{}, fmt.Errorf("%w: Steam Guard code", ErrBadLogin)
 	}
-	exe, _, err := w.steamcmd()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	exe, err := w.ensure(ctx) // not set up yet: download it now
+	cancel()
 	if err != nil {
 		return LoginState{}, err
 	}
@@ -331,7 +333,7 @@ func (w *Workshop) CheckSession(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	exe, _, err := w.steamcmd()
+	exe, err := w.steamcmd()
 	if err != nil {
 		return Status{}, err
 	}
