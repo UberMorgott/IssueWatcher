@@ -72,10 +72,10 @@ func TestMCPTools(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	slices.Sort(names)
-	want := []string{"apply_job_labels", "cancel_job", "cancel_run", "create_pr", "get_autopilot_settings", "get_item", "get_job", "get_job_log", "get_publish_profile",
+	want := []string{"apply_job_labels", "cancel_job", "cancel_run", "create_pr", "get_item", "get_job", "get_job_log", "get_publish_profile",
 		"get_publish_task", "get_run", "list_autopilot_events", "list_item_comments", "list_items", "list_jobs", "list_projects", "list_publish_targets",
 		"list_runs", "pause_autopilot", "plan_release", "publish_version", "push_job", "release", "reply_item", "resume_run", "retry_job",
-		"send_job_reply", "set_autopilot_settings", "set_publish_profile", "skip_step", "start_jobs", "sync_now"}
+		"send_job_reply", "set_publish_profile", "skip_step", "start_jobs", "sync_now"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
 	}
