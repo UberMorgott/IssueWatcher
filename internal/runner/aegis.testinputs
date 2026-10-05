@@ -1,0 +1,4 @@
+# go build ./testdata/fakecli (stdlib only); git and ping work on temporary dirs
+testdata/fakecli/
+../../go.mod
+../../go.sum

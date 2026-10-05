@@ -1,0 +1,7 @@
+# go build . (the whole app binary) and of internal/runner/testdata/fakecli; git on temp repos
+*.go
+../../*.go
+../../frontend/dist/
+../../internal/
+../../go.mod
+../../go.sum
