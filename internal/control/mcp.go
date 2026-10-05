@@ -187,6 +187,9 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		Name        string `json:"name,omitempty" jsonschema:"Nexus: the file version's display name; Factorio: ignored"`
 		Description string `json:"description,omitempty" jsonschema:"Nexus: file description"`
 		Changelog   string `json:"changelog,omitempty" jsonschema:"Nexus: changelog for the version; Factorio: not accepted (the portal reads changelog.txt from the archive)"`
+		Category    string `json:"category,omitempty" jsonschema:"Nexus: main, optional or miscellaneous (default main)"`
+		ArchivePrev bool   `json:"archive_previous,omitempty" jsonschema:"Nexus, new version of file_id only: move the file's current version to Old versions"`
+		UpdateMod   bool   `json:"update_mod_version,omitempty" jsonschema:"Nexus: set the mod's version to version"`
 		DryRun      bool   `json:"dry_run,omitempty" jsonschema:"plan only: return the requests that would be sent, upload nothing"`
 		Wait        bool   `json:"wait,omitempty" jsonschema:"wait until the publish finishes and return the final task (default: return the running task at once)"`
 	}
@@ -195,7 +198,8 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		"never resend after an error without checking get_publish_task and the platform. Returns the publish task (or the dry-run plan)."},
 		func(ctx context.Context, in publish) (json.RawMessage, error) {
 			out, err := c.Publish(ctx, in.Project, PublishRequest{Path: in.Path, Version: in.Version, FileID: in.FileID, NewFile: in.NewFile,
-				Name: in.Name, Description: in.Description, Changelog: in.Changelog, DryRun: in.DryRun})
+				Name: in.Name, Description: in.Description, Category: in.Category, Changelog: in.Changelog,
+				ArchivePrevious: in.ArchivePrev, UpdateModVersion: in.UpdateMod, DryRun: in.DryRun})
 			if err != nil || !in.Wait || in.DryRun {
 				return out, err
 			}

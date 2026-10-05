@@ -72,10 +72,10 @@ func TestMCPTools(t *testing.T) {
 		names = append(names, tl.Name)
 	}
 	slices.Sort(names)
-	want := []string{"apply_job_labels", "cancel_job", "cancel_run", "create_pr", "get_item", "get_job", "get_job_log", "get_publish_profile",
+	want := []string{"apply_job_labels", "cancel_job", "cancel_run", "create_pr", "get_autopilot_settings", "get_item", "get_job", "get_job_log", "get_publish_profile",
 		"get_publish_task", "get_run", "list_autopilot_events", "list_item_comments", "list_items", "list_jobs", "list_projects", "list_publish_targets",
 		"list_runs", "pause_autopilot", "plan_release", "publish_version", "push_job", "release", "reply_item", "resume_run", "retry_job",
-		"send_job_reply", "set_publish_profile", "skip_step", "start_jobs", "sync_now"}
+		"send_job_reply", "set_autopilot_settings", "set_publish_profile", "skip_step", "start_jobs", "sync_now"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tools %v", names)
 	}
@@ -172,10 +172,15 @@ func TestMCPPublish(t *testing.T) {
 	if got[0] != `POST /api/projects/69/publish {"path":"E:\\m.zip","version":"1.1.6","dryRun":true}` {
 		t.Fatalf("dry-run request %q", got[0])
 	}
+	call("publish_version", map[string]any{"project": 69, "path": `E:\m.zip`, "version": "1.1.6", "file_id": "8", "category": "main",
+		"archive_previous": true, "update_mod_version": true, "dry_run": true})
+	if want := `POST /api/projects/69/publish {"fileId":"8","path":"E:\\m.zip","version":"1.1.6","category":"main","archivePrevious":true,"updateModVersion":true,"dryRun":true}`; got[1] != want {
+		t.Fatalf("archive dry-run request %q, want %q", got[1], want)
+	}
 	if out := call("publish_version", map[string]any{"project": 69, "path": `E:\m.zip`, "version": "1.1.6", "wait": true}); !strings.Contains(out, `"done"`) {
 		t.Fatalf("wait: %s", out)
 	}
-	if n := strings.Count(strings.Join(got, "\n"), "POST /api/projects/69/publish"); n != 2 {
+	if n := strings.Count(strings.Join(got, "\n"), "POST /api/projects/69/publish"); n != 3 {
 		t.Fatalf("publish sent %d times: %v", n, got)
 	}
 	if out := call("get_publish_task", map[string]any{"id": "t1"}); !strings.Contains(out, `"t1"`) {

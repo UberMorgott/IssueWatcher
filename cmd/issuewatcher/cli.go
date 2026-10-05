@@ -64,7 +64,8 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   job labels <id> <name>...
   publish targets <projectId>
   publish <projectId> --path ARCHIVE --version V [--file-id ID | --new-file] [--name N]
-          [--description D] [--changelog-file FILE] [--dry-run] [--wait]
+          [--description D] [--category C] [--changelog-file FILE] [--archive-previous]
+          [--update-mod-version] [--dry-run] [--wait]
                       upload an archive as a new mod version on the project's platform
                       (nexus, factorio); public unless --dry-run; --wait polls to the end
   publish status <taskId>
@@ -462,7 +463,10 @@ func (c *cli) publish(args []string) (json.RawMessage, error) {
 	fs.BoolVar(&req.NewFile, "new-file", false, "create a new file (nexus)")
 	fs.StringVar(&req.Name, "name", "", "file version name (nexus)")
 	fs.StringVar(&req.Description, "description", "", "file description (nexus)")
+	fs.StringVar(&req.Category, "category", "", "main, optional or miscellaneous (nexus; default main)")
 	changelog := fs.String("changelog-file", "", "file with the changelog (nexus)")
+	fs.BoolVar(&req.ArchivePrevious, "archive-previous", false, "archive the file's current version (nexus, new version only)")
+	fs.BoolVar(&req.UpdateModVersion, "update-mod-version", false, "set the mod's version to --version (nexus)")
 	fs.BoolVar(&req.DryRun, "dry-run", false, "plan only")
 	wait := fs.Bool("wait", false, "wait until the publish finishes")
 	pos, err := flags(fs, args)

@@ -350,7 +350,11 @@ type PublishRequest struct {
 	Description string `json:"description,omitempty"`
 	Category    string `json:"category,omitempty"`
 	Changelog   string `json:"changelog,omitempty"`
-	DryRun      bool   `json:"dryRun,omitempty"`
+	// ArchivePrevious moves the file's current version to Old versions (Nexus,
+	// new version only); UpdateModVersion sets the mod's version to Version.
+	ArchivePrevious  bool `json:"archivePrevious,omitempty"`
+	UpdateModVersion bool `json:"updateModVersion,omitempty"`
+	DryRun           bool `json:"dryRun,omitempty"`
 }
 
 // PublishTargets lists the project's publishable files and their versions.
