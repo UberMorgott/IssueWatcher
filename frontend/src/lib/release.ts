@@ -118,6 +118,8 @@ export function smokeKindText(kind: string): string {
 export function targetBlock(tg: PlanTarget): string {
   const platform = platformName(tg.platform)
   if (!tg.publishable) return t('release.target.notPublishable', { platform })
+  if (tg.platform === 'steam' && tg.auth === 'no_api_key') return t('release.target.noSteamLogin')
+  if (tg.platform === 'steam' && tg.auth === 'bad_api_key') return t('release.target.steamRelogin')
   if (tg.auth === 'no_api_key') return t('release.target.noKey', { platform })
   if (tg.auth === 'bad_api_key') return t('release.target.badKey', { platform })
   if (!tg.configured) return t(tg.platform === 'nexus' ? 'release.target.noFileId' : 'release.target.notConfigured')

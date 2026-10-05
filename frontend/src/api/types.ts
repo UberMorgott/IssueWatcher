@@ -898,6 +898,34 @@ export interface NexusKeyStatus {
   checkedAt?: string
 }
 
+/** GET/PUT /api/providers/curseforge/upload: the CurseForge upload API token (write-only; never returned). */
+export interface CurseForgeUploadStatus {
+  hasToken: boolean
+  checkedAt?: string
+}
+
+/** idle | starting | need_code | confirm_mobile | ok | failed | cancelled. */
+export type SteamLoginStep = 'idle' | 'starting' | 'need_code' | 'confirm_mobile' | 'ok' | 'failed' | 'cancelled' | ''
+
+export interface SteamLoginState {
+  state: SteamLoginStep
+  error?: string
+  at?: string
+}
+
+/** GET /api/providers/steam/upload: steamcmd and its cached sign-in for Workshop uploads (no password stored). */
+export interface SteamUploadStatus {
+  /** steamcmd.exe in use (absent = none found). */
+  steamcmd?: string
+  source?: 'app' | 'found' | 'path' | 'configured'
+  user?: string
+  loggedIn: boolean
+  expired?: boolean
+  loggedInAt?: string
+  checkedAt?: string
+  login: SteamLoginState
+}
+
 // --- Publishing a mod file version (Nexus, Phase 7): internal/provider/publish.go, internal/api/publish.go.
 
 /** One version of a mod file. */

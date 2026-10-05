@@ -9,6 +9,7 @@ import { useToast } from 'primevue/usetoast'
 import { useI18n } from 'vue-i18n'
 import { encode } from 'uqr'
 import PlatformIcon from '../../components/PlatformIcon.vue'
+import UploadCredentials from './UploadCredentials.vue'
 import { api, type Result } from '../../api/client'
 import type { LoginStatus, ModPlatform, NativePlatform, NexusKeyStatus, PlatformStatus, SteamStatus } from '../../api/types'
 import { useAppStore } from '../../stores/app'
@@ -609,6 +610,12 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
         <i class="pi pi-exclamation-triangle" /> {{ errors.nexusKey }}
       </p>
     </div>
+
+    <!-- CurseForge: upload token; Steam: steamcmd sign-in (publishing) -->
+    <UploadCredentials
+      v-if="c.id === 'curseforge' || c.id === 'steam'"
+      :platform="c.id === 'steam' ? 'steam' : 'curseforge'"
+    />
 
     <!-- Nexus / CurseForge / Factorio: author, optional -->
     <template v-if="c.id !== 'steam' && cfg(c.id)">

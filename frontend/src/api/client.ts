@@ -33,6 +33,9 @@ import type {
   SteamUpdate,
   ProjectLinks,
   NexusKeyStatus,
+  CurseForgeUploadStatus,
+  SteamLoginState,
+  SteamUploadStatus,
   ModPage,
   ModPageEdit,
   ModPageSave,
@@ -286,6 +289,20 @@ export const api = {
   nexusKey: () => call<NexusKeyStatus>('GET', '/api/providers/nexus'),
   saveNexusKey: (apiKey: string) => call<NexusKeyStatus>('PUT', '/api/providers/nexus', { apiKey }),
   checkNexusKey: () => call<NexusKeyStatus>('POST', '/api/providers/nexus/check'),
+  /** CurseForge upload token: status only; PUT stores it after a read-only check, "" removes it. */
+  cfUpload: () => call<CurseForgeUploadStatus>('GET', '/api/providers/curseforge/upload'),
+  saveCfUpload: (token: string) => call<CurseForgeUploadStatus>('PUT', '/api/providers/curseforge/upload', { token }),
+  checkCfUpload: () => call<CurseForgeUploadStatus>('POST', '/api/providers/curseforge/upload/check'),
+  /** steamcmd sign-in for Workshop uploads: the password and code go to steamcmd's console, never stored. */
+  steamUpload: () => call<SteamUploadStatus>('GET', '/api/providers/steam/upload'),
+  steamUploadLogin: (user: string, password: string, code: string) =>
+    call<SteamLoginState>('POST', '/api/providers/steam/upload/login', { user, password, code }),
+  steamUploadCode: (code: string) => call<SteamLoginState>('POST', '/api/providers/steam/upload/code', { code }),
+  steamUploadCancel: () => call<void>('POST', '/api/providers/steam/upload/cancel'),
+  steamUploadCheck: () => call<SteamUploadStatus>('POST', '/api/providers/steam/upload/check'),
+  steamUploadInstall: () => call<SteamUploadStatus>('POST', '/api/providers/steam/upload/install'),
+  steamUploadPath: (path: string) => call<SteamUploadStatus>('PUT', '/api/providers/steam/upload/path', { path }),
+  steamUploadForget: () => call<SteamUploadStatus>('DELETE', '/api/providers/steam/upload'),
   // --- publishing (Nexus): targets, dry run (200 PublishResult) / start (202 PublishTask), task, cancel/forget
   publishTargets: (id: number) => call<PublishTargets>('GET', `/api/projects/${id}/publish/targets`),
   publishPlan: (id: number, req: PublishRequest) => call<PublishResult>('POST', `/api/projects/${id}/publish`, { ...req, dryRun: true }),
