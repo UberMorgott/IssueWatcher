@@ -85,6 +85,7 @@ func outcomeLabel(j store.Job, res runner.Result) string {
 			runner.OutcomeFixedLocal: "исправлено локально", runner.OutcomePushed: "отправлено",
 			runner.OutcomeNotReproduced: "не воспроизводится", runner.OutcomeNeedsInfo: "нужна информация",
 			runner.OutcomeNoCommit: "коммита нет", runner.OutcomeFailed: "ошибка",
+			runner.OutcomeFeedback: "не баг — отзыв", runner.OutcomeQuestion: "вопрос", runner.OutcomeSuggestion: "предложение",
 		}[res.Local.Outcome]
 	}
 	if j.Flow == "reply" {

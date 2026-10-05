@@ -147,12 +147,12 @@ Discussion:
 {comments}
 
 Steps:
-1. Reproduce or confirm the problem from the code. If it does not reproduce or is not a bug, change nothing and report not_reproduced; if the issue lacks information you need, change nothing and report needs_info.
+1. Reproduce or confirm the problem from the code. If it is not a bug report at all, change nothing and report what it is: feedback (thanks, praise or a general comment), question (the reporter asks something) or suggestion (an idea or feature request). If it is a bug report that does not reproduce, change nothing and report not_reproduced; if the issue lacks information you need, change nothing and report needs_info.
 2. Fix it with the smallest correct change; add or update tests when the project has them.
 3. Verify the way this project's rules say (build, tests, linters).
 4. Commit only the files you changed (git add <paths>, never git add -A / git add .), with a message that contains "Fixes #{issue.number}". Leave any other uncommitted changes in the folder alone.
 5. Do NOT push, do not create branches, pull requests or comments; the maintainer pushes.
-Finish with the structured result: status (fixed | not_reproduced | needs_info | failed), summary in the language of the issue (what was wrong, what changed, how it was verified), the commit SHA(s) you made, the verify result, notes.`
+Finish with the structured result: status (fixed | not_reproduced | needs_info | feedback | question | suggestion | failed), summary in the language of the issue (what was wrong, what changed, how it was verified), the commit SHA(s) you made, the verify result, notes.`
 	DefaultReplyPrompt = `Draft a reply to issue #{issue.number} "{issue.title}" in {repo}, written as the maintainer.
 
 Issue:

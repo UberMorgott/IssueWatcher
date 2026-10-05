@@ -480,6 +480,10 @@ type Comment struct {
 type IssueDetail struct {
 	Issue
 	Body string `json:"body"`
+	// NonBug is what the item is when it is not a bug (ItemNonBug): feedback |
+	// question | suggestion; "" = a bug or not known. The item page leads with
+	// «Черновик ответа агентом» then.
+	NonBug string `json:"nonBug,omitempty"`
 }
 
 // Issue returns one issue with its body.
@@ -503,6 +507,9 @@ func (s *Store) Issue(ctx context.Context, id int64) (IssueDetail, error) {
 		return d, err
 	}
 	d.Issue = one[0]
+	if d.NonBug, err = s.ItemNonBug(ctx, id); err != nil {
+		return d, err
+	}
 	return d, nil
 }
 

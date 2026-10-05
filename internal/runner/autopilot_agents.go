@@ -15,6 +15,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/folders"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/release"
+	"github.com/UberMorgott/issuewatcher/internal/replystyle"
 )
 
 // Autopilot agent steps (docs/AUTOPILOT.md → Fix run, Replies, Phase 4): the
@@ -30,7 +31,7 @@ const (
 func init() {
 	schemas[flowClassify] = `{"type":"object","additionalProperties":false,` +
 		`"required":["kind","duplicateOf","severity","actionable","regression","missing","language","reason"],"properties":{` +
-		`"kind":{"type":"string","enum":["bug","question","feature","duplicate","spam","other"]},` +
+		`"kind":{"type":"string","enum":["bug","question","feature","feedback","duplicate","spam","other"]},` +
 		`"duplicateOf":{"type":"integer","description":"Item id (from the candidates list) of the report this one duplicates; 0 if none"},` +
 		`"severity":{"type":"string","enum":["critical","high","medium","low"]},` +
 		`"actionable":{"type":"boolean","description":"A bug with enough information to reproduce and fix it"},` +
@@ -136,7 +137,8 @@ func classifyTask(p promptInput, req release.ClassifyRequest) string {
 	b.WriteString(untrusted("candidates", cands.String()))
 	b.WriteString("\n\nDecide:\n" +
 		"- kind: bug (something is broken), question (asks how to do something / whether something works), feature (asks for something new), " +
-		"duplicate (the same problem as one of the candidates above), spam, or other (nothing to act on).\n" +
+		"feedback (thanks, praise or a general comment: nothing broken, nothing asked), duplicate (the same problem as one of the candidates above), spam, " +
+		"or other (nothing to act on).\n" +
 		"- duplicateOf: the candidate's item id when kind is duplicate (the same root problem, not just the same area), else 0.\n" +
 		"- actionable: for a bug, true only if it says what goes wrong and how to get there well enough to reproduce or locate it in the code " +
 		"(you may read the code in the current folder); false when steps, versions or the error are missing.\n" +
@@ -164,26 +166,36 @@ func (r *Runner) DraftReply(ctx context.Context, req release.DraftRequest) (stri
 	if pl := r.maxReply(in.Platform); pl > 0 && (limit <= 0 || pl < limit) {
 		limit = pl
 	}
-	task := draftTask(pin, req) + replyStyleNote(in.Platform, markdown) + replyLimitNote(limit, in, mention)
+	task := draftTask(pin, req) + replyStyleNote(in.Platform, markdown, req.Kind) + replyLimitNote(limit, in, mention)
 	if mention {
 		task += "\n\n" + in.Platform + " has no reply threads: IssueWatcher prepends @" + in.Author + " to the reply (do not write it yourself)."
-	}
-	agent, err := r.runAgent(ctx, agentSpec{item: req.ItemID, repo: in.ProjectKey, profile: prof, flow: flowAutoReply, dir: dir,
-		workDir: filepath.Dir(cmp.Or(req.LogPath, dir)), system: system, task: task, readOnly: true}, log)
-	if err != nil {
-		return "", err
 	}
 	var v struct {
 		Reply    string `json:"reply"`
 		Language string `json:"language"`
 	}
-	_ = json.Unmarshal([]byte(agent.raw), &v)
-	text := strings.TrimSpace(v.Reply)
-	if text == "" {
-		return "", errors.New("the agent returned no reply text")
+	draft := func(extra string) (string, error) {
+		agent, err := r.runAgent(ctx, agentSpec{item: req.ItemID, repo: in.ProjectKey, profile: prof, flow: flowAutoReply, dir: dir,
+			workDir: filepath.Dir(cmp.Or(req.LogPath, dir)), system: system, task: task + extra, readOnly: true}, log)
+		if err != nil {
+			return "", err
+		}
+		v.Reply, v.Language = "", ""
+		_ = json.Unmarshal([]byte(agent.raw), &v)
+		text := strings.TrimSpace(v.Reply)
+		if text == "" {
+			return "", errors.New("the agent returned no reply text")
+		}
+		if !markdown {
+			text = stripBold(text)
+		}
+		return text, nil
 	}
-	if !markdown {
-		text = stripBold(text)
+	// No template here: a refused draft is an error, and the release engine
+	// falls back to its own template of the kind (with the release's facts).
+	text, err := r.styledReply(draft, replystyle.Input{Kind: req.Kind, Source: reporterText(in), Limit: replyLimit(limit, in, mention)}, "", log)
+	if err != nil {
+		return "", err
 	}
 	if mention {
 		text = provider.WithMention(text, in.Author)
@@ -225,6 +237,14 @@ func draftTask(p promptInput, req release.DraftRequest) string {
 	case release.DraftQuestion:
 		b.WriteString("This is a question. Answer it from the code in the current folder and the discussion; if you are not sure, say what you know " +
 			"and that the maintainer will follow up. Do not promise features or dates. No links unless they are the project's own pages already given above.")
+		agentFound(&b, req.Notes)
+	case release.DraftFeedback:
+		b.WriteString("This is thanks or praise, not a bug report: there is nothing to fix. Reply in 1–3 short sentences, for example " +
+			"\"Thanks, glad it works for you!\". No links, no questions back.")
+	case release.DraftSuggestion:
+		b.WriteString("This is a suggestion or idea, not a bug. Thank them in a few words and say plainly whether it fits or that the maintainer will think about it. " +
+			"1–3 short sentences, no promises, no dates, no links.")
+		agentFound(&b, req.Notes)
 	case release.DraftNeedsInfo:
 		b.WriteString("The report cannot be fixed yet: details are missing. Thank the reporter and ask, in one short list or sentence, for exactly what is needed")
 		if n := strings.TrimSpace(req.Notes); n != "" {
@@ -236,4 +256,12 @@ func draftTask(p promptInput, req release.DraftRequest) string {
 	}
 	b.WriteString("\n\nReturn the JSON object only.")
 	return b.String()
+}
+
+// agentFound adds what the maintainer's coding agent found about the item (a
+// fix run that judged it no bug), as context for the reply.
+func agentFound(b *strings.Builder, notes string) {
+	if n := strings.TrimSpace(notes); n != "" {
+		b.WriteString("\nWhat the maintainer's coding agent found in the code (context, do not paste it):\n" + untrusted("agent notes", n) + "\n")
+	}
 }

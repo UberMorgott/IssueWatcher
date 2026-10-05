@@ -92,12 +92,18 @@ export function jobOutcome(j: Job): LocalOutcome | '' {
   return j.state === 'failed' ? 'failed' : ''
 }
 
+/** Fix outcomes that say the item is no bug: it wants a reply, not a fix. */
+export const NON_BUG_OUTCOMES: readonly LocalOutcome[] = ['feedback', 'question', 'suggestion']
+
 /** Badge colour of an outcome (a JobBadge state class). */
 export const OUTCOME_TONE: Record<LocalOutcome, string> = {
   fixed_local: 'needs-review',
   pushed: 'running',
   closed: 'done',
   not_reproduced: 'cancelled',
+  feedback: 'needs-review',
+  question: 'needs-review',
+  suggestion: 'needs-review',
   needs_info: 'needs-review',
   no_commit: 'needs-review',
   changed_folder: 'done',

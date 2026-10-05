@@ -9,12 +9,15 @@
 //	spawn like ok, but first start a child that sleeps holding stdout (its pid
 //	      goes to FAKECLI_RECORD.pid) and leave it running
 //	noop  report "cannot_fix" (direct: "not_reproduced") without touching files, exit 0
+//	thanks  direct / folder fix: report "feedback" (not a bug) without touching files
 //	fail  emit a step, exit 1
 //	authfail  claude's expired sign-in: an "authentication_failed" assistant
 //	      message and an is_error result of subtype "success", exit 1
 //	hang  start a child that sleeps, write its pid to FAKECLI_RECORD.pid, sleep
 //	sleep sleep (the child of hang)
 //
+// The reply flows answer FAKECLI_REPLY (default a fixed text); a redraft (the
+// prompt says the previous draft was refused) answers FAKECLI_REPLY_REDRAFT.
 // The label flow answers the comma-separated FAKECLI_LABELS as its picks. The
 // triage flow answers FAKECLI_PICKS ("number:severity,..."), or else every
 // "#N " line of its prompt in order, severity high.
@@ -120,7 +123,14 @@ func main() {
 	var result map[string]any
 	switch flow {
 	case "reply":
-		result = map[string]any{"reply": "Thanks for the report! Fixed in the next release.", "notes": ""}
+		reply := "Thanks for the report! Fixed in the next release."
+		if v := os.Getenv("FAKECLI_REPLY"); v != "" {
+			reply = v
+		}
+		if v := os.Getenv("FAKECLI_REPLY_REDRAFT"); v != "" && strings.Contains(fullPrompt(args, string(stdin)), "previous draft was refused") {
+			reply = v
+		}
+		result = map[string]any{"reply": reply, "notes": "", "language": "en"}
 	case "review":
 		result = map[string]any{"verdict": "ok", "summary": "looks right"}
 	case "label":
@@ -136,6 +146,10 @@ func main() {
 	case "fix-folder": // edit in place, no git
 		if mode == "noop" {
 			result = map[string]any{"status": "not_reproduced", "summary": "cannot reproduce", "files": []string{}, "verify": "", "notes": ""}
+			break
+		}
+		if mode == "thanks" {
+			result = map[string]any{"status": "feedback", "summary": "a thank-you, not a bug", "files": []string{}, "verify": "", "notes": ""}
 			break
 		}
 		if err := os.WriteFile("fixed.txt", []byte("fixed\n"), 0o600); err != nil {
@@ -171,6 +185,9 @@ func main() {
 func directFix(mode string, args []string, stdin string) map[string]any {
 	if mode == "noop" {
 		return map[string]any{"status": "not_reproduced", "summary": "cannot reproduce", "commits": []string{}, "verify": "", "notes": ""}
+	}
+	if mode == "thanks" {
+		return map[string]any{"status": "feedback", "summary": "a thank-you, not a bug", "commits": []string{}, "verify": "", "notes": ""}
 	}
 	prompt := stdin
 	if i := slices.Index(args, "--append-system-prompt-file"); i >= 0 && i+1 < len(args) {
@@ -219,4 +236,13 @@ func triagePicks(prompt string) []map[string]any {
 		picks = append(picks, map[string]any{"number": n, "severity": "high", "reason": "listed as #" + m[1]})
 	}
 	return picks
+}
+
+// fullPrompt is stdin plus claude's appended system prompt file, if any.
+func fullPrompt(args []string, stdin string) string {
+	if i := slices.Index(args, "--append-system-prompt-file"); i >= 0 && i+1 < len(args) {
+		b, _ := os.ReadFile(args[i+1])
+		return stdin + "\n" + string(b)
+	}
+	return stdin
 }

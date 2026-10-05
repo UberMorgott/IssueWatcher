@@ -14,6 +14,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/folders"
+	"github.com/UberMorgott/issuewatcher/internal/replystyle"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -31,7 +32,19 @@ const (
 	OutcomeNeedsInfo     = "needs_info"     // no commit, the issue lacks information
 	OutcomeNoCommit      = "no_commit"      // no commit and no reason given (or "fixed" without a commit)
 	OutcomeFailed        = "failed"         // the agent reported failure
+	// Not a bug (no commit): the agent says what the item is instead, and a
+	// reply draft follows (docs: fix outcomes). not_reproduced stays for a real
+	// bug report the agent could not reproduce.
+	OutcomeFeedback   = replystyle.KindFeedback   // thanks / praise / a general comment
+	OutcomeQuestion   = replystyle.KindQuestion   // the reporter asks something
+	OutcomeSuggestion = replystyle.KindSuggestion // an idea or feature request
 )
+
+// agentOutcome reports whether a fix agent's status is an outcome of its own
+// when the run made no change (not_reproduced, needs_info, failed, non-bug kinds).
+func agentOutcome(status string) bool {
+	return status == OutcomeNotReproduced || status == OutcomeNeedsInfo || status == OutcomeFailed || replystyle.NonBug(status)
+}
 
 // LocalResult is what a direct fix did to the mapped folder (Result.Local).
 type LocalResult struct {
@@ -119,7 +132,7 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 		loc.Outcome = OutcomePushed
 	case len(loc.Commits) > 0:
 		loc.Outcome = OutcomeFixedLocal
-	case agent.Status == "not_reproduced" || agent.Status == "needs_info" || agent.Status == "failed":
+	case agentOutcome(agent.Status):
 		loc.Outcome = agent.Status
 	default:
 		loc.Outcome = OutcomeNoCommit

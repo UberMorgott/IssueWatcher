@@ -66,6 +66,8 @@ func ruDraft(req DraftRequest) string {
 		return "Спасибо! Исправлено в версии " + req.Version + ", скачать: " + strings.Join(links, " , ")
 	case DraftQuestion:
 		return "Да, это включается в настройках мода."
+	case DraftFeedback:
+		return "Спасибо, рад, что всё работает!"
 	}
 	return "Спасибо! Пришлите, пожалуйста, сохранение и лог."
 }
@@ -225,6 +227,41 @@ func TestTriageClasses(t *testing.T) {
 		}
 		if nr := c.runOf(c.item); nr.ID == fr.ID || nr.State != store.RunPushed || c.fixer.fixes != 1 {
 			t.Fatalf("new run %+v fixes %d", nr, c.fixer.fixes)
+		}
+	})
+	t.Run("fix agent: not a bug → short reply, no release", func(t *testing.T) {
+		c := newTriageChain(t)
+		c.fixer.nonBug = "feedback"
+		en := c.engine(false)
+		c.tick(en)
+		c.tick(en)
+		fr := c.fixRun()
+		rs := c.replies(c.item)
+		if fr.State != store.RunAnswered || len(rs) != 1 || !strings.HasPrefix(rs[0], "Спасибо, рад") || c.dr.reqs[0].Kind != DraftFeedback {
+			t.Fatalf("run %+v replies %q reqs %+v steps %+v", fr, rs, c.dr.reqs, c.steps(fr.ID))
+		}
+		if st := c.steps(fr.ID)["push"]; st.State != store.StepSkipped {
+			t.Fatalf("push step %+v", st)
+		}
+	})
+	t.Run("triage feedback → short reply", func(t *testing.T) {
+		c := newTriageChain(t)
+		c.tr.byNum[1] = Classification{Kind: KindFeedback, Language: "ru", Reason: "says thanks"}
+		en := c.engine(false)
+		c.tick(en)
+		fr := c.fixRun()
+		if rs := c.replies(c.item); fr.State != store.RunAnswered || len(rs) != 1 || c.fixer.fixes != 0 || c.dr.reqs[0].Kind != DraftFeedback {
+			t.Fatalf("run %+v replies %q fixes %d", fr, rs, c.fixer.fixes)
+		}
+	})
+	t.Run("slop draft → template", func(t *testing.T) {
+		c := newTriageChain(t)
+		c.tr.byNum[1] = Classification{Kind: KindFeedback, Language: "en", Reason: "says thanks"}
+		c.dr.draft = func(DraftRequest) string { return "Thank you so much for your kind words! Happy gaming!" }
+		en := c.engine(false)
+		c.tick(en)
+		if rs := c.replies(c.item); len(rs) != 1 || !strings.HasPrefix(rs[0], "Thanks, glad it works for you!") {
+			t.Fatalf("replies %q", rs)
 		}
 	})
 	t.Run("fix agent needs info → asks", func(t *testing.T) {

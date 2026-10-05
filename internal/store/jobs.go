@@ -669,3 +669,35 @@ func (s *Store) JobInput(ctx context.Context, itemID int64) (JobInput, error) {
 		cursor = c.NextCursor
 	}
 }
+
+// ItemNonBug is what item itemID is when it is not a bug: its newest fix
+// job's non-bug outcome (feedback | question | suggestion), else — no fix job
+// said either way — its newest autopilot fix run's triage kind (question,
+// feedback; feature → suggestion). "" = a bug or not known.
+func (s *Store) ItemNonBug(ctx context.Context, itemID int64) (string, error) {
+	var outcome string
+	err := s.rd.QueryRowContext(ctx, `SELECT coalesce(json_extract(result, '$.local.outcome'), '') FROM jobs
+		WHERE item_id = ? AND flow = 'fix' AND json_valid(result) AND state IN ('needs_review', 'done') ORDER BY id DESC LIMIT 1`, itemID).Scan(&outcome)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("store: item fix outcome: %w", err)
+	}
+	switch outcome {
+	case "feedback", "question", "suggestion":
+		return outcome, nil
+	case "fixed_local", "pushed", "closed", "changed_folder", "not_reproduced", "needs_info":
+		return "", nil // the fix agent judged it a bug
+	}
+	var kind string
+	err = s.rd.QueryRowContext(ctx, `SELECT coalesce(json_extract(manifest_json, '$.triage.kind'), '') FROM autopilot_runs WHERE kind = 'fix'
+		AND json_valid(manifest_json) AND id IN (SELECT run_id FROM autopilot_run_items WHERE item_id = ?) ORDER BY id DESC LIMIT 1`, itemID).Scan(&kind)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("store: item triage kind: %w", err)
+	}
+	switch kind {
+	case "feedback", "question":
+		return kind, nil
+	case "feature":
+		return "suggestion", nil
+	}
+	return "", nil
+}

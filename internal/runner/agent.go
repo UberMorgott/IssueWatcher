@@ -38,13 +38,13 @@ var schemas = map[string]string{
 		`"summary":{"type":"string","description":"What was wrong, what changed, how it was checked"},` +
 		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
 	flowFixDirect: `{"type":"object","additionalProperties":false,"required":["status","summary","commits","verify","notes"],"properties":{` +
-		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","failed"]},` +
+		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","feedback","question","suggestion","failed"],"description":"feedback / question / suggestion: not a bug report (thanks or praise, a question, an idea); not_reproduced: a bug report that does not reproduce"},` +
 		`"summary":{"type":"string","description":"What was wrong, what changed, how it was verified"},` +
 		`"commits":{"type":"array","items":{"type":"string"},"description":"SHA of every commit you made; empty if none"},` +
 		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
 		`"notes":{"type":"string","description":"Anything the maintainer should know; empty if nothing"}}}`,
 	flowFixFolder: `{"type":"object","additionalProperties":false,"required":["status","summary","files","verify","notes"],"properties":{` +
-		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","failed"]},` +
+		`"status":{"type":"string","enum":["fixed","not_reproduced","needs_info","feedback","question","suggestion","failed"],"description":"feedback / question / suggestion: not a bug report (thanks or praise, a question, an idea); not_reproduced: a bug report that does not reproduce"},` +
 		`"summary":{"type":"string","description":"What was wrong, what changed, how it was verified"},` +
 		`"files":{"type":"array","items":{"type":"string"},"description":"Paths (relative to the folder) of every file you changed; empty if none"},` +
 		`"verify":{"type":"string","description":"The checks you ran and their result; empty if none"},` +
@@ -86,7 +86,7 @@ type AgentResult struct {
 	Profile string `json:"profile"`
 	CLI     string `json:"cli"`
 	Model   string `json:"model,omitempty"`
-	Status  string `json:"status,omitempty"`  // fix: fixed | partial | cannot_fix | needs_info; direct: fixed | not_reproduced | needs_info | failed
+	Status  string `json:"status,omitempty"`  // fix: fixed | partial | cannot_fix | needs_info; direct: fixed | not_reproduced | needs_info | feedback | question | suggestion | failed
 	Verdict string `json:"verdict,omitempty"` // review: ok | concerns
 	Summary string `json:"summary,omitempty"`
 	Notes   string `json:"notes,omitempty"`

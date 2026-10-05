@@ -181,8 +181,13 @@ export interface Comment {
   updatedAt: string
 }
 
+/** What an item is when it is not a bug: the fix agent's outcome or the autopilot triage verdict. */
+export type NonBugKind = 'feedback' | 'question' | 'suggestion'
+
 export interface IssueDetail extends Issue {
   body: string
+  /** Not a bug (store ItemNonBug): the item page leads with «Черновик ответа агентом». */
+  nonBug?: NonBugKind
 }
 
 /** Weekly bucket: issues and bug reports opened / closed; new comment threads apart. */
@@ -469,7 +474,7 @@ export interface AgentResult {
   profile: string
   cli: string
   model?: string
-  status?: 'fixed' | 'partial' | 'cannot_fix' | 'needs_info' | 'not_reproduced' | 'failed'
+  status?: 'fixed' | 'partial' | 'cannot_fix' | 'needs_info' | 'not_reproduced' | 'feedback' | 'question' | 'suggestion' | 'failed'
   verdict?: 'ok' | 'concerns'
   summary?: string
   notes?: string
@@ -530,6 +535,9 @@ export type LocalOutcome =
   | 'pushed'
   | 'closed'
   | 'not_reproduced'
+  | 'feedback'
+  | 'question'
+  | 'suggestion'
   | 'needs_info'
   | 'no_commit'
   | 'changed_folder'

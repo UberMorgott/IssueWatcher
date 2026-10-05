@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/UberMorgott/issuewatcher/internal/replystyle"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -26,6 +27,9 @@ const (
 	DraftReleased  = "released"   // the fix is out: version + links
 	DraftQuestion  = "question"   // answer the reporter's question
 	DraftNeedsInfo = "needs_info" // ask for the details a fix needs
+	// Not a bug (a fix run's agent or triage said so): a short human reply.
+	DraftFeedback   = replystyle.KindFeedback   // thanks / praise: "Thanks, glad it works for you!"
+	DraftSuggestion = replystyle.KindSuggestion // an idea: thanks, fits or not, no promises
 )
 
 // Link is a place the release can be downloaded from.
@@ -37,11 +41,11 @@ type Link struct {
 // DraftRequest is one reply to draft.
 type DraftRequest struct {
 	ItemID   int64
-	Kind     string   // released | question | needs_info
+	Kind     string   // released | question | needs_info | feedback | suggestion
 	Version  string   // released: X.Y.Z
 	Changes  []string // released: what was fixed (commit subjects / changelog lines)
 	Links    []Link   // released: where to download (available targets + the GitHub release)
-	Notes    string   // needs_info: what is missing (triage / the fixing agent's note)
+	Notes    string   // needs_info: what is missing; question / suggestion: what the fixing agent found
 	Language string   // the reporter's language from triage ("" = detect from the item)
 	Limit    int      // max characters of the reply
 	LogPath  string   // the agent's step log (JSONL)
@@ -94,6 +98,9 @@ func checkDraft(body string, req DraftRequest, allowed []string) error {
 		if u = trimURL(u); !slices.Contains(allowed, u) {
 			return fmt.Errorf("draft links to %s, which is not one of the release's pages", u)
 		}
+	}
+	if p := replystyle.Check(body, replystyle.Input{Kind: req.Kind, Limit: req.Limit}); len(p) > 0 {
+		return errors.New("reply style: " + strings.Join(p, "; "))
 	}
 	if req.Kind != DraftReleased {
 		return nil
@@ -205,6 +212,8 @@ func (e *Engine) draftFor(ctx context.Context, r store.Run, m *FixManifest, kind
 	switch kind {
 	case DraftNeedsInfo:
 		fallback = needsInfoTemplate
+	case DraftFeedback, DraftSuggestion:
+		fallback = replystyle.Fallback(kind, req.Language)
 	case DraftReleased:
 		rel, err := e.d.Store.Run(ctx, m.ReleaseRun)
 		if err == nil {

@@ -194,7 +194,7 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 		if p.autopilot {
 			tmpl = autopilotTemplate(tmpl, p.in)
 		}
-		task = render(tmpl, p) + modNote(p.in) + autopilotNote(p)
+		task = render(tmpl, p) + modNote(p.in) + autopilotNote(p) + outcomeNote(tmpl)
 	case flowFixFolder:
 		task = render(folderFixPrompt, p) + modNote(p.in)
 	case flowLabel:
@@ -254,6 +254,16 @@ func autopilotNote(p promptInput) string {
 	return "\n\nThis fix runs unattended (IssueWatcher autopilot). Reference the issue neutrally with \"Refs #" + n +
 		"\" in the commit message. Never use a closing keyword (Fixes, Closes, Resolves and their forms) for #" + n +
 		": the issue is closed by the release, after the reporter is answered."
+}
+
+// outcomeNote spells out the non-bug statuses for a fix template that does
+// not list them (a prompt the maintainer saved before they existed).
+func outcomeNote(tmpl string) string {
+	if strings.Contains(tmpl, "suggestion") {
+		return ""
+	}
+	return "\n\nIf the issue is not a bug report at all, change nothing and report its kind as the status: feedback (thanks, praise or a general comment), " +
+		"question (the reporter asks something) or suggestion (an idea or feature request). Report not_reproduced only for a bug report you could not reproduce."
 }
 
 // modNote tells the agent where a mod-page report comes from and forbids #N references.

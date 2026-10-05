@@ -1,0 +1,23 @@
+{
+  "source": "thanks a lot for the mod, works perfectly",
+  "slop": [
+    {"kind": "feedback", "draft": "Thank you so much for your kind words! I'm thrilled to hear the mod works perfectly for you. It really means a lot. Happy gaming!"},
+    {"kind": "feedback", "draft": "Thanks a lot for the mod, works perfectly? Glad to hear it!"},
+    {"kind": "feedback", "draft": "Thanks! Glad it works 😊"},
+    {"kind": "feedback", "draft": "Thanks, glad it works for you! If anything breaks, don't hesitate to reach out."},
+    {"kind": "feedback", "draft": "Thanks — glad it works — enjoy the campaign."},
+    {"kind": "feedback", "draft": "Thanks, glad it works for you!\n\n— Morgott"},
+    {"kind": "feedback", "draft": "Thanks for trying it. Glad it works. I spent a while on the perk logic. More is coming soon. Stay tuned."},
+    {"kind": "question", "draft": "Great question! You can turn it off in the config. Feel free to ask if anything else comes up."},
+    {"kind": "feedback", "draft": "Спасибо за тёплые слова! Приятной игры!"},
+    {"kind": "suggestion", "draft": "Love the idea! Best regards,\nMorgott\nBest regards"}
+  ],
+  "good": [
+    {"kind": "feedback", "draft": "Thanks, glad it works for you!"},
+    {"kind": "feedback", "draft": "Thanks! Good to hear it runs fine."},
+    {"kind": "feedback", "draft": "Спасибо, рад, что всё работает!"},
+    {"kind": "suggestion", "draft": "Thanks for the idea. It doesn't really fit the mod right now, but I'll keep it in mind."},
+    {"kind": "question", "draft": "Yes, it works with the latest game patch. Install it over the old version, no new save needed."},
+    {"kind": "", "draft": "Fixed in v1.2.3, the perk no longer resets after a reload. Thanks for the report!"}
+  ]
+}

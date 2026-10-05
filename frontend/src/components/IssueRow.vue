@@ -314,6 +314,12 @@ const outcome = computed(() => (live.value ? jobOutcome(live.value) : (props.ite
   color: var(--iw-muted);
 }
 
+.outcome.feedback,
+.outcome.question,
+.outcome.suggestion {
+  color: var(--iw-primary);
+}
+
 .c-project {
   display: flex;
   align-items: center;

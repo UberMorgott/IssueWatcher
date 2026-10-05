@@ -6,6 +6,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,12 +17,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/folders"
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/replystyle"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -467,6 +470,31 @@ func (r *Runner) finish(ctx context.Context, j store.Job, res Result, err error,
 	if nj.State != store.JobCancelled {
 		r.opts.OnFinished(nj)
 	}
+	if nj.State == store.JobNeedsReview && nj.Flow == flowFix && res.Local != nil && replystyle.NonBug(res.Local.Outcome) && !autopilotJob(&nj) {
+		r.draftAfterFix(ctx, nj, res.Local.Outcome)
+	}
+}
+
+// draftAfterFix queues «Черновик ответа агентом» for item of fix job j that
+// found no bug (feedback, question, suggestion): a draft for the owner to
+// review, never sent by itself. An autopilot fix leaves the reply to its run
+// (sent only with the project's autoReply on, else a draft for the owner).
+func (r *Runner) draftAfterFix(ctx context.Context, j store.Job, outcome string) {
+	cfg := r.opts.Settings().Agents
+	if _, ok := cfg.Profile(cfg.Roles.Responder); !ok {
+		r.opts.Log.Warn("runner: no responder profile: no reply draft after the fix", "job", j.ID)
+		return
+	}
+	nj, err := r.opts.Store.CreateJob(ctx, j.ItemID, flowReply, cfg.Roles.Responder, store.OriginManual, "")
+	switch {
+	case err == nil:
+		r.opts.Log.Info("runner: reply draft queued after a non-bug fix outcome", "job", j.ID, "outcome", outcome, "reply", nj.ID)
+		r.opts.OnJob(nj)
+		r.kick()
+	case errors.Is(err, store.ErrJobExists): // a draft is already on its way
+	default:
+		r.opts.Log.Warn("runner: queue reply draft after the fix", "job", j.ID, "err", err)
+	}
 }
 
 func (r *Runner) phase(ctx context.Context, j *store.Job, name string) {
@@ -665,40 +693,107 @@ func (r *Runner) runReply(ctx context.Context, j *store.Job, res *Result, log *j
 		task += "\n\n" + in.Platform + " has no reply threads: the reply is posted as a new comment that starts with @" + in.Author +
 			" (IssueWatcher adds it; do not write it yourself)."
 	}
-	markdown := r.opts.ReplyMarkdown != nil && r.opts.ReplyMarkdown(in.Platform)
-	task += replyStyleNote(in.Platform, markdown)
-	task += replyLimitNote(r.maxReply(in.Platform), in, mention)
-	agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files, system: system, task: task, readOnly: true}, log)
-	res.Agent = &agent
+	// What the item is when it is not a bug (the fix agent's outcome, the triage verdict): the reply fits it.
+	kind, err := r.opts.Store.ItemNonBug(ctx, j.ItemID)
 	if err != nil {
-		if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {
-			return "", err
+		r.opts.Log.Warn("runner: reply kind", "item", j.ItemID, "err", err)
+	}
+	markdown := r.opts.ReplyMarkdown != nil && r.opts.ReplyMarkdown(in.Platform)
+	task += replyStyleNote(in.Platform, markdown, kind)
+	task += replyLimitNote(r.maxReply(in.Platform), in, mention)
+	draft := func(extra string) (string, error) {
+		agent, err := r.runAgent(ctx, agentSpec{item: j.ItemID, repo: j.ProjectKey, profile: prof, flow: flowReply, dir: dir, workDir: files,
+			system: system, task: task + extra, readOnly: true}, log)
+		res.Agent = &agent
+		if err != nil {
+			if errors.Is(err, errTimeout) || errors.Is(err, ErrCancelled) {
+				return "", err
+			}
+			return "", coded(CodeAgent, err)
 		}
-		return "", coded(CodeAgent, err)
+		text := strings.TrimSpace(cmp.Or(agent.Reply, agent.Final))
+		if text == "" {
+			return "", coded(CodeAgent, errors.New("the agent returned no reply text"))
+		}
+		if !markdown {
+			text = stripBold(text)
+		}
+		return text, nil
 	}
-	res.Draft = agent.Reply
-	if res.Draft == "" {
-		res.Draft = agent.Final
+	style := replystyle.Input{Kind: kind, Source: reporterText(in), Limit: replyLimit(r.maxReply(in.Platform), in, mention)}
+	text, err := r.styledReply(draft, style, replystyle.Fallback(kind, replystyle.Language(in.Title+"\n"+in.Body)), log)
+	if err != nil {
+		return "", err
 	}
-	if res.Draft == "" {
-		return "", coded(CodeAgent, errors.New("the agent returned no reply text"))
-	}
-	if !markdown {
-		res.Draft = stripBold(res.Draft)
-	}
+	res.Draft = text
 	if mention {
 		res.Draft = provider.WithMention(res.Draft, in.Author)
 	}
 	return store.JobNeedsReview, nil
 }
 
+// styledReply drafts a reply and holds it to the reply style (replystyle): a
+// refused draft gets one redraft with its problems named; a second refusal
+// falls back to the minimal template (fallback "" → an error, the caller's
+// own fallback applies).
+func (r *Runner) styledReply(draft func(extra string) (string, error), in replystyle.Input, fallback string, log *jobLog) (string, error) {
+	text, err := draft("")
+	if err != nil {
+		return "", err
+	}
+	p := replystyle.Check(text, in)
+	if len(p) == 0 {
+		return text, nil
+	}
+	log.addf(StepInfo, "reply style: draft refused (%s); drafting once more", strings.Join(p, "; "))
+	again, err := draft(replystyle.RedraftNote(p))
+	switch {
+	case errors.Is(err, ErrCancelled):
+		return "", err
+	case err != nil:
+		log.addf(StepInfo, "reply style: the redraft failed: %v", err)
+	default:
+		if p = replystyle.Check(again, in); len(p) == 0 {
+			return again, nil
+		}
+		log.addf(StepInfo, "reply style: redraft refused too (%s)", strings.Join(p, "; "))
+	}
+	if fallback == "" {
+		return "", fmt.Errorf("reply style: %s", strings.Join(p, "; "))
+	}
+	log.add(StepInfo, "reply style: minimal template used")
+	return fallback, nil
+}
+
+// reporterText is the reporter's own words on in (title, body, their comments):
+// what a draft must not echo, and whether they used emoji.
+func reporterText(in store.JobInput) string {
+	parts := []string{in.Title, in.Body}
+	for _, c := range in.Comments {
+		if c.Author == in.Author {
+			parts = append(parts, c.Body)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// replyLimit is the length a draft may have: the platform's limit less the
+// «@author » IssueWatcher prepends when mention is on (0 = no limit).
+func replyLimit(limit int, in store.JobInput, mention bool) int {
+	if limit > 0 && mention {
+		limit -= provider.ReplyLength("@" + in.Author + " ")
+	}
+	return max(limit, 0)
+}
+
 // replyStyleNote tells the agent how a reply reads: the maintainer's own short
-// comment, and plain text where platform shows no Markdown (it posts as typed).
-func replyStyleNote(platform string, markdown bool) string {
+// comment (replystyle.Rules of kind), and plain text where platform shows no
+// Markdown (it posts as typed).
+func replyStyleNote(platform string, markdown bool, kind string) string {
 	note := "\n\nWrite the reply as the maintainer typing a comment yourself: first person, casual and direct, like a person, not a support bot. " +
 		"Keep it short, usually a few sentences in one or two conversational paragraphs; answer the point without restating the question. " +
 		"No headings, no \"Short answer:\" or \"TL;DR\" lead-ins, no bullet lists or bold labels, no sign-off or signature, " +
-		"and no stock phrases such as \"Great question\", \"I hope this helps\" or \"Feel free to\"."
+		"and no stock phrases such as \"Great question\", \"I hope this helps\" or \"Feel free to\"." + replystyle.Rules(kind)
 	if markdown {
 		return note + "\n" + platform + " renders Markdown, but keep the reply plain prose: use Markdown only for code or a link when it is really needed."
 	}
@@ -733,9 +828,7 @@ func replyLimitNote(limit int, in store.JobInput, mention bool) string {
 	if limit <= 0 {
 		return ""
 	}
-	if mention {
-		limit -= provider.ReplyLength("@" + in.Author + " ")
-	}
+	limit = replyLimit(limit, in, mention)
 	return "\n\n" + in.Platform + " refuses longer comments: the reply text must be at most " + strconv.Itoa(limit) +
 		" characters (count them; be brief, cut rather than exceed)."
 }

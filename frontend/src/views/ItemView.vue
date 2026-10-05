@@ -17,7 +17,7 @@ import JobProgress from '../components/JobProgress.vue'
 import JobLog from '../components/JobLog.vue'
 import DirectResult from '../components/DirectResult.vue'
 import FolderDialog from '../components/FolderDialog.vue'
-import { canPush, FLOW_ICON, isActive, isDirect, JOB_FLOWS, jobOutcome, useDispatchToast, usePush } from '../lib/jobs'
+import { canPush, FLOW_ICON, isActive, isDirect, JOB_FLOWS, jobOutcome, NON_BUG_OUTCOMES, useDispatchToast, usePush } from '../lib/jobs'
 import { useJobEvents, useJobsStore } from '../stores/jobs'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '../stores/app'
@@ -358,6 +358,35 @@ function profileMenu(flow: JobFlow) {
     icon: p.cli === 'claude' ? 'pi pi-sparkles' : 'pi pi-code',
     command: () => void dispatch(flow, p.id),
   }))
+}
+
+/**
+ * The item is no bug (feedback, question, suggestion): its newest fix job said
+ * so, or (no fix job verdict) the autopilot triage. The reply then leads and
+ * «Исправить агентом» moves into the reply button's menu.
+ */
+const nonBug = computed(() => {
+  const fix = itemJobs.value.find((j) => j.flow === 'fix')
+  const o = fix ? jobOutcome(fix) : ''
+  if (o) return NON_BUG_OUTCOMES.includes(o)
+  return !!item.value?.nonBug
+})
+const primaryFlow = computed<JobFlow>(() => (nonBug.value ? 'reply' : 'fix'))
+const shownFlows = computed(() => {
+  if (!nonBug.value) return ITEM_FLOWS.value
+  return ['reply' as JobFlow, ...ITEM_FLOWS.value.filter((f) => f !== 'reply' && f !== 'fix')]
+})
+function flowMenu(flow: JobFlow) {
+  const menu: { label?: string; icon?: string; separator?: boolean; disabled?: boolean; command?: () => void }[] = profileMenu(flow)
+  if (flow === 'reply' && nonBug.value) {
+    menu.push({ separator: true }, {
+      label: t('item.fixWithAgent'),
+      icon: FLOW_ICON.fix,
+      disabled: !!activeJob('fix') || noFolder.value,
+      command: () => void dispatch('fix'),
+    })
+  }
+  return menu
 }
 
 const initials = (name: string) => (name || '?').slice(0, 2).toUpperCase()
@@ -795,15 +824,15 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               </template>
             </div>
             <template
-              v-for="f in ITEM_FLOWS"
+              v-for="f in shownFlows"
               :key="f"
             >
               <SplitButton
                 :label="t('item.' + f + 'WithAgent')"
                 :icon="FLOW_ICON[f]"
-                :model="profileMenu(f)"
+                :model="flowMenu(f)"
                 :disabled="!!activeJob(f) || dispatching || (f === 'fix' && noFolder)"
-                :severity="f === 'fix' ? undefined : 'secondary'"
+                :severity="f === primaryFlow ? undefined : 'secondary'"
                 :title="activeJob(f) ? t('item.jobRunning') : f === 'fix' && noFolder ? fixHint : undefined"
                 class="agent-btn"
                 @click="dispatch(f)"
@@ -823,7 +852,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
                 />
               </div>
               <div
-                v-if="f === 'fix' && dirtyFiles"
+                v-if="f === primaryFlow && dirtyFiles"
                 class="folder-hint dirty-hint"
                 role="alert"
               >

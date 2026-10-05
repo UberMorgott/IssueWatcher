@@ -13,6 +13,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/release/source"
+	"github.com/UberMorgott/issuewatcher/internal/replystyle"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -453,6 +454,17 @@ func (e *Engine) fixJobStep(ctx context.Context, r store.Run, m *FixManifest, st
 		hold = HeldNoCommit
 	case loc.FixesRef:
 		hold = HeldClosingKeyword
+	}
+	if len(loc.Commits) == 0 && replystyle.NonBug(loc.Outcome) {
+		// Not a bug (thanks, a question, an idea): no release; the reporter gets
+		// a short reply (autoReply, else a draft for the owner) and the run ends answered.
+		if _, err := e.transition(ctx, st, store.StepSending, store.StepSent, store.StepUpdate{ExternalRef: &st.ExternalRef, Error: new(loc.Outcome)}); err != nil {
+			return false, err
+		}
+		if res.Agent != nil {
+			m.Notes = clipRunes(strings.TrimSpace(res.Agent.Summary), 1000)
+		}
+		return true, e.takePath(ctx, r, m, OutcomeAnswered, loc.Outcome, loc.Outcome)
 	}
 	if hold == HeldNeedsInfo || hold == HeldNotReproduced {
 		// The fixing agent needs the reporter: ask (autoReply) and wait held;

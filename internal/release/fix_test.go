@@ -71,6 +71,8 @@ type fakeFixer struct {
 	// "filtered" = the project has fix rules, none matches the item.
 	rules     string
 	needsInfo bool // the job ends needs_info without a commit
+	// nonBug: the job ends with this non-bug outcome (feedback | question | suggestion) without a commit.
+	nonBug string
 }
 
 func (f *fakeFixer) AutopilotMatch(context.Context, int64, string) (bool, bool, error) {
@@ -96,12 +98,16 @@ func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string, 
 	f.mu.Lock()
 	f.fixes++
 	n := f.fixes
-	closing, big, needsInfo := f.closing, f.big, f.needsInfo
+	closing, big, needsInfo, nonBug := f.closing, f.big, f.needsInfo, f.nonBug
 	f.mu.Unlock()
-	if needsInfo {
+	if needsInfo || nonBug != "" {
 		head := git(e.t, e.folder, "rev-parse", "HEAD")
-		res, _ := json.Marshal(map[string]any{"mode": "direct", "agent": map[string]any{"summary": "Which save triggers it?"},
-			"local": map[string]any{"dir": e.folder, "branch": "main", "startSha": head, "headSha": head, "commits": []any{}, "outcome": "needs_info"}})
+		outcome, summary := "needs_info", "Which save triggers it?"
+		if nonBug != "" {
+			outcome, summary = nonBug, "Not a bug: the reporter says thanks."
+		}
+		res, _ := json.Marshal(map[string]any{"mode": "direct", "agent": map[string]any{"summary": summary},
+			"local": map[string]any{"dir": e.folder, "branch": "main", "startSha": head, "headSha": head, "commits": []any{}, "outcome": outcome}})
 		nj, err := e.st.UpdateJob(ctx, j.ID, nil, store.JobChange{State: new(store.JobNeedsReview), Result: res})
 		return entry, &nj, err
 	}

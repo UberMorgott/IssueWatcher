@@ -29,9 +29,10 @@ const (
 	KindDuplicate = "duplicate"
 	KindSpam      = "spam"
 	KindOther     = "other"
+	KindFeedback  = "feedback" // thanks / praise: nothing broken, nothing asked → a short reply
 )
 
-var triageKinds = []string{KindBug, KindQuestion, KindFeature, KindDuplicate, KindSpam, KindOther}
+var triageKinds = []string{KindBug, KindQuestion, KindFeature, KindFeedback, KindDuplicate, KindSpam, KindOther}
 
 // Fix run outcomes besides a fix (FixManifest.Outcome; "" = fix → push).
 const (
@@ -52,7 +53,7 @@ const maxTriageAttempts = 3
 
 // Classification is the classify agent's verdict (checked by the app).
 type Classification struct {
-	Kind        string `json:"kind"`                  // bug | question | feature | duplicate | spam | other
+	Kind        string `json:"kind"`                  // bug | question | feature | feedback | duplicate | spam | other
 	DuplicateOf int64  `json:"duplicateOf,omitempty"` // item id of the original (one of the candidates)
 	Severity    string `json:"severity,omitempty"`    // critical | high | medium | low
 	Actionable  bool   `json:"actionable"`            // a bug with enough information to fix
@@ -259,6 +260,8 @@ func (e *Engine) applyTriage(ctx context.Context, r store.Run, m *FixManifest) e
 		}
 	case c.Kind == KindQuestion:
 		return e.takePath(ctx, r, m, OutcomeAnswered, DraftQuestion, "")
+	case c.Kind == KindFeedback:
+		return e.takePath(ctx, r, m, OutcomeAnswered, DraftFeedback, KindFeedback)
 	case c.Kind == KindBug && !c.Actionable:
 		return e.takePath(ctx, r, m, OutcomeNeedsInfo, DraftNeedsInfo, "")
 	case c.Kind != KindBug && c.Kind != KindDuplicate:

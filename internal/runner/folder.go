@@ -45,11 +45,11 @@ Discussion:
 {comments}
 
 Steps:
-1. Reproduce or confirm the problem from the files. If it does not reproduce or is not a bug, change nothing and report not_reproduced; if the issue lacks information you need, change nothing and report needs_info.
+1. Reproduce or confirm the problem from the files. If it is not a bug report at all, change nothing and report what it is: feedback (thanks, praise or a general comment), question (the reporter asks something) or suggestion (an idea or feature request). If it is a bug report that does not reproduce, change nothing and report not_reproduced; if the issue lacks information you need, change nothing and report needs_info.
 2. Fix it with the smallest correct change, editing the files of this folder in place. Do not touch anything outside this folder.
 3. Verify the change if the folder has a way to (build, tests, linters).
 4. Do NOT use git here: no git init, add, commit, stash, checkout or reset. Do not push, create pull requests or post comments; the maintainer takes the changed files from this folder.
-Finish with the structured result: status (fixed | not_reproduced | needs_info | failed), summary in the language of the issue (what was wrong, what changed, how it was verified), the files you changed (paths relative to the folder), the verify result, notes.`
+Finish with the structured result: status (fixed | not_reproduced | needs_info | feedback | question | suggestion | failed), summary in the language of the issue (what was wrong, what changed, how it was verified), the files you changed (paths relative to the folder), the verify result, notes.`
 
 // Snapshot bounds: a folder mapped at a huge tree must not stall the job.
 const (
@@ -181,7 +181,7 @@ func (r *Runner) runFolder(ctx context.Context, j *store.Job, res *Result, log *
 	switch {
 	case len(loc.Changed) > 0:
 		loc.Outcome = OutcomeChangedFolder
-	case agent.Status == OutcomeNotReproduced || agent.Status == OutcomeNeedsInfo || agent.Status == OutcomeFailed:
+	case agentOutcome(agent.Status):
 		loc.Outcome = agent.Status
 	default:
 		loc.Outcome = OutcomeNoChanges
