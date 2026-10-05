@@ -67,11 +67,26 @@ type fakeFixer struct {
 	fixes   int
 	closing bool // commit with a closing keyword instead
 	big     bool // a three-line change
+	// rules: "" = a matching fix rule; "none" = no fix rule of the project;
+	// "filtered" = the project has fix rules, none matches the item.
+	rules     string
+	needsInfo bool // the job ends needs_info without a commit
 }
 
-func (f *fakeFixer) AutopilotMatch(context.Context, int64, string) (bool, error) { return true, nil }
+func (f *fakeFixer) AutopilotMatch(context.Context, int64, string) (bool, bool, error) {
+	switch f.rules {
+	case "none":
+		return false, false, nil
+	case "filtered":
+		return false, true, nil
+	}
+	return true, true, nil
+}
 
-func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string) (store.AutomationEntry, *store.Job, error) {
+func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string, triaged bool) (store.AutomationEntry, *store.Job, error) {
+	if m, _, _ := f.AutopilotMatch(ctx, item, event); !m && !triaged {
+		return store.AutomationEntry{ItemID: item, Reason: "no_fix_rule"}, nil, nil
+	}
 	e := f.e
 	entry, j, err := e.st.Automate(ctx, store.AutomationRequest{At: time.Now(), ItemID: item, Event: event, RuleID: store.RuleAutopilot,
 		Flow: config.FlowFix, TotalCap: 10, MaxAttempts: 3})
@@ -81,8 +96,15 @@ func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string) 
 	f.mu.Lock()
 	f.fixes++
 	n := f.fixes
-	closing, big := f.closing, f.big
+	closing, big, needsInfo := f.closing, f.big, f.needsInfo
 	f.mu.Unlock()
+	if needsInfo {
+		head := git(e.t, e.folder, "rev-parse", "HEAD")
+		res, _ := json.Marshal(map[string]any{"mode": "direct", "agent": map[string]any{"summary": "Which save triggers it?"},
+			"local": map[string]any{"dir": e.folder, "branch": "main", "startSha": head, "headSha": head, "commits": []any{}, "outcome": "needs_info"}})
+		nj, err := e.st.UpdateJob(ctx, j.ID, nil, store.JobChange{State: new(store.JobNeedsReview), Result: res})
+		return entry, &nj, err
+	}
 	start := git(e.t, e.folder, "rev-parse", "HEAD")
 	body := fmt.Sprintf("-- v1 fixed\n-- fix %d\n", n)
 	if big {

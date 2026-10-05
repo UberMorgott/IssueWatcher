@@ -135,6 +135,28 @@ func TestProviderCloseIssueAndStatus(t *testing.T) {
 	}
 }
 
+// The regression breaker's collaborator check: the issue author's association.
+func TestProviderIssueAuthorAssociation(t *testing.T) {
+	gh := githubtest.New(t)
+	seed(gh)
+	gh.Mu.Lock()
+	gh.Issues[0].Association = "COLLABORATOR"
+	id := gh.Issues[0].ID
+	gh.Mu.Unlock()
+	a := newAuth(t, gh)
+	signIn(t, gh, a)
+	p := NewProvider(a)
+	if as, err := p.IssueAuthorAssociation(t.Context(), id); err != nil || as != "COLLABORATOR" || !Collaborator(as) {
+		t.Fatalf("association %q %v", as, err)
+	}
+	if Collaborator("NONE") || Collaborator("CONTRIBUTOR") || !Collaborator("OWNER") || !Collaborator("MEMBER") {
+		t.Fatal("Collaborator")
+	}
+	if _, err := p.IssueAuthorAssociation(t.Context(), "I_missing"); !errors.Is(err, ErrNotIssue) {
+		t.Fatalf("missing: %v", err)
+	}
+}
+
 func TestProviderUnauthorizedSignsOut(t *testing.T) {
 	gh := githubtest.New(t)
 	a := newAuth(t, gh)

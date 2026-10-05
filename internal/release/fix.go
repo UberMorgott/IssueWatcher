@@ -40,6 +40,16 @@ type FixManifest struct {
 	StartSHA string   `json:"startSha,omitempty"`
 	HeadSHA  string   `json:"headSha,omitempty"`
 	Commits  []string `json:"commits,omitempty"` // StartSHA..HeadSHA
+
+	// Auto-triage (Phase 4): the classify verdict, the path it took and, for a
+	// duplicate, the original item with its run (and the release that fixed it).
+	Triage        *Classification `json:"triage,omitempty"`
+	Outcome       string          `json:"outcome,omitempty"` // "" = fix → push; answered | duplicate | needs_info | ignored
+	OutcomeReason string          `json:"outcomeReason,omitempty"`
+	Original      int64           `json:"original,omitempty"`
+	OriginalRun   int64           `json:"originalRun,omitempty"`
+	ReleaseRun    int64           `json:"releaseRun,omitempty"`
+	Notes         string          `json:"notes,omitempty"` // the fixing agent's note when it needs details
 }
 
 // DiffCheck is the verify step's diff limits result (part of its external ref).
@@ -110,18 +120,28 @@ func (e *Engine) consumeOne(ctx context.Context, cfg config.Settings, ev store.I
 	create, why := code.Open, "closed"
 	if create && ev.Kind == string(store.EventNewComment) {
 		// A comment starts a fix only on an item autopilot never fixed (a
-		// reporter's "thanks" after the release must not start another).
-		if n, err := e.d.Store.ItemFixRuns(ctx, ev.ItemID); err != nil || n > 0 {
-			create, why = false, "has_fix_run"
+		// reporter's "thanks" after the release must not start another), or
+		// when its run waits for the reporter's details (it is looked at again).
+		if !e.reporterAnswered(ctx, ev.ItemID) {
+			if n, err := e.d.Store.ItemFixRuns(ctx, ev.ItemID); err != nil || n > 0 {
+				create, why = false, "has_fix_run"
+			}
 		}
 	}
-	if create {
-		ok, err := e.d.Fixer.AutopilotMatch(ctx, ev.ItemID, ev.Kind)
+	triage := e.triageOn(code.CodeKey)
+	if create && !triage {
+		// Without auto-triage the project's fix rules decide (with it, the
+		// classify verdict does; rules then only override / filter).
+		ok, _, err := e.d.Fixer.AutopilotMatch(ctx, ev.ItemID, ev.Kind)
 		if err != nil {
 			e.d.Log.Error("autopilot: fix rule", "item", ev.ItemID, "err", err)
 			return ""
 		}
 		create, why = ok, "no_fix_rule"
+	}
+	steps := fixSteps()
+	if triage {
+		steps = fixStepsTriage()
 	}
 	repo, err := e.d.Store.Repo(ctx, code.CodeID)
 	if err != nil {
@@ -131,7 +151,7 @@ func (e *Engine) consumeOne(ctx context.Context, cfg config.Settings, ev store.I
 	m := FixManifest{ProjectID: repo.ID, Project: repo.Key, Repo: strings.TrimPrefix(repo.Key, "github:"), RepoURL: repo.URL,
 		Folder: repo.LocalPath, ItemID: ev.ItemID, Event: ev.Kind, Number: code.Number, ItemURL: code.URL}
 	b, _ := json.Marshal(m)
-	run, attached, err := e.d.Store.ConsumeInbox(ctx, ev.ID, store.NewFixRun{ProjectID: repo.ID, Manifest: b, Steps: fixSteps(), Create: create})
+	run, attached, err := e.d.Store.ConsumeInbox(ctx, ev.ID, store.NewFixRun{ProjectID: repo.ID, Manifest: b, Steps: steps, Create: create})
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return why
@@ -229,7 +249,7 @@ func (e *Engine) fixStep(ctx context.Context, id int64) (bool, error) {
 		}
 	}
 	if st == nil {
-		return false, e.fixPushed(ctx, run, m)
+		return false, e.fixFinished(ctx, run, m)
 	}
 	switch st.State {
 	case store.StepFailed, store.StepUnknown:
@@ -237,6 +257,10 @@ func (e *Engine) fixStep(ctx context.Context, id int64) (bool, error) {
 		return false, nil
 	}
 	switch st.Step {
+	case StepTriage:
+		return e.triageStep(ctx, run, m, *st)
+	case StepReply:
+		return e.fixReplyStep(ctx, run, m, *st)
 	case StepFix:
 		return e.fixJobStep(ctx, run, m, *st)
 	case StepVerify:
@@ -311,6 +335,9 @@ func (e *Engine) otherFixInFlight(ctx context.Context, r store.Run) bool {
 // directResult is the part of a direct fix job's result autopilot reads (runner.Result).
 type directResult struct {
 	Mode  string `json:"mode"`
+	Agent *struct {
+		Summary string `json:"summary"`
+	} `json:"agent"`
 	Local *struct {
 		Branch   string `json:"branch"`
 		StartSHA string `json:"startSha"`
@@ -337,15 +364,18 @@ func (e *Engine) fixJobStep(ctx context.Context, r store.Run, m *FixManifest, st
 			e.endFix(ctx, r, m, store.RunCancelled, "the item was closed before the fix")
 			return false, nil
 		}
+		e.queueMu.Lock()
 		if e.d.Fixer == nil || e.otherFixInFlight(ctx, r) {
+			e.queueMu.Unlock()
 			return false, nil // waits for the folder's previous fix to be pushed
 		}
 		key := fmt.Sprintf("item:%d:attempt:%d", m.ItemID, st.Attempt+1)
 		sending, err := e.transition(ctx, st, store.StepPending, store.StepSending, store.StepUpdate{IncAttempt: true, IdemKey: &key})
+		e.queueMu.Unlock()
 		if err != nil {
 			return false, err
 		}
-		entry, job, err := e.d.Fixer.AutopilotFix(ctx, m.ItemID, m.Event)
+		entry, job, err := e.d.Fixer.AutopilotFix(ctx, m.ItemID, m.Event, m.Triage != nil)
 		switch {
 		case err != nil:
 			_, terr := e.transition(ctx, sending, store.StepSending, store.StepPending, store.StepUpdate{Error: new(err.Error())})
@@ -423,6 +453,17 @@ func (e *Engine) fixJobStep(ctx context.Context, r store.Run, m *FixManifest, st
 		hold = HeldNoCommit
 	case loc.FixesRef:
 		hold = HeldClosingKeyword
+	}
+	if hold == HeldNeedsInfo || hold == HeldNotReproduced {
+		// The fixing agent needs the reporter: ask (autoReply) and wait held;
+		// the reporter's next comment starts the item again.
+		if _, err := e.transition(ctx, st, store.StepSending, store.StepSent, store.StepUpdate{ExternalRef: &st.ExternalRef, Error: new(hold)}); err != nil {
+			return false, err
+		}
+		if res.Agent != nil {
+			m.Notes = clipRunes(strings.TrimSpace(res.Agent.Summary), 1000)
+		}
+		return true, e.takePath(ctx, r, m, OutcomeNeedsInfo, DraftNeedsInfo, hold)
 	}
 	if hold != "" {
 		if _, err := e.transition(ctx, st, store.StepSending, store.StepFailed, store.StepUpdate{Error: new(hold)}); err != nil {
@@ -797,6 +838,80 @@ func (e *Engine) sendFixPush(ctx context.Context, mir *mirror, rm *Manifest, m *
 	}
 	if _, err := mir.run(ctx, env, "push", "-q", "--no-verify", url, m.HeadSHA+":refs/heads/"+m.Branch); err != nil {
 		return redact(err, secret)
+	}
+	return nil
+}
+
+// resumeFix continues a held fix run: failed steps run again (a fix job gets
+// a new attempt), unclear ones (a push or reply that may have happened) are
+// probed by their step before any send. A run held for the reporter's details
+// (all its steps through) is looked at again from triage / the fix.
+func (e *Engine) resumeFix(ctx context.Context, run store.Run) (store.Run, error) {
+	m, err := fixManifestOf(run)
+	if err != nil {
+		return run, err
+	}
+	steps, err := e.d.Store.RunSteps(ctx, run.ID)
+	if err != nil {
+		return run, err
+	}
+	again := m.Outcome == OutcomeNeedsInfo
+	for _, st := range steps {
+		to := ""
+		switch {
+		case st.State == store.StepFailed:
+			to = store.StepPending
+		case st.State == store.StepUnknown && st.Step == StepPush:
+			to = store.StepSending // fixPushStep probes a sending push first
+		case st.State == store.StepUnknown:
+			to = store.StepPending // reply: attempt > 0 → probed before a send
+		case again && (st.Step == StepTriage || st.Step == StepFix || st.Step == StepVerify || st.Step == StepPush) && st.State != store.StepPending:
+			to = store.StepPending
+		}
+		if to == "" {
+			continue
+		}
+		if _, err := e.transition(ctx, st, st.State, to, store.StepUpdate{Error: new("resumed by the owner")}); err != nil {
+			return run, err
+		}
+	}
+	if again {
+		m.Outcome, m.OutcomeReason, m.Notes, m.Triage = "", "", "", nil
+		b, _ := json.Marshal(m)
+		if _, err := e.d.Store.UpdateRun(ctx, run.ID, []string{store.RunHeld}, store.RunUpdate{Manifest: b}); err != nil {
+			return run, err
+		}
+	}
+	r, err := e.d.Store.UpdateRun(ctx, run.ID, []string{store.RunHeld}, store.RunUpdate{State: store.RunRunning})
+	if err != nil {
+		if errors.Is(err, store.ErrRunState) {
+			return r, ErrState
+		}
+		return r, err
+	}
+	e.d.OnChange(run.ID)
+	e.launchFix(run.ID) //nolint:contextcheck // the run outlives the request: the engine's context
+	return r, nil
+}
+
+// fixFinished ends a run whose steps are all through: pushed for a fix, else
+// the triage path's outcome (needs_info stays held for the reporter).
+func (e *Engine) fixFinished(ctx context.Context, r store.Run, m *FixManifest) error {
+	switch m.Outcome {
+	case "":
+		return e.fixPushed(ctx, r, m)
+	case OutcomeNeedsInfo:
+		reason := HeldNeedsInfo
+		if m.OutcomeReason == HeldNotReproduced {
+			reason = HeldNotReproduced
+		}
+		e.holdFix(ctx, r, m, reason, cmpOrStr(m.Notes, "waiting for the reporter's details"))
+	case OutcomeAnswered:
+		e.endFix(ctx, r, m, store.RunAnswered, "answered")
+	case OutcomeDuplicate:
+		e.endFix(ctx, r, m, store.RunDuplicate, fmt.Sprintf("duplicate of item %d (%s)", m.Original, m.OutcomeReason))
+	default:
+		e.endFix(ctx, r, m, store.RunIgnored, "ignored: "+m.OutcomeReason)
 	}
 	return nil
 }

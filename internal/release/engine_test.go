@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha1" //nolint:gosec // the Factorio portal's archive hash
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,7 +22,6 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
-	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/smoke"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
@@ -279,7 +279,7 @@ func newEnv(t *testing.T) *tenv {
 		},
 		DefaultBranch: func(context.Context, string) (string, error) { return "main", nil },
 		GitToken:      func(context.Context) (string, error) { return "tok-secret", nil },
-		TokenEnv:      runner.TokenEnv,
+		TokenEnv:      testTokenEnv,
 		GitURL:        func(string) string { return e.bare },
 		Folders:       e,
 		Gate: func(_ context.Context, project, _, dir, _ string) (CmdResult, bool) {
@@ -992,4 +992,12 @@ func TestReleaseCheckFullDryRun(t *testing.T) {
 	if err != nil || res.Build.OK || res.Build.Command == nil || res.Build.Command.Output != "boom" || res.ArchiveCheck.Skipped == "" {
 		t.Fatalf("failing build %v %+v", err, res.Build)
 	}
+}
+
+// testTokenEnv is runner.TokenEnv (the runner imports this package: no import here).
+func testTokenEnv(url, token string) (env []string, secret string) {
+	auth := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	return []string{"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=http." + url + ".extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic " + auth,
+		"GIT_CONFIG_KEY_1=credential.helper", "GIT_CONFIG_VALUE_1="}, auth
 }

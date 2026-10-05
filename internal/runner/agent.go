@@ -111,6 +111,9 @@ type AgentResult struct {
 	// authFailed: the CLI could not sign in (expired session, bad key) →
 	// CodeAgentAuth; the user signs in to the CLI again.
 	authFailed bool
+	// raw is the final structured text as the agent wrote it (autopilot flows
+	// decode their own shapes from it).
+	raw string
 }
 
 // agentEnv is the environment for child processes: the user's, minus
@@ -464,6 +467,7 @@ func applyStructured(text string, res *AgentResult) {
 	if text == "" {
 		return
 	}
+	res.raw = text
 	var v struct {
 		Status  string       `json:"status"`
 		Verdict string       `json:"verdict"`

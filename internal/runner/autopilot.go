@@ -33,7 +33,10 @@ func AutopilotFixes(cfg config.Agents, key string) bool {
 // project must be in direct mode with its folder. The decision is logged in
 // the automation log like a rule's; job is nil when it was skipped
 // (entry.Reason; ReasonNoFixRule is not logged).
-func (r *Runner) AutopilotFix(ctx context.Context, itemID int64, event string) (store.AutomationEntry, *store.Job, error) {
+//
+// triaged: the auto-triage verdict (a bug) decided the fix, so no rule is
+// needed; a matching rule still sets the agent profile and its own cap.
+func (r *Runner) AutopilotFix(ctx context.Context, itemID int64, event string, triaged bool) (store.AutomationEntry, *store.Job, error) {
 	cfg := r.opts.Settings().Agents
 	in, err := r.opts.Store.JobInput(ctx, itemID)
 	if err != nil {
@@ -43,11 +46,11 @@ func (r *Runner) AutopilotFix(ctx context.Context, itemID int64, event string) (
 	if err != nil {
 		return store.AutomationEntry{}, nil, err
 	}
-	rule, ok, err := r.autopilotRule(ctx, itemID, event)
+	rule, ok, _, err := r.autopilotRule(ctx, itemID, event)
 	if err != nil {
 		return store.AutomationEntry{}, nil, err
 	}
-	if !ok {
+	if !ok && !triaged {
 		return store.AutomationEntry{ItemID: itemID, Event: event, Flow: config.FlowFix, Decision: store.DecisionSkipped, Reason: ReasonNoFixRule}, nil, nil
 	}
 	pol := cfg.AutomationFor(in.CodeKey)
@@ -80,31 +83,36 @@ func (r *Runner) AutopilotFix(ctx context.Context, itemID int64, event string) (
 }
 
 // AutopilotMatch reports whether an enabled fix rule of the item's project
-// covers item itemID for event (the inbox starts a fix run only then).
-func (r *Runner) AutopilotMatch(ctx context.Context, itemID int64, event string) (bool, error) {
-	_, ok, err := r.autopilotRule(ctx, itemID, event)
-	return ok, err
+// covers item itemID for event (match: without auto-triage the inbox starts a
+// fix run only then), and whether the project has enabled fix rules for the
+// event and item kind at all (scoped: with auto-triage they filter which bugs
+// are fixed; a project without such rules leaves it to the verdict).
+func (r *Runner) AutopilotMatch(ctx context.Context, itemID int64, event string) (match, scoped bool, err error) {
+	_, match, scoped, err = r.autopilotRule(ctx, itemID, event)
+	return match, scoped, err
 }
 
-func (r *Runner) autopilotRule(ctx context.Context, itemID int64, event string) (config.Rule, bool, error) {
+func (r *Runner) autopilotRule(ctx context.Context, itemID int64, event string) (config.Rule, bool, bool, error) {
 	in, err := r.opts.Store.JobInput(ctx, itemID)
 	if err != nil {
-		return config.Rule{}, false, err
+		return config.Rule{}, false, false, err
 	}
 	facts, err := r.opts.Store.AutomationItemFacts(ctx, itemID)
 	if err != nil {
-		return config.Rule{}, false, err
+		return config.Rule{}, false, false, err
 	}
 	code, err := r.opts.Store.ItemCodeProject(ctx, itemID)
 	if err != nil {
-		return config.Rule{}, false, err
+		return config.Rule{}, false, false, err
 	}
 	ev := store.Event{Kind: store.EventKind(event), ItemKind: code.Kind, ItemID: itemID, Project: in.ProjectKey}
 	if in.Mod {
 		ev.CodeProject = code.CodeKey
 	}
-	ru, ok := fixRule(r.opts.Settings().Agents.Automation.Rules, ev, facts.Labels)
-	return ru, ok, nil
+	rules := r.opts.Settings().Agents.Automation.Rules
+	scoped := slices.ContainsFunc(rules, func(ru config.Rule) bool { return ru.Flow == config.FlowFix && ruleFor(ru, ev) })
+	ru, ok := fixRule(rules, ev, facts.Labels)
+	return ru, ok, scoped, nil
 }
 
 func hasProfile(cfg config.Agents, id string) bool {

@@ -5,6 +5,7 @@
 package githubtest
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -48,6 +49,8 @@ type Issue struct {
 	UpdatedAt time.Time
 	ClosedAt  time.Time
 	Comments  []Comment
+	// Association is the author's authorAssociation ("" = NONE).
+	Association string
 }
 
 // Server is the fake. Lock Mu before mutating Issues/Repos from a test.
@@ -385,7 +388,7 @@ func issueNode(is *Issue) map[string]any {
 	}
 	return map[string]any{
 		"id": is.ID, "number": is.Number, "title": is.Title, "body": "", "url": "https://x/" + is.ID,
-		"state": state, "stateReason": nil, "createdAt": is.CreatedAt, "updatedAt": is.UpdatedAt, "closedAt": closedAt,
+		"state": state, "stateReason": nil, "authorAssociation": cmp.Or(is.Association, "NONE"), "createdAt": is.CreatedAt, "updatedAt": is.UpdatedAt, "closedAt": closedAt,
 		"author": map[string]string{"login": is.Author}, "labels": map[string]any{"nodes": labels},
 		"comments": map[string]any{"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}, "nodes": comments},
 	}

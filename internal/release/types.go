@@ -30,6 +30,11 @@ const (
 	// Fix run steps (docs/AUTOPILOT.md → Fix run): fix → verify → push (StepPush).
 	StepFix    = "fix"    // the autopilot direct fix job (external_ref = job id)
 	StepVerify = "verify" // the static gate on the fix head + diff limits
+	// StepTriage (auto-triage, first step of a fix run): the classify agent's
+	// verdict (external_ref = Classification JSON). A fix run's reply step
+	// (StepReply, target = item id) answers a question / asks for details /
+	// gives a duplicate the original's release.
+	StepTriage = "triage"
 )
 
 // Refusal codes of a plan / start (Refusal.Code) and held reasons.

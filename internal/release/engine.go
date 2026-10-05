@@ -79,6 +79,15 @@ type Deps struct {
 	Fixer Fixer
 	// TickEvery paces the autopilot loop: inbox → fix runs → coalescing timer (default 30 s).
 	TickEvery time.Duration
+	// Triager classifies incoming items (auto-triage; nil = the fix rules decide).
+	Triager Triager
+	// Drafter drafts reporter replies (nil = the templates).
+	Drafter Drafter
+	// PauseProject switches a project's autopilot off (the regression breaker).
+	PauseProject func(ctx context.Context, project string) error
+	// Collaborator reports whether a GitHub item's author is a collaborator of
+	// its repository (owner / member / collaborator); nil = never.
+	Collaborator func(ctx context.Context, itemID int64) (bool, error)
 }
 
 // ItemActions are the platform actions on an item (the app's syncers).
@@ -98,10 +107,13 @@ type ItemActions interface {
 
 // Fixer queues autopilot fix jobs (runner.Runner).
 type Fixer interface {
-	// AutopilotMatch reports whether an enabled fix rule covers the item for event.
-	AutopilotMatch(ctx context.Context, itemID int64, event string) (bool, error)
-	// AutopilotFix queues the fix job (job nil = skipped, entry.Reason says why).
-	AutopilotFix(ctx context.Context, itemID int64, event string) (store.AutomationEntry, *store.Job, error)
+	// AutopilotMatch reports whether an enabled fix rule covers the item for
+	// event (match), and whether the project has fix rules for the event and
+	// item kind at all (scoped: then they filter what triage may fix).
+	AutopilotMatch(ctx context.Context, itemID int64, event string) (match, scoped bool, err error)
+	// AutopilotFix queues the fix job (job nil = skipped, entry.Reason says
+	// why); triaged = the classify verdict decided it, no rule needed.
+	AutopilotFix(ctx context.Context, itemID int64, event string, triaged bool) (store.AutomationEntry, *store.Job, error)
 }
 
 // Engine runs release runs. One executor goroutine per running run.
@@ -114,6 +126,9 @@ type Engine struct {
 	wg     sync.WaitGroup
 	kick   chan struct{} // wakes the autopilot loop (Kick)
 	tickMu sync.Mutex    // one Tick at a time
+	// queueMu makes "no other fix of the folder in flight → queue mine" one
+	// step: fix runs advance in their own goroutines.
+	queueMu sync.Mutex
 
 	// hook is called around every external send (tests simulate crashes):
 	// point "before" (after sending is committed, before the call) and "after"
@@ -681,6 +696,9 @@ func (e *Engine) Resume(ctx context.Context, id int64) (store.Run, error) {
 	}
 	if run.State != store.RunHeld {
 		return run, ErrState
+	}
+	if run.Kind == store.RunKindFix {
+		return e.resumeFix(ctx, run)
 	}
 	m, err := manifestOf(run)
 	if err != nil {

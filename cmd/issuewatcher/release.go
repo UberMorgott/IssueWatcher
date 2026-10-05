@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -23,7 +24,7 @@ import (
 // with the user's token, the mod platforms' publishers, the runner's folder
 // lock, verify gate and job-object commands; run / event changes go to the
 // dashboard (SSE). srv is read at call time: it is set after the engine exists.
-func newReleaseEngine(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store, gh *github.Provider,
+func newReleaseEngine(log *slog.Logger, dataDir string, cfgs *config.Store, settings *appSettings, st *store.Store, gh *github.Provider,
 	jobs *runner.Runner, sy *syncer.Group, publishers func(string) provider.Publisher, srv func() *api.Server,
 ) *release.Engine {
 	// Sync writes autopilot projects' new items / comments into the inbox (in
@@ -34,6 +35,32 @@ func newReleaseEngine(log *slog.Logger, dataDir string, cfgs *config.Store, st *
 	})
 	return release.New(release.Deps{
 		HasGate: jobs.HasGate, Fixer: jobs, Items: itemActions{st: st, sy: sy, gh: gh},
+		Triager: jobs, Drafter: jobs,
+		// The regression breaker switches the project's autopilot off (as the
+		// panel's switch would) and tells the open tabs.
+		PauseProject: func(_ context.Context, project string) error {
+			patch, _ := json.Marshal(map[string]any{"agents": map[string]any{"projects": map[string]any{project: map[string]any{
+				"autopilot": map[string]any{"enabled": false}}}}})
+			var err error
+			for range 3 { // a concurrent save moves the revision: read it again
+				var doc api.SettingsDoc
+				if doc, err = settings.PatchSettings(cfgs.Get().Revision, patch); err == nil {
+					if s := srv(); s != nil {
+						s.Publish(api.EventSettingsChanged, doc)
+					}
+					return nil
+				}
+			}
+			return err
+		},
+		Collaborator: func(ctx context.Context, itemID int64) (bool, error) {
+			ref, err := st.ItemRef(ctx, itemID)
+			if err != nil || ref.Platform != store.CodePlatform {
+				return false, err
+			}
+			a, err := gh.IssueAuthorAssociation(ctx, ref.ExternalID)
+			return github.Collaborator(a), err
+		},
 		Store: st, Settings: cfgs.Get, DataDir: dataDir, Releaser: gh, Publishers: publishers,
 		DefaultBranch: gh.DefaultBranch, GitToken: gh.GitToken, TokenEnv: runner.TokenEnv, Folders: jobs,
 		Gate: func(ctx context.Context, project, localPath, dir, logDir string) (release.CmdResult, bool) {

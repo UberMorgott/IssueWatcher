@@ -297,7 +297,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	var testN atomic.Int64
 	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
-	releases = newReleaseEngine(log, dataDir, cfgs, st, gh, jobs, sy, mods.Publisher, func() *api.Server { return srv })
+	releases = newReleaseEngine(log, dataDir, cfgs, settings, st, gh, jobs, sy, mods.Publisher, func() *api.Server { return srv })
 
 	focus := notify.FocusDashboard
 	var picker api.FolderPicker

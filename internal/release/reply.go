@@ -128,42 +128,6 @@ func replyHead(c *rc) string { return "Fixed in " + c.m.Tag + "." }
 var platformNames = map[string]string{"nexus": "Nexus Mods", "factorio": "Factorio Mod Portal", "steam": "Steam Workshop",
 	"curseforge": "CurseForge", "github": "GitHub"}
 
-// replyBody drafts the reply from the manifest (read-only, no agent): the
-// version, the GitHub release and every available, non-skipped target.
-func (e *Engine) replyBody(ctx context.Context, c *rc, it ReplyItem) (string, error) {
-	steps, err := e.d.Store.RunSteps(ctx, c.run.ID)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	b.WriteString(replyHead(c) + "\n\n")
-	links := 0
-	for _, st := range steps {
-		switch {
-		case st.Step == StepGHRelease && st.State == store.StepSent && strings.HasPrefix(st.ExternalRef, "http"):
-			b.WriteString("- GitHub release: " + st.ExternalRef + "\n")
-			links++
-		case st.Step == StepAvailable && st.State == store.StepSent:
-			if t, ok := c.target(st.Target); ok && t.URL != "" {
-				b.WriteString("- " + cmpOrStr(platformNames[t.Platform], t.Platform) + ": " + t.URL + "\n")
-				links++
-			}
-		}
-	}
-	if links == 0 {
-		b.WriteString("The update is out.\n")
-	}
-	b.WriteString("\nThanks for the report!")
-	if it.Platform == store.CodePlatform {
-		b.WriteString("\n\n<!-- " + replyMarker(c, it) + " -->")
-	}
-	s := b.String()
-	if r := []rune(s); len(r) > maxReplyRunes {
-		s = string(r[:maxReplyRunes])
-	}
-	return s, nil
-}
-
 // checkReply: every target's publish and availability went through or was
 // skipped (a failed target holds the replies until the owner skips it).
 func (e *Engine) checkReply(ctx context.Context, c *rc, st store.Step) (string, error) {
@@ -182,7 +146,74 @@ func (e *Engine) checkReply(ctx context.Context, c *rc, st store.Step) (string, 
 			return HeldReplyWaiting, fmt.Errorf("%s is %s: skip the target or resume once it is available", stepName(s), s.State)
 		}
 	}
+	if replyStateOf(st).Body != "" {
+		return "", nil // drafted before (a crash or a failed send): the same text again
+	}
+	// Draft once, stored before the send: a resend posts the same text and the
+	// probe looks for the same marker.
+	it, _ := c.replyItem(st.Target)
+	body, drafted, note := e.releaseDraft(ctx, c, it)
+	rs := replyState{Kind: DraftReleased, Body: body, Drafted: drafted, Note: note, Marker: replyMarker(c, it)}
+	if it.Platform != store.CodePlatform {
+		rs.Marker = firstLine(body)
+	}
+	b, _ := json.Marshal(rs)
+	if _, err := e.transition(ctx, st, store.StepPending, store.StepPending, store.StepUpdate{Request: b}); err != nil {
+		return "check:" + stepName(st), err
+	}
 	return "", nil
+}
+
+// releaseDraft drafts item it's release reply: what its fix run changed, the
+// version and the links of the available, non-skipped targets; the template
+// when the drafter fails or its draft does not pass the check.
+func (e *Engine) releaseDraft(ctx context.Context, c *rc, it ReplyItem) (string, bool, string) {
+	links, err := e.replyLinks(ctx, c)
+	if err != nil {
+		links = nil
+	}
+	req := DraftRequest{ItemID: it.ID, Kind: DraftReleased, Version: c.m.Version, Links: links, Limit: replyLimit(it.Platform),
+		LogPath: filepath.Join(e.runDir(c.run.ID), "logs", "reply-"+strconv.FormatInt(it.ID, 10)+".log")}
+	for _, id := range c.m.FixRuns {
+		fr, err := e.d.Store.Run(ctx, id)
+		if err != nil {
+			continue
+		}
+		its, _ := e.d.Store.RunItems(ctx, id)
+		if slices.ContainsFunc(its, func(x store.RunItem) bool { return x.ItemID == it.ID }) {
+			req.Changes, req.Language = e.fixChanges(ctx, fr)
+			break
+		}
+	}
+	if len(req.Changes) == 0 && c.m.Changelog != "" {
+		for l := range strings.SplitSeq(c.m.Changelog, "\n") {
+			if l = strings.TrimSpace(l); l != "" && len(req.Changes) < 10 {
+				req.Changes = append(req.Changes, l)
+			}
+		}
+	}
+	return e.draftBody(ctx, req, linkURLs(links, c.m.RepoURL, it.URL), releasedTemplate(c.m.Tag, links), replyMarker(c, it),
+		it.Platform == store.CodePlatform)
+}
+
+// replyLinks: the GitHub release and every available target with a page.
+func (e *Engine) replyLinks(ctx context.Context, c *rc) ([]Link, error) {
+	steps, err := e.d.Store.RunSteps(ctx, c.run.ID)
+	if err != nil {
+		return nil, err
+	}
+	var links []Link
+	for _, st := range steps {
+		switch {
+		case st.Step == StepGHRelease && st.State == store.StepSent && strings.HasPrefix(st.ExternalRef, "http"):
+			links = append(links, Link{Name: "GitHub", URL: st.ExternalRef})
+		case st.Step == StepAvailable && st.State == store.StepSent:
+			if t, ok := c.target(st.Target); ok && t.URL != "" {
+				links = append(links, Link{Name: cmpOrStr(platformNames[t.Platform], t.Platform), URL: t.URL})
+			}
+		}
+	}
+	return links, nil
 }
 
 // probeReply: a step never sent has nothing to find; after a send the own
@@ -198,7 +229,11 @@ func (e *Engine) probeReply(ctx context.Context, c *rc, st store.Step) (probeRes
 	if !ok {
 		return probeResult{}, errors.New("item not in the manifest")
 	}
-	ref, found, err := e.d.Items.FindReply(ctx, it.ID, replyMarker(c, it))
+	marker := replyMarker(c, it)
+	if rs := replyStateOf(st); rs.Marker != "" {
+		marker = rs.Marker // the stored draft's (its first line off GitHub)
+	}
+	ref, found, err := e.d.Items.FindReply(ctx, it.ID, marker)
 	if err != nil || !found {
 		return probeResult{}, err
 	}
@@ -207,11 +242,11 @@ func (e *Engine) probeReply(ctx context.Context, c *rc, st store.Step) (probeRes
 
 func (e *Engine) sendReply(ctx context.Context, c *rc, st store.Step) (string, error) {
 	it, _ := c.replyItem(st.Target)
-	body, err := e.replyBody(ctx, c, it)
-	if err != nil {
-		return "", holdError{reason: "failed:" + stepName(st), err: err, definite: true}
+	rs := replyStateOf(st)
+	if rs.Body == "" { // checkReply stores it before every send
+		return "", holdError{reason: "failed:" + stepName(st), err: errors.New("no stored reply draft"), definite: true}
 	}
-	return e.d.Items.Reply(ctx, it.ID, body)
+	return e.d.Items.Reply(ctx, it.ID, rs.Body)
 }
 
 func (e *Engine) probeClose(ctx context.Context, c *rc, st store.Step) (probeResult, error) {

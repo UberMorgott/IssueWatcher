@@ -24,6 +24,35 @@ const issueStateQuery = `query($id: ID!) {
   }
 }`
 
+const issueAuthorQuery = `query($id: ID!) { node(id: $id) { ... on Issue { authorAssociation } } }`
+
+// IssueAuthorAssociation reads the issue author's association with the
+// repository (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, …).
+func (p *Provider) IssueAuthorAssociation(ctx context.Context, itemExternalID string) (string, error) {
+	var out struct {
+		Node *struct {
+			AuthorAssociation string `json:"authorAssociation"`
+		} `json:"node"`
+	}
+	if err := p.c.graphql(ctx, issueAuthorQuery, map[string]any{"id": itemExternalID}, &out, 0); err != nil {
+		return "", err
+	}
+	if out.Node == nil || out.Node.AuthorAssociation == "" {
+		return "", ErrNotIssue
+	}
+	return out.Node.AuthorAssociation, nil
+}
+
+// Collaborator reports whether an author association grants push-level
+// standing in the repository (owner, organization member, collaborator).
+func Collaborator(association string) bool {
+	switch association {
+	case "OWNER", "MEMBER", "COLLABORATOR":
+		return true
+	}
+	return false
+}
+
 // ErrNotIssue means the node is not an issue (or is gone).
 var ErrNotIssue = errors.New("github: not an issue")
 
