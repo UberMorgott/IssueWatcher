@@ -256,13 +256,44 @@ func TestFailedBootstrapRetriesWithBackoff(t *testing.T) {
 }
 
 // slowProvider serves n projects, each read taking delay; failAt fails that
-// project's read with a rate limit.
+// project's read with a rate limit. With gate > 0 the reads hold until gate
+// of them are in flight at once (then the gate stays open), so overlap is
+// proven by counting, not by wall-clock time; maxInFlight records the peak.
 type slowProvider struct {
 	fakeProvider
 	n      int
 	delay  time.Duration
 	failAt string
 	reads  atomic.Int32
+
+	gate        int32
+	gateOnce    sync.Once
+	gateOpen    chan struct{} // closed once gate reads were in flight together
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+}
+
+// waitGate counts the read in and holds it until the gate opens (or ctx ends).
+func (f *slowProvider) waitGate(ctx context.Context) error {
+	n := f.inFlight.Add(1)
+	for {
+		peak := f.maxInFlight.Load()
+		if n <= peak || f.maxInFlight.CompareAndSwap(peak, n) {
+			break
+		}
+	}
+	if f.gate <= 0 {
+		return nil
+	}
+	if n >= f.gate {
+		f.gateOnce.Do(func() { close(f.gateOpen) })
+	}
+	select {
+	case <-f.gateOpen:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (f *slowProvider) ListProjects(context.Context) ([]provider.Project, error) {
@@ -279,6 +310,10 @@ func (f *slowProvider) SyncItems(ctx context.Context, p provider.Project, _ time
 	if p.ExternalID == f.failAt {
 		return nil, &provider.RateLimitError{Reset: t0.Add(time.Hour)}
 	}
+	defer f.inFlight.Add(-1)
+	if err := f.waitGate(ctx); err != nil {
+		return nil, err
+	}
 	select {
 	case <-time.After(f.delay):
 	case <-ctx.Done():
@@ -288,10 +323,14 @@ func (f *slowProvider) SyncItems(ctx context.Context, p provider.Project, _ time
 }
 
 // A reconcile reads Plan.Concurrency projects at a time; progress counts up
-// in completion order.
+// in completion order. Parallelism is proven by the provider: its first reads
+// hold until 4 are in flight together (a sequential reconcile never gets
+// there and the safety deadline fails the test), and no more than 4 ever are.
+// No wall-clock bound: a loaded machine (race detector, parallel packages)
+// slows every read alike without making a parallel reconcile sequential.
 func TestReconcileIsParallel(t *testing.T) {
 	st := openStore(t)
-	fp := &slowProvider{platform: "nexus", account: "me", n: 20, delay: 50 * time.Millisecond}
+	fp := &slowProvider{platform: "nexus", account: "me", n: 20, delay: 5 * time.Millisecond, gate: 4, gateOpen: make(chan struct{})}
 	s := New(Options{Store: st, Provider: fp, Log: slog.New(slog.DiscardHandler), Plan: plan5()}) // Concurrency 2
 	p := plan5()
 	p.Concurrency = 4
@@ -307,12 +346,14 @@ func TestReconcileIsParallel(t *testing.T) {
 			mu.Unlock()
 		}
 	})
-	start := time.Now()
-	if err := s.SyncOnce(t.Context()); err != nil {
-		t.Fatal(err)
+	// Safety deadline only (a sequential reconcile would wait at the gate forever).
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := s.SyncOnce(ctx); err != nil {
+		t.Fatalf("%v (peak reads in flight %d, want 4)", err, fp.maxInFlight.Load())
 	}
-	if d := time.Since(start); d >= 700*time.Millisecond { // 4 workers: ~250 ms
-		t.Fatalf("20 projects x 50 ms took %v with 4 workers (sequential is 1 s)", d)
+	if peak := fp.maxInFlight.Load(); peak != 4 {
+		t.Fatalf("peak reads in flight %d, want Concurrency 4", peak)
 	}
 	if len(dones) != 20 || dones[0] != 1 || dones[19] != 20 {
 		t.Fatalf("progress %v", dones)
