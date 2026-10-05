@@ -38,6 +38,7 @@ import (
 	folderpicker "github.com/UberMorgott/issuewatcher/internal/picker"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
+	"github.com/UberMorgott/issuewatcher/internal/provider/steamugc"
 	"github.com/UberMorgott/issuewatcher/internal/redact"
 	"github.com/UberMorgott/issuewatcher/internal/release"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
@@ -86,6 +87,10 @@ func newAuth(log *slog.Logger, dataDir string) *github.Auth {
 const snapshotScale = 1.5
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == steamugc.HelperArg {
+		// Steam Workshop helper (steamugc): ISteamUGC through the running Steam client, one job on stdin.
+		os.Exit(steamugc.Main())
+	}
 	if isCLI(os.Args[1:]) {
 		// CLI/MCP subcommands talk to the running app; they run before the
 		// single-instance lock and never open the tray, DB or a message box.
@@ -370,6 +375,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		NexusKey:         mods.nexusKeys,
 		CurseForgeUpload: mods.cfUpload,
 		SteamUpload:      mods.workshop,
+		Workshop:         steamugc.New(steamugc.Options{DataDir: dataDir}),
 		Publishers:       mods.Publisher,
 		PageEditors:      mods.PageEditor,
 		Platforms:        mods,

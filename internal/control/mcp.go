@@ -216,6 +216,7 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 	add(s, &mcp.Tool{Name: "get_publish_task", Description: "Get a publish task: state (running, done, failed, cancelled), stage, bytes sent, result or error.", Annotations: ro},
 		func(ctx context.Context, in taskID) (json.RawMessage, error) { return c.PublishTask(ctx, in.ID) })
 	addReleaseTools(s, c)
+	addWorkshopTools(s, c)
 	return s
 }
 

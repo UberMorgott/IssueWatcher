@@ -145,6 +145,8 @@ func TestCLIActionCommands(t *testing.T) {
 		"POST /api/jobs/9/labels":              `200 {"id":9}`,
 		"POST /api/projects/69/publish":        `200 {"dryRun":true}`,
 		"GET /api/projects/69/publish/targets": `200 {"files":[]}`,
+		"POST /api/projects/69/steam/item":     `200 {"dryRun":true}`,
+		"POST /api/projects/69/steam/page":     `200 {"dryRun":true}`,
 		"GET /api/publish/t1":                  `200 {"id":"t1","state":"done"}`,
 	})
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
@@ -172,6 +174,10 @@ func TestCLIActionCommands(t *testing.T) {
 			apiCall{"POST", "/api/projects/69/publish", "", `{"path":"C:\\m\\mod_1.1.6.zip","version":"1.1.6","dryRun":true}`}, `"dryRun": true`},
 		{"", []string{"publish", "69", "--path", `C:\m\mod.jar`, "--version", "0.1.0", "--game-versions", "0.6, Early Access", "--release-type", "beta", "--app-id", "839770"},
 			apiCall{"POST", "/api/projects/69/publish", "", `{"path":"C:\\m\\mod.jar","version":"0.1.0","appId":839770,"gameVersions":["0.6","Early Access"],"releaseType":"beta"}`}, ``},
+		{"", []string{"workshop", "create", "69", "--app-id", "839770", "--dry-run"},
+			apiCall{"POST", "/api/projects/69/steam/item", "", `{"appId":839770,"dryRun":true}`}, `dryRun`},
+		{"", []string{"workshop", "page", "69", "--title", "Content Tool", "--tags", "Tools, Gameplay", "--visibility", "public", "--dry-run"},
+			apiCall{"POST", "/api/projects/69/steam/page", "", `{"title":"Content Tool","tags":["Tools","Gameplay"],"visibility":"public","dryRun":true}`}, `dryRun`},
 		{"", []string{"publish", "targets", "69"}, apiCall{"GET", "/api/projects/69/publish/targets", "", ""}, `"files"`},
 		{"", []string{"publish", "status", "t1"}, apiCall{"GET", "/api/publish/t1", "", ""}, `"done"`},
 	} {

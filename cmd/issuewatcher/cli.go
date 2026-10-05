@@ -66,9 +66,18 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   publish <projectId> --path ARCHIVE --version V [--file-id ID | --new-file] [--name N]
           [--description D] [--category C] [--changelog-file FILE] [--archive-previous]
           [--update-mod-version] [--dry-run] [--wait]
+          [--app-id N] [--game-versions V,..] [--release-type release|beta|alpha]
                       upload an archive as a new mod version on the project's platform
-                      (nexus, factorio); public unless --dry-run; --wait polls to the end
+                      (nexus, factorio, steam via steamcmd, curseforge); public unless --dry-run; --wait polls to the end
   publish status <taskId>
+
+  Steam Workshop items of a code project (Steam client running, signed in as the owner):
+  workshop item <project>
+  workshop create <project> --app-id N [--dry-run]
+                      create the project's Workshop item once (id recorded first; a retry reuses it)
+  workshop page <project> [--item ID] [--app-id N] [--title T] [--locale-dir DIR] [--preview FILE]
+          [--tags a,b] [--visibility public|friends|private|unlisted] [--change-note TEXT] [--dry-run]
+                      write the page in every language of DIR/description.<language>.txt
 
   Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
   profile get <project>
@@ -252,6 +261,8 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.job(rest)
 	case "publish":
 		return c.publish(rest)
+	case "workshop":
+		return c.workshop(rest)
 	case "release":
 		return c.release(rest)
 	case "runs":

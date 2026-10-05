@@ -84,6 +84,8 @@ type Options struct {
 	// (/api/providers/{curseforge,steam}/upload); nil disables them.
 	CurseForgeUpload CurseForgeUpload
 	SteamUpload      SteamUpload
+	// Workshop creates Steam Workshop items and writes their pages (/api/projects/{id}/steam/*); nil disables it.
+	Workshop WorkshopItems
 	// Publishers returns the provider that publishes new versions for a
 	// platform, nil when none (/api/projects/{id}/publish, needs Store); nil disables them.
 	Publishers func(platform string) provider.Publisher
@@ -195,6 +197,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 		s.registerNexus(mux)
 	}
 	s.registerUploads(mux)
+	if opts.Workshop != nil && opts.Store != nil {
+		s.registerWorkshop(mux)
+	}
 	if opts.Publishers != nil && opts.Store != nil {
 		s.registerPublish(mux)
 	}
