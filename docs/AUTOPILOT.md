@@ -2,11 +2,11 @@
 
 Design 2026-10-05 (owner decisions of the same day; reviewed with Codex 2026-10-05, see **Review**). Checklist: `TASKS.md` → Phase 8. Builds on `ARCHITECTURE.md` → Runner, Automation, Control, Native mod platforms, and Phase 7 publishing.
 
-**Goal**: the owner can walk away. A new issue / comment / bug report on a mod → triage → the coder fixes it in the mapped folder → the app verifies (build, lint, tests, in-game smoke test) → push → GitHub release → the fixed mod is uploaded to every enabled platform → the reporter gets a reply with the version and links → the issue is closed. Every step is a per-project checkbox; anything that fails stops the chain before the next public action and sends the owner one push notification.
+**Goal**: the owner can walk away. A new issue / comment / bug report on a mod → triage → the coder fixes it in the mapped folder → the app verifies (build, lint, tests, in-game smoke test) → push → GitHub release → the fixed mod is uploaded to every enabled platform → the reporter gets a reply with the version and links → the issue is closed. Every step is a per-project checkbox; anything that fails stops the chain before the next public action and records an unread "needs attention" event in the app's autopilot log (in this document, "notification" always means such an event: there is no phone push).
 
 ## Owner decisions (2026-10-05)
 
-1. **Verify gate** = the project's build/lint/tests **plus** an automated in-game smoke test where feasible (Factorio: headless load of the mod + a save; other games: whatever the adapter can do). Fail → nothing is published, the owner gets a push notification.
+1. **Verify gate** = the project's build/lint/tests **plus** an automated in-game smoke test where feasible (Factorio: headless load of the mod + a save; other games: whatever the adapter can do). Fail → nothing is published, an unread event is recorded in the autopilot log. *(Revised 2026-10-05: no phone push — see decision 5.)*
 2. **Logins**: one-time sign-ins are fine, but **only through a form in the app** (Settings › Платформы). The owner types passwords / Steam Guard codes there; agents never see secrets. Steam Workshop uploads go through `steamcmd` driven by the app (the form pipes the credentials to steamcmd; its cached login is reused afterwards). No manual browser/cookie work, ever. An expired session is re-established silently (app browser profile, cached steamcmd login, stored API key); only when that fails → one notification with a link to the form.
 3. **External agent sessions** (Claude/Codex) publish, reply and release **through the app** (MCP/CLI) with no explanation needed: self-describing tools + a per-project **publish profile** (archive build command or path, mod id per platform, version source, changelog source).
 
@@ -20,7 +20,7 @@ Design 2026-10-05 (owner decisions of the same day; reviewed with Codex 2026-10-
 | Triage (project job → picks → fix jobs) | Runner → Triage flow | per project, not per incoming item; not wired to rules |
 | Publish: `provider.Publisher` (targets / check / publish once, `PublishError.UploadID`) | `provider/publish.go`, `api/publish.go:42` | tasks **in memory**; only Nexus; Factorio in progress (another agent) |
 | GitHub App token with `contents: write` | `provider/github/auth.go:183-186` | no release API calls yet |
-| Tray/popup notifications | `internal/notify` | local only — useless when the owner is away |
+| Tray/popup notifications | `internal/notify` | transient cards only; no history of what autopilot did while the owner was away |
 | MCP server / CLI | `control/mcp.go`, Control (Phase 4) | no release/run/profile tools; no caller check (an agent's shell can run `issuewatcher-cli`) |
 | Coder runs | `runner/agent.go` | Codex direct fix = `danger-full-access`, same Windows user as the app (DPAPI secrets readable in principle) |
 
@@ -71,7 +71,7 @@ any step failed / unknown ─▶ held (owner notified; resume / skip target / ca
 
 ### Persistence, idempotency, crash resume
 
-Migration 016: `autopilot_runs (id, kind fix|release, project_id, state, origin auto|manual|mcp, release_id, manifest_json, version, artifact_sha256, created_at, updated_at, held_reason)` with a partial unique index **one unfinished release run per project**; `autopilot_run_items (run_id, item_id, role primary|duplicate)`; `autopilot_steps (run_id, step, target, state, attempt, idem_key, request_json, external_ref, error, started_at, finished_at)`, `UNIQUE(run_id, step, target)`; `autopilot_inbox (id, source_event UNIQUE, item_id, kind, at, consumed_run_id)`.
+Migration 016: `autopilot_runs (id, kind fix|release, project_id, state, origin auto|manual|mcp, release_id, manifest_json, version, artifact_sha256, created_at, updated_at, held_reason)` with a partial unique index **one unfinished release run per project**; `autopilot_run_items (run_id, item_id, role primary|duplicate)`; `autopilot_steps (run_id, step, target, state, attempt, idem_key, request_json, external_ref, error, started_at, finished_at)`, `UNIQUE(run_id, step, target)`; `autopilot_inbox (id, source_event UNIQUE, item_id, kind, at, consumed_run_id)`; `autopilot_events` (Activity log).
 
 - Step states: `pending → sending → sent | failed | unknown | skipped`. `sending` is committed **before** the external call; the answer is committed after. Transitions are compare-and-set (`UPDATE … WHERE state = ?`), so two workers never send the same step.
 - **At most once is a goal, not a promise**: `idem_key` = identity of the action — fix: `item:<id>:attempt:<n>`, push: `<branch>:<sha>`, tag/release/asset: `<tag>:<sha>[:<asset>]`, publish: `<target>:<version>:<sha256>`, reply: `<item>:<release>`, close: `<item>:<release>`. Before sending, a read-only **probe** checks whether the action already happened; a definite match → `sent` without sending. A probe error, timeout or ambiguous answer is **not** absence → `unknown` → `held` + notification "check X". Resend only when the probe proves absence *and* the platform call is safe to repeat.
@@ -131,7 +131,7 @@ Per code project, `agents.projects["github:owner/repo"]`:
 }
 ```
 
-Global: `agents.autopilot { paused: false, maxReleasesPerDay: 5, maxPublishesPerDay: 20 }`, `notifications.remote { channel: "ntfy" | "none", server, topic }` (token in `data\secrets\notify.json`). The profile lives in the app config (not in the repo: the app must not dirty the folder, and the coder must not be able to change where or how it publishes); it holds no secrets — credentials stay in `data\secrets\*` (DPAPI). `POST /api/projects/{id}/publish-profile/check` resolves version source, changelog source, build output and targets.
+Global: `agents.autopilot { paused: false, maxReleasesPerDay: 5, maxPublishesPerDay: 20 }`, events go to the `autopilot_events` table (see Activity log; no remote channel). The profile lives in the app config (not in the repo: the app must not dirty the folder, and the coder must not be able to change where or how it publishes); it holds no secrets — credentials stay in `data\secrets\*` (DPAPI). `POST /api/projects/{id}/publish-profile/check` resolves version source, changelog source, build output and targets.
 
 ## Platforms and auth
 
@@ -164,21 +164,22 @@ Every publisher implements `provider.Publisher`; Steam's "archive" is the conten
 - **Git (trusted push)**: the agent can edit `.git/hooks` and `.git/config` without that showing in the diff, so autopilot never pushes from the mapped folder with its hooks/config. Push, tag and build go through an **app-owned mirror** `data\mirrors\<repo>.git` (`git fetch <folder> <sha>` → verify the objects → `git push <url> <sha>:refs/heads/<branch>` from the mirror with `core.hooksPath` = an empty dir, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL` = an app file, credential helpers off, token via `GIT_CONFIG_*` as today). Fast-forward only, never `--force`; only the default branch; commits ahead of the remote must all be the manifest's fix commits or the bump — any other → held `foreign_commits` (never pushes the owner's own unpushed work). The manual «Push» keeps today's behaviour (the owner's hooks).
 - **Diff limits**: a fix over `maxDiffLines`, touching CI/build/release scripts, the files the publish profile reads, dependency manifests, `.gitattributes`/`.gitmodules`, or deleting files → `held` for review (notification with the diff link). Issue text stays untrusted data in every prompt.
 - **Control-surface capabilities**: `release`, `set_publish_profile`, clearing pause, `skip_step`, and the generic `publish` tool are refused when the caller is an agent run: the API resolves the loopback client's PID (`GetExtendedTcpTable`) and refuses processes inside any runner job object (job MCP servers and agents' shells included). An MCP/CLI release is never an owner approval: it goes through the same gate, caps and rails as autopilot.
-- **Agent isolation** (open owner question 1): coder runs use the owner's Windows identity (Codex direct = `danger-full-access`), so a prompt-injected agent could read DPAPI-protected secrets or call other local services. The mirror push and the caller check close the publish path, not secret reads. Until isolation is decided, enabling `autoFix` together with any unattended publish target shows this risk in the Autopilot panel and needs an explicit confirmation.
+- **Agent isolation** (owner decision 2026-10-05: risk accepted): coder runs keep the owner's Windows identity (Codex direct = `danger-full-access`), so a prompt-injected agent could in principle read DPAPI-protected secrets or call other local services. No separate Windows account. The app-owned mirror push and the agent-caller refusal on control tools close the publish path; diff limits and the gate stay. Enabling `autoFix` together with any unattended publish target shows this accepted risk once in the Autopilot panel.
 - **Duplicates**: triage `duplicateOf` (same project or a linked page) → attached to the original's open fix run, no second fix; already released in the latest version → reply with that release at once.
 - **Regression breaker**: trips only when triage marks `regression` for the latest released version **and** (≥ 2 distinct reporters, or one GitHub collaborator) within `regressionWindowHours`; a single anonymous report only notifies. Tripped → autopilot paused for the project, notification. **Rollback** = forward fix: `git revert` of the release's fix commits → manual release run with the next patch version (platforms never get a reused version); Nexus additionally archives the bad version. Never automatic.
 - **Replies**: drafted read-only, ≤ 2000 chars, links only to the release / mod pages from the manifest; one auto-reply per item per release; platforms with `Capabilities.Reply` off → the draft waits for a click.
 - **Quota**: every agent step counts against the existing caps (subscription quota).
 
-## Notifications
+## Activity log (replaces phone notifications)
 
-`internal/notify` stays for local cards. New remote channel for when the owner is away (open owner question 2; default **ntfy**: HTTP POST to `<server>/<topic>`, random topic, optional bearer token in `data\secrets\notify.json`; phone app subscribes). Sent on: run `held` / `failed` (reason + run link), release `done` (version + platforms), `relogin` needed, regression pause, availability timeout. Rate-limited (≤ 1 per step, ≤ 20/day, digest beyond). Test button in Settings.
+Owner decision 2026-10-05: **no phone push** (no ntfy, no Telegram). `internal/notify` stays for transient local cards. Every autopilot action writes an event to `autopilot_events (id, at, run_id, project_id, item_id, kind, severity info|attention, title, detail_json, read_at)` (migration 016): fix pushed, release done (version + targets), reply posted, issue closed, and every `held` / `failed` step, `relogin` needed, regression pause, availability timeout as `attention`. UI: «Автопилот» entry in the top bar with an **unread counter badge** (attention events highlighted) that stays until the owner opens the log; the log lists events newest first with links to the run, item, release and platform pages; «Отметить прочитанным» / opening marks them read. SSE `autopilot.event` updates the badge live; MCP `list_autopilot_events {unreadOnly?}` for external sessions. Events are kept (newest 5000).
 
 ## UI
 
 - **Projects › code project › «Автопилот»** panel: master switch; checkboxes «Авто-разбор», «Авто-исправление», «Авто-push», «Авто-релиз», «GitHub релиз», one per linked mod page «Загружать на Nexus / Factorio / Steam / CurseForge» (disabled with the reason: no key / no login / page not linked), «Авто-ответ», «Закрывать issue»; coalesce / batch age, caps; publish-profile editor (build command, output, version source, changelog, smoke) + «Проверить настройку» (full dry run: version, changelog preview, archive build in a temp worktree, smoke, planned requests per target; nothing public).
 - **Runs** page: fix and release runs with a step timeline (state, probe result, external links), actions «Продолжить», «Отменить», «Пропустить платформу», «Откатить».
-- **Settings › Платформы**: Factorio API key, CurseForge token, Steam «Вход для загрузки» (steamcmd form), notification channel; ru + en.
+- **Settings › Платформы**: Factorio API key, CurseForge token, Steam «Вход для загрузки» (steamcmd form); ru + en.
+- **«Автопилот» activity log**: top-bar entry with an unread counter badge (see Activity log).
 
 ## MCP / CLI surface
 
@@ -195,20 +196,20 @@ Self-describing tools (descriptions state preconditions, side effects and the re
 ## Phases (smallest useful slice first)
 
 1. **Release run, manual**: migration 016, publish profile + check, version/changelog sources, release from an explicit verified HEAD (+ optional items), bump → clean-worktree build → archive check → gate → mirror push → tag → GitHub release + asset → Nexus/Factorio publish → availability, probes + reconcile + crash tests before/after every external action, serialization; UI «Выпустить релиз» + Runs page; MCP/CLI `get_publish_profile` / `plan_release` / `release` / runs with the caller check. Value: one click or one MCP call ships a mod everywhere.
-2. **Smoke + remote notifications**: Factorio smoke adapter, `command` adapter, ntfy channel; release held on failure.
+2. **Smoke + activity log**: Factorio smoke adapter, `command` adapter; release held on failure; autopilot activity log with the unread badge.
 3. **Fix runs + chain**: event inbox, autopilot fix prompt (`Refs #N`), fix run → trusted auto-push with git rails + diff limits, claim + coalescing timer (max batch age) → release run, replies and close steps, caps + kill switch, Autopilot panel.
 4. **Auto-triage**: `classify` flow, duplicates, needs-info / question replies, regression breaker.
 5. **Steam Workshop (steamcmd) + CurseForge upload**: login form + steamcmd driver, CurseForge token + uploader, probes + availability.
-6. **Rollback + isolation + more smoke adapters**: «Откатить» (revert + forward release, Nexus archive), the chosen agent isolation, adapters for other games as feasible.
+6. **Rollback + more smoke adapters**: «Откатить» (revert + forward release, Nexus archive), adapters for other games as feasible.
 
 ## Review (Codex, 2026-10-05)
 
 Codex reviewed the first draft (agent-link chat `339783d9`). Agreed and folded in: coder can alter `.git/hooks`/config and pre-push hooks see the token → trusted push from an app-owned mirror; MCP/CLI must not let an agent run release/profile/unpause → caller check by PID + job object, MCP origin is not approval; serialization (one release run per project, shared folder lock, cap reservation); immutable manifest + clean-worktree build + hash re-check + Steam content manifest; honest idempotency (probe errors = unknown → held; per-action keys incl. item/commit identity); exact probes (ancestry, peeled tags, separate release/asset steps with `state: uploaded` + digest, platform hashes); local reconcile before any re-run, cancel only on exact HEAD; inbox UNIQUE + atomic consume, no loops from own replies/edits; uploaded ≠ available (availability step, replies only for available targets, skip excludes from the reply); `Fixes #N` closes before release → `Refs #N` + a close step after the reply; atomic fix→release claim and terminal outcomes for disabled steps; Phase 1 standalone from an explicit HEAD with archive checks and crash tests; batch max age; breaker needs ≥ 2 reporters or a collaborator.
 
-Not fully resolved: **agent isolation** — Codex: a separate restricted execution identity for the coder, with secrets out of its reach. Same-user DPAPI cannot keep secrets from a same-user process; the mitigations above close the publish path only. Needs an owner decision (open question 1).
+Not adopted: **agent isolation** — Codex proposed a separate restricted execution identity for the coder. Same-user DPAPI cannot keep secrets from a same-user process; the owner accepted that risk (2026-10-05) and kept the mirror push + caller refusal, which close the publish path.
 
-## Open owner questions
+## Owner decisions on the open questions (2026-10-05)
 
-1. **Agent isolation for unattended fixes**: (a) **recommended** — the app creates a dedicated low-privilege local Windows account for agent runs once (one UAC prompt from the Settings form), agents run under it with access only to the mapped folders, secrets stay unreadable; or (b) accept same-user risk with the mitigations above (mirror push, caller check, diff limits).
-2. **Remote notification channel**: (a) **recommended** — ntfy (ntfy.sh or self-hosted, random topic + token, phone app); or (b) Telegram bot (token + chat id in the form).
-3. **Replies when a platform moderates uploads** (CurseForge approval can take days): (a) **recommended** — reply once every non-skipped target is available, at most 72 h, then hold and notify; or (b) reply as soon as GitHub + the first platform are available, listing the others as "coming soon".
+4. **Agent isolation**: risk accepted — no separate Windows account; the mirror push and the agent-caller refusal on control tools stay.
+5. **Notifications**: no phone push; an in-app autopilot activity log with an unread counter badge (see Activity log).
+6. **Reply timing**: replies wait until every enabled (non-skipped) target shows the file as available, at most 72 h; then the step is held and an unread "needs attention" event is recorded.
