@@ -9,7 +9,7 @@ import { platformName } from './platforms'
 /** Targets that name a key (manifest targets, plan targets). */
 export type NamedTargets = readonly { key: string; name: string; platform: string }[] | null
 
-export const RUN_STATES: RunState[] = ['pending', 'running', 'held', 'pushed', 'released', 'done', 'cancelled', 'failed']
+export const RUN_STATES: RunState[] = ['pending', 'running', 'held', 'pushed', 'released', 'duplicate', 'answered', 'ignored', 'done', 'cancelled', 'failed']
 
 /** Run kind as text: «Релиз» / «Исправление»; unknown kinds as is. */
 export function runKindText(kind: string): string {
@@ -29,6 +29,9 @@ export const RUN_TONE: Record<RunState, string> = {
   failed: 'failed',
   pushed: 'running',
   released: 'done',
+  duplicate: 'done',
+  answered: 'done',
+  ignored: 'cancelled',
 }
 
 export const RUN_ICON: Record<RunState, string> = {
@@ -40,6 +43,9 @@ export const RUN_ICON: Record<RunState, string> = {
   failed: 'pi pi-times-circle',
   pushed: 'pi pi-upload',
   released: 'pi pi-check-circle',
+  duplicate: 'pi pi-clone',
+  answered: 'pi pi-comment',
+  ignored: 'pi pi-minus-circle',
 }
 
 export const STEP_ICON: Record<RunStepState, string> = {

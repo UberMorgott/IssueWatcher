@@ -40,8 +40,9 @@ import { useSettingsStore } from '../../stores/settings'
 // editor + «Проверить настройку» (dry run, nothing public); Phase 2: the smoke
 // block (factorio save / ticks / install, command) and «Публиковать без
 // смоук-теста»; Phase 3: fix / push / auto release / reply / close switches,
-// the release timer and diff limit, the accepted-risk notice. Auto triage
-// comes with phase 4 (shown disabled).
+// the release timer and diff limit, the accepted-risk notice; Phase 4: auto
+// triage + the regression window, and the plain note that without triage only
+// reports matching a Fix rule are fixed.
 const { t, te } = useI18n()
 const app = useAppStore()
 const settings = useSettingsStore()
@@ -148,7 +149,7 @@ function setPublish(key: string, on: boolean) {
   void saveAutopilot({ publish: cur })
 }
 /** Numeric autopilot fields: saved 700 ms after the last change, within their range. */
-type NumKey = 'maxReleasesPerDay' | 'coalesceMinutes' | 'maxBatchAgeHours' | 'maxDiffLines'
+type NumKey = 'maxReleasesPerDay' | 'coalesceMinutes' | 'maxBatchAgeHours' | 'maxDiffLines' | 'regressionWindowHours'
 const numTimers: Partial<Record<NumKey, number>> = {}
 function setNum(key: NumKey, v: number | null, min: number, max: number) {
   window.clearTimeout(numTimers[key])
@@ -161,16 +162,15 @@ const NUMS: { key: NumKey; min: number; max: number }[] = [
   { key: 'coalesceMinutes', min: 1, max: 1440 },
   { key: 'maxBatchAgeHours', min: 1, max: 168 },
   { key: 'maxDiffLines', min: 1, max: 100000 },
+  { key: 'regressionWindowHours', min: 1, max: 720 },
 ]
-/** Phase 3 switches (fix → push → release → reply → close). */
-type SwitchKey = 'autoFix' | 'autoPush' | 'autoRelease' | 'autoReply' | 'autoClose'
-const SWITCHES: SwitchKey[] = ['autoFix', 'autoPush', 'autoRelease', 'autoReply', 'autoClose']
+/** Phase 3–4 switches (triage → fix → push → release → reply → close). */
+type SwitchKey = 'autoTriage' | 'autoFix' | 'autoPush' | 'autoRelease' | 'autoReply' | 'autoClose'
+const SWITCHES: SwitchKey[] = ['autoTriage', 'autoFix', 'autoPush', 'autoRelease', 'autoReply', 'autoClose']
 function switchText(key: SwitchKey): string {
   const a = ap.value
   return t('release.autopilot.' + key + 'Text', { coalesce: a?.coalesceMinutes ?? 0, age: a?.maxBatchAgeHours ?? 0 })
 }
-/** Later phases: shown, not switchable yet. */
-const LATER: { key: keyof ProjectAutopilot; phase: number }[] = [{ key: 'autoTriage', phase: 4 }]
 /**
  * Accepted risk (docs/AUTOPILOT.md → Safety rails → Agent isolation): the fixing
  * agent runs as the owner while a publish target is on.
@@ -429,6 +429,21 @@ const name = (k: string) => platformName(k)
           />
         </SettingRow>
         <Message
+          v-if="ap.autoFix"
+          :severity="ap.autoTriage ? 'secondary' : 'info'"
+          :closable="false"
+          class="risk"
+        >
+          {{ ap.autoTriage ? t('release.autopilot.rulesFilter') : t('release.autopilot.needsRule') }}
+          <RouterLink
+            v-if="!ap.autoTriage"
+            to="/settings/agents"
+            class="small"
+          >
+            {{ t('release.autopilot.rulesLink') }}
+          </RouterLink>
+        </Message>
+        <Message
           v-if="showRisk"
           severity="warn"
           :closable="false"
@@ -450,18 +465,6 @@ const name = (k: string) => platformName(k)
             input-class="num-input"
             :aria-label="t('release.autopilot.' + n.key)"
             @update:model-value="(v: number | null) => setNum(n.key, v, n.min, n.max)"
-          />
-        </SettingRow>
-        <SettingRow
-          v-for="l in LATER"
-          :key="l.key"
-          :title="t('release.autopilot.' + l.key)"
-          :text="t('release.autopilot.phase', { n: l.phase })"
-        >
-          <ToggleSwitch
-            :model-value="!!ap[l.key]"
-            disabled
-            :aria-label="t('release.autopilot.' + l.key)"
           />
         </SettingRow>
       </template>

@@ -1250,8 +1250,22 @@ export interface ReleaseManifest {
   changelog?: string
 }
 
-/** pushed / released: a fix run (kind fix) on the default branch, then claimed by a release run. */
-export type RunState = 'pending' | 'running' | 'held' | 'done' | 'cancelled' | 'failed' | 'pushed' | 'released'
+/**
+ * pushed / released: a fix run (kind fix) on the default branch, then claimed by a release run;
+ * duplicate / answered / ignored: fix runs that auto-triage ended without a fix.
+ */
+export type RunState =
+  | 'pending'
+  | 'running'
+  | 'held'
+  | 'done'
+  | 'cancelled'
+  | 'failed'
+  | 'pushed'
+  | 'released'
+  | 'duplicate'
+  | 'answered'
+  | 'ignored'
 export type RunStepState = 'pending' | 'sending' | 'sent' | 'failed' | 'unknown' | 'skipped'
 
 export interface ReleaseRun {
