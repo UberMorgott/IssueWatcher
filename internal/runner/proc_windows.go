@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -25,7 +27,20 @@ type procTree struct {
 
 // prepare hides a short helper command (git, --version); it is not put in a job.
 func prepare(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow | windows.CREATE_NEW_PROCESS_GROUP}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow | windows.CREATE_NEW_PROCESS_GROUP,
+		CmdLine: shellCmdLine(cmd.Args)}
+}
+
+// shellCmdLine is the raw command line of the verify shell `cmd.exe /d /s /c
+// <command>` ("" for anything else = Go's argv escaping). Go escapes the
+// command's " as \", which cmd.exe does not unescape, so a command with quotes
+// (pwsh -Command "…") broke; /s strips exactly the outer pair added here.
+func shellCmdLine(args []string) string {
+	if len(args) != 5 || strings.TrimSuffix(strings.ToLower(filepath.Base(args[0])), ".exe") != "cmd" ||
+		!strings.EqualFold(args[1], "/d") || !strings.EqualFold(args[2], "/s") || !strings.EqualFold(args[3], "/c") {
+		return ""
+	}
+	return syscall.EscapeArg(args[0]) + ` /d /s /c "` + args[4] + `"`
 }
 
 // prepareTree is prepare for a command attach will own: it starts suspended, so
