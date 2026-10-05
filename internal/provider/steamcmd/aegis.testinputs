@@ -1,2 +1,2 @@
-# the test binary re-run as a fake steamcmd, on a temporary dir
-nothing
+# the test binary re-run as a fake steamcmd, on a temporary dir; it replays the real captured logs
+testdata/real_mobile_login/

@@ -1,0 +1,22 @@
+
+
+[2026-10-05 15:51:53] Client version: 1788292693
+[2026-10-05 15:51:53] Loading Steam API...
+[2026-10-05 15:51:53] OK
+[2026-10-05 15:51:53] Cached credentials not found.
+[2026-10-05 15:51:53] 
+password: 
+[2026-10-05 15:51:53] 
+Proceeding with login using username/password.
+[2026-10-05 15:51:53] Logging in user 'owner_acc' [U:1:0] to Steam Public...
+[2026-10-05 15:52:28] OK
+[2026-10-05 15:52:28] Waiting for client config...
+[2026-10-05 15:52:31] OK
+[2026-10-05 15:52:31] Waiting for user info...
+[2026-10-05 15:52:42] OK
+[2026-10-05 15:52:42] 
+Steam>
+[2026-10-05 15:52:42] Unloading Steam API...
+[2026-10-05 15:52:42] OK
+
+

@@ -70,6 +70,11 @@ type Options struct {
 	// Timeouts: sign-in (default 10 min: the first run updates steamcmd),
 	// session check (5 min), upload (60 min).
 	LoginTimeout, CheckTimeout, UploadTimeout time.Duration
+	// LogPoll: how often a sign-in reads steamcmd's connection log (1 s).
+	LogPoll time.Duration
+	// WarmTimeout bounds the first "+quit" run after the download, which
+	// lets steamcmd update itself before any sign-in (10 min).
+	WarmTimeout time.Duration
 }
 
 // Workshop is the Steam Workshop publisher (provider.Publisher).
@@ -117,6 +122,12 @@ func New(opts Options) *Workshop {
 	}
 	if opts.UploadTimeout == 0 {
 		opts.UploadTimeout = 60 * time.Minute
+	}
+	if opts.LogPoll == 0 {
+		opts.LogPoll = time.Second
+	}
+	if opts.WarmTimeout == 0 {
+		opts.WarmTimeout = 10 * time.Minute
 	}
 	return &Workshop{opts: opts}
 }
@@ -281,12 +292,29 @@ func (w *Workshop) install(ctx context.Context) error {
 			return tools.ErrBusy
 		}
 		err := w.download(ctx)
+		if err == nil {
+			w.warm(ctx)
+		}
 		w.run.Unlock()
 		if err != nil {
 			return err
 		}
 	}
 	return w.migrate()
+}
+
+// warm runs the fresh steamcmd once with "+quit": its first run downloads
+// and installs its update (~45 MB) and restarts, which otherwise happens in
+// the middle of the owner's first sign-in. A failure only logs: the
+// sign-in updates it then.
+func (w *Workshop) warm(ctx context.Context) {
+	b, err := w.runBatch(ctx, w.appExe(), []string{"+quit"}, w.opts.WarmTimeout)
+	if err == nil && b.code != 0 {
+		err = fmt.Errorf("exit code %d: %s", b.code, lastOutput(b.out))
+	}
+	if err != nil {
+		w.opts.Log("steamcmd: first run (self-update) failed", err)
+	}
 }
 
 func (w *Workshop) download(ctx context.Context) error {
@@ -439,11 +467,17 @@ var (
 	passwordRe = regexp.MustCompile(`(?i)password:\s*$`)
 	guardRe    = regexp.MustCompile(`(?i)(steam guard code|two-factor code|two factor code|auth code)[^:\n]*:\s*$`)
 	mobileRe   = regexp.MustCompile(`(?i)steam mobile app|confirm the login|waiting for confirmation`)
-	loggedInRe = regexp.MustCompile(`(?i)waiting for user info\.*\s*ok|logged in ok`)
-	cachedNone = regexp.MustCompile(`(?i)cached credentials not found|no cached credentials`)
-	failRe     = regexp.MustCompile(`(?im)^.*\b(?:failed|error)\b[^\n]*\([^)\n]*\)[^\n]*$|^.*login failure[^\n]*$`)
-	successRe  = regexp.MustCompile(`(?m)^\s*Success\.`)
-	uploadErr  = regexp.MustCompile(`(?im)^.*ERROR! Failed to update workshop item[^\n]*$`)
+	// The console stays silent during the mobile approval; the connection
+	// log says so (real steamcmd 1788292693, testdata/real_mobile_login).
+	confirmLogRe = regexp.MustCompile(`(?m)\] Waiting for confirmation\s*$`)
+	updateRe     = regexp.MustCompile(`(?m)^\[\s*(?:\d+%|----)\]`)
+	loadingRe    = regexp.MustCompile(`Loading Steam API`)
+	loggingInRe  = regexp.MustCompile(`Logging in user '`)
+	loggedInRe   = regexp.MustCompile(`(?i)waiting for user info\.*\s*ok|logged in ok`)
+	cachedNone   = regexp.MustCompile(`(?i)cached credentials not found|no cached credentials`)
+	failRe       = regexp.MustCompile(`(?im)^.*\b(?:failed|error)\b[^\n]*\([^)\n]*\)[^\n]*$|^.*login failure[^\n]*$`)
+	successRe    = regexp.MustCompile(`(?m)^\s*Success\.`)
+	uploadErr    = regexp.MustCompile(`(?im)^.*ERROR! Failed to update workshop item[^\n]*$`)
 )
 
 // scrub removes secrets from a line shown to the owner.
