@@ -186,10 +186,30 @@ func TestAutopilotSettingsAndDryRuns(t *testing.T) {
 		t.Fatalf("invalid profile dry run: %d %+v", code, bad)
 	}
 
+	// The project's verify command: dry run (not written), then saved alone
+	// (publishProfile / autopilot untouched).
+	pv = ProfilePreview{}
+	if code := e.call(t, http.MethodPut, base+"/publish-profile", `{"dryRun": true, "verify": " luac -p {name}.lua "}`, &pv); code != http.StatusOK ||
+		!pv.DryRun || pv.Verify != "luac -p {name}.lua" {
+		t.Fatalf("verify dry run %d %+v", code, pv)
+	}
+	pd = ProfileDoc{}
+	if code := e.call(t, http.MethodGet, base+"/publish-profile", "", &pd); code != http.StatusOK || pd.Verify != "" {
+		t.Fatalf("the verify dry run saved: %d %q", code, pd.Verify)
+	}
+	pd = ProfileDoc{}
+	if code := e.call(t, http.MethodPut, base+"/publish-profile", `{"verify": "go test ./..."}`, &pd); code != http.StatusOK ||
+		pd.Verify != "go test ./..." || !pd.Autopilot.Enabled {
+		t.Fatalf("verify put %d %+v", code, pd)
+	}
+
 	// Agent callers: refused writes, allowed dry runs and reads.
 	e.s.inAgentJob = func(uint32) bool { return true }
 	if code, out := e.callErr(t, http.MethodPut, base+"/autopilot", `{"autopilot": {}}`); code != http.StatusForbidden || out != codeAgentCaller {
 		t.Fatalf("agent put: %d %q", code, out)
+	}
+	if code, out := e.callErr(t, http.MethodPut, base+"/publish-profile", `{"verify": "x"}`); code != http.StatusForbidden || out != codeAgentCaller {
+		t.Fatalf("agent verify put: %d %q", code, out)
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodGet, base + "/autopilot", ``},

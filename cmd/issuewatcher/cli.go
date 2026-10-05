@@ -72,8 +72,9 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
 
   Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
   profile get <project>
-  profile set <project> (--file FILE | -) [--dry-run]
-                      replace the given blocks of {revision?, publishProfile?, autopilot?};
+  profile set <project> [--file FILE | -] [--verify CMD] [--dry-run]
+                      replace the given blocks of {revision?, publishProfile?, autopilot?, verify?};
+                      --verify CMD sets the project's verify command ({name} {version} replaced)
                       --dry-run validates and answers the preview, nothing is written
   autopilot get <project>
                       the project's autopilot switches + revision + the global block

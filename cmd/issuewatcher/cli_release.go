@@ -142,7 +142,7 @@ func (c *cli) runCmd(args []string) (json.RawMessage, error) {
 	return nil, usagef("run: want <id> [resume|cancel|skip <step> [--target T]]")
 }
 
-// profile: `profile get <project>` · `profile set <project> (--file FILE | -)`.
+// profile: `profile get <project>` · `profile set <project> [--file FILE | -] [--verify CMD] [--dry-run]`.
 func (c *cli) profile(args []string) (json.RawMessage, error) {
 	sub := ""
 	if len(args) > 0 {
@@ -160,7 +160,7 @@ func (c *cli) profile(args []string) (json.RawMessage, error) {
 		}
 		return c.c.PublishProfile(c.ctx, id)
 	case "set":
-		id, b, err := c.setBody("profile set", "JSON file {revision?, publishProfile?, autopilot?}", args[1:])
+		id, b, err := c.setBody("profile set", "JSON file {revision?, publishProfile?, autopilot?, verify?}", args[1:], true)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +188,7 @@ func (c *cli) autopilot(args []string) (json.RawMessage, error) {
 		}
 		return c.c.AutopilotSettings(c.ctx, id)
 	case "set":
-		id, b, err := c.setBody("autopilot set", "JSON file {revision?, autopilot}", args[1:])
+		id, b, err := c.setBody("autopilot set", "JSON file {revision?, autopilot}", args[1:], false)
 		if err != nil {
 			return nil, err
 		}
@@ -199,26 +199,34 @@ func (c *cli) autopilot(args []string) (json.RawMessage, error) {
 
 // setBody parses `<project> (--file FILE | -) [--dry-run]` of a settings PUT:
 // the project id and the JSON object body (dryRun: true added on --dry-run:
-// validated by the app, nothing written).
-func (c *cli) setBody(cmd, fileHelp string, args []string) (int64, []byte, error) {
+// validated by the app, nothing written). withVerify adds `--verify CMD`
+// (the project's verify command; the JSON is then optional).
+func (c *cli) setBody(cmd, fileHelp string, args []string, withVerify bool) (int64, []byte, error) {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	file := fs.String("file", "", fileHelp)
 	dry := fs.Bool("dry-run", false, "validate only, nothing is written")
+	var verify *string
+	if withVerify {
+		verify = fs.String("verify", "", "the project's verify command ({name} {version} are replaced; \"\" clears it)")
+	}
 	pos, err := flags(fs, args)
 	if err != nil {
 		return 0, nil, err
 	}
+	verifySet := false
+	fs.Visit(func(f *flag.Flag) { verifySet = verifySet || f.Name == "verify" })
 	stdin := len(pos) == 2 && pos[1] == "-"
 	if stdin {
 		pos = pos[:1]
 	}
-	if stdin == (*file != "") {
+	if (stdin && *file != "") || (!stdin && *file == "" && !verifySet) {
 		return 0, nil, usagef("%s: give the JSON with --file FILE or - (stdin)", cmd)
 	}
-	var b []byte
-	if stdin {
+	b := []byte("{}")
+	switch {
+	case stdin:
 		b, err = io.ReadAll(io.LimitReader(c.stdin, 256<<10))
-	} else {
+	case *file != "":
 		b, err = os.ReadFile(*file)
 	}
 	if err != nil {
@@ -229,8 +237,14 @@ func (c *cli) setBody(cmd, fileHelp string, args []string) (int64, []byte, error
 	if json.Unmarshal(b, &doc) != nil || doc == nil {
 		return 0, nil, usagef("%s: the body is not a JSON object", cmd)
 	}
-	if *dry {
-		doc["dryRun"] = json.RawMessage("true")
+	if verifySet || *dry {
+		if verifySet {
+			v, _ := json.Marshal(*verify)
+			doc["verify"] = v
+		}
+		if *dry {
+			doc["dryRun"] = json.RawMessage("true")
+		}
 		if b, err = json.Marshal(doc); err != nil {
 			return 0, nil, err
 		}

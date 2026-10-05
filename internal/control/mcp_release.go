@@ -27,7 +27,7 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 	}
 	add(s, &mcp.Tool{Name: "get_publish_profile", Description: "Get a code project's release setup in one call: publishProfile (build, version " +
 		"and changelog sources, smoke, per-target settings such as the Nexus fileId), autopilot switches and caps, the global pause and caps, " +
-		"allowed source kinds, revision (pass it to set_publish_profile), and resolved: the dry-run plan (current and next version, " +
+		"the project's verify command (verify), allowed source kinds, revision (pass it to set_publish_profile), and resolved: the dry-run plan (current and next version, " +
 		"changelog preview, targets with latest versions and auth state, steps, refusals). Read-only.", Annotations: ro},
 		func(ctx context.Context, in project) (json.RawMessage, error) {
 			return c.PublishProfile(ctx, in.Project)
@@ -36,23 +36,31 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 	type setProfile struct {
 		Project        int64          `json:"project" jsonschema:"the GitHub code project id from list_projects"`
 		Revision       int            `json:"revision,omitempty" jsonschema:"settings revision from get_publish_profile; a stale one fails with conflict (re-read and retry)"`
-		PublishProfile map[string]any `json:"publish_profile" jsonschema:"the full publishProfile object (as returned by get_publish_profile, edited): it REPLACES the stored one"`
+		PublishProfile map[string]any `json:"publish_profile,omitempty" jsonschema:"the full publishProfile object (as returned by get_publish_profile, edited): it REPLACES the stored one; omit to change only verify"`
+		Verify         *string        `json:"verify,omitempty" jsonschema:"the project's verify command (the release and fix gate when the folder has no Aegis), run in the folder through the verify shell; {name} and {version} are replaced (values limited to letters, digits and . _ + -); empty string clears it; omit to keep it"`
 		DryRun         bool           `json:"dry_run,omitempty" jsonschema:"validate only: returns the profile as it would be saved, nothing is written"`
 	}
 	add(s, &mcp.Tool{Name: "set_publish_profile", Description: "Replace a code project's publishProfile (build command and output, version source " +
 		"{kind, path, key, pattern}, changelog source, smoke, targets {key: {fileId, category, ...}}). Send the whole object from " +
-		"get_publish_profile with your edits; keys left out are removed. Validated by the app (400 with the field on error); no secrets " +
+		"get_publish_profile with your edits; keys left out are removed. build.command and the verify command get {name} and {version} " +
+		"replaced (as build.output). verify sets the project's verify command (publish_profile may then be omitted). Validated by the app (400 with the field on error); no secrets " +
 		"are stored here (platform credentials stay in the app). Autopilot switches are not changed by this tool (set_autopilot_settings). " +
 		"smoke: {kind: factorio|command|none, save (factorio: a save .zip; empty = a fresh map), ticks (default 600), install (factorio " +
 		"root or factorio.exe; empty = auto-detect), command (command: runs in a temp dir; {archive} {name} {version} are replaced)}; " +
 		"kind none holds every release unless the project's autopilot.publishWithoutSmoke is on. " +
-		"dry_run validates and returns {dryRun, ok, publishProfile, autopilot} without saving (allowed for agent runs). " +
+		"dry_run validates and returns {dryRun, ok, publishProfile, verify, autopilot} without saving (allowed for agent runs). " +
 		"Otherwise returns the new profile with its resolved plan." + descCallerRefusal},
 		func(ctx context.Context, in setProfile) (json.RawMessage, error) {
-			if in.PublishProfile == nil {
-				return nil, errors.New("publish_profile: give the full publishProfile object")
+			if in.PublishProfile == nil && in.Verify == nil {
+				return nil, errors.New("publish_profile: give the full publishProfile object (or verify)")
 			}
-			body := map[string]any{"publishProfile": in.PublishProfile}
+			body := map[string]any{}
+			if in.PublishProfile != nil {
+				body["publishProfile"] = in.PublishProfile
+			}
+			if in.Verify != nil {
+				body["verify"] = *in.Verify
+			}
 			if in.DryRun {
 				body["dryRun"] = true
 			}

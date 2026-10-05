@@ -16,7 +16,7 @@ import (
 // Autopilot release runs (docs/AUTOPILOT.md, Phase 1):
 //
 //	GET  /api/projects/{id}/publish-profile          → ProfileDoc (profile + autopilot + resolved plan)
-//	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?, dryRun?} → ProfileDoc   (agent callers refused)
+//	PUT  /api/projects/{id}/publish-profile          {revision?, publishProfile?, autopilot?, verify?, dryRun?} → ProfileDoc   (agent callers refused)
 //	                                                 dryRun → ProfilePreview (validated, nothing written; agent callers allowed)
 //	POST /api/projects/{id}/publish-profile/check    release.Request? → release.CheckResult (plan + trial build at HEAD in a temp
 //	                                                 worktree, archive check, per-target publisher dry run; nothing committed or sent)
@@ -166,13 +166,16 @@ type ProfileKinds struct {
 
 // ProfileDoc is GET/PUT /api/projects/{id}/publish-profile (MCP get_publish_profile).
 type ProfileDoc struct {
-	ProjectID      int64                   `json:"projectId"`
-	Project        string                  `json:"project"`
-	Revision       int                     `json:"revision"`
-	PublishProfile config.PublishProfile   `json:"publishProfile"`
-	Autopilot      config.ProjectAutopilot `json:"autopilot"`
-	Global         config.AgentsAutopilot  `json:"global"`
-	Kinds          ProfileKinds            `json:"kinds"`
+	ProjectID      int64                 `json:"projectId"`
+	Project        string                `json:"project"`
+	Revision       int                   `json:"revision"`
+	PublishProfile config.PublishProfile `json:"publishProfile"`
+	// Verify is the project's verify command (agents.projects[key].verify): the
+	// release / fix gate when the folder has no Aegis; {name} / {version} expand.
+	Verify    string                  `json:"verify"`
+	Autopilot config.ProjectAutopilot `json:"autopilot"`
+	Global    config.AgentsAutopilot  `json:"global"`
+	Kinds     ProfileKinds            `json:"kinds"`
 	// Resolved is the dry-run plan: current / next version, changelog preview,
 	// targets with their latest versions and auth state, steps, refusals.
 	Resolved release.Plan `json:"resolved"`
@@ -189,7 +192,7 @@ func (s *Server) profileDoc(r *http.Request, rp store.Repo) (ProfileDoc, error) 
 	if err != nil {
 		return ProfileDoc{}, err
 	}
-	return ProfileDoc{ProjectID: rp.ID, Project: rp.Key, Revision: doc.Revision, PublishProfile: pa.PublishProfile,
+	return ProfileDoc{ProjectID: rp.ID, Project: rp.Key, Revision: doc.Revision, PublishProfile: pa.PublishProfile, Verify: pa.Verify,
 		Autopilot: ag.AutopilotFor(rp.Key), Global: ag.Autopilot, Resolved: plan,
 		Kinds: ProfileKinds{
 			Version:   []string{config.VersionFactorioInfo, config.VersionJSON, config.VersionRegex, config.VersionGitTag},
@@ -220,6 +223,7 @@ type ProfilePreview struct {
 	Project        string                  `json:"project"`
 	Revision       int                     `json:"revision"` // the revision it was validated against
 	PublishProfile config.PublishProfile   `json:"publishProfile"`
+	Verify         string                  `json:"verify"`
 	Autopilot      config.ProjectAutopilot `json:"autopilot"`
 }
 
@@ -236,11 +240,12 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		Revision       *int                     `json:"revision"`
 		PublishProfile *config.PublishProfile   `json:"publishProfile"`
 		Autopilot      *config.ProjectAutopilot `json:"autopilot"`
+		Verify         *string                  `json:"verify"`
 		DryRun         bool                     `json:"dryRun"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&req); err != nil ||
-		(req.PublishProfile == nil && req.Autopilot == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, publishProfile?, autopilot?, dryRun?}", "code": "bad_request"})
+		(req.PublishProfile == nil && req.Autopilot == nil && req.Verify == nil) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {revision?, publishProfile?, autopilot?, verify?, dryRun?}", "code": "bad_request"})
 		return
 	}
 	if !req.DryRun && s.refuseAgent(w, r) {
@@ -263,6 +268,9 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 	if req.Autopilot != nil {
 		block["autopilot"] = mergeDiff(toJSONValue(cur.Settings.Agents.AutopilotFor(rp.Key)), toJSONValue(*req.Autopilot))
 	}
+	if req.Verify != nil {
+		block["verify"] = strings.TrimSpace(*req.Verify)
+	}
 	patch, _ := json.Marshal(map[string]any{"agents": map[string]any{"projects": map[string]any{rp.Key: block}}})
 	if req.DryRun {
 		doc, err := s.opts.Settings.PreviewSettings(rev, patch)
@@ -272,7 +280,7 @@ func (s *Server) handleProfilePut(w http.ResponseWriter, r *http.Request) {
 		}
 		ag := doc.Settings.Agents
 		writeJSON(w, http.StatusOK, ProfilePreview{DryRun: true, OK: true, ProjectID: rp.ID, Project: rp.Key, Revision: rev,
-			PublishProfile: ag.Projects[rp.Key].PublishProfile, Autopilot: ag.AutopilotFor(rp.Key)})
+			PublishProfile: ag.Projects[rp.Key].PublishProfile, Verify: ag.Projects[rp.Key].Verify, Autopilot: ag.AutopilotFor(rp.Key)})
 		return
 	}
 	doc, err := s.opts.Settings.PatchSettings(rev, patch)
