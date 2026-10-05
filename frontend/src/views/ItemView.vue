@@ -240,12 +240,18 @@ useCrumbs(() => {
 async function send() {
   const it = item.value
   const body = reply.value.trim()
-  if (!it || !body || sending.value || tooLong.value) return
+  if (!it || !body || sending.value || unsure.value || tooLong.value) return
   sending.value = true
   replyError.value = ''
   const r = await api.reply(it.id, body)
   sending.value = false
   const here = String(it.id) === props.id // still on the item the reply went to
+  if (r.ok && r.status === 202) {
+    // Sent once, not found on read-back: never re-sent; the server syncs the
+    // project and the reply attaches to the item if it is there.
+    await confirmUnsure(it, body)
+    return
+  }
   if (!r.ok) {
     if (!here) {
       toast.add({ severity: 'error', summary: t('item.replyFailed'), detail: itemRef(it), life: 5000 })
@@ -261,6 +267,32 @@ async function send() {
     reply.value = ''
   }
   toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: itemRef(it), life: 3000 })
+}
+
+/** A reply whose outcome is unknown: the composer is locked while the item is checked for it. */
+const unsure = ref(false)
+const UNSURE_CHECKS = 18 // × 5 s
+async function confirmUnsure(it: IssueDetail, body: string) {
+  unsure.value = true
+  try {
+    for (let i = 0; i < UNSURE_CHECKS; i++) {
+      await new Promise((ok) => setTimeout(ok, 5000))
+      const r = await api.issue(it.id)
+      if (r.ok && r.data.comments > it.comments) {
+        if (String(it.id) === props.id) {
+          item.value = r.data
+          if (comments.done.value) void comments.loadTail()
+          if (reply.value.trim() === body) reply.value = ''
+        }
+        toast.add({ severity: 'success', summary: t('item.replyPosted'), detail: itemRef(it), life: 3000 })
+        return
+      }
+    }
+    if (String(it.id) === props.id) replyError.value = t('item.replyUnsureFailed')
+    else toast.add({ severity: 'warn', summary: t('item.replyUnsureFailed'), detail: itemRef(it), life: 8000 })
+  } finally {
+    unsure.value = false
+  }
 }
 
 function onComposerKey(e: KeyboardEvent) {
@@ -552,6 +584,14 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               {{ t('item.replyTooLong', { platform: pname, limit: num(maxReply) }) }}
             </Message>
             <Message
+              v-if="unsure"
+              severity="info"
+              size="small"
+              variant="simple"
+            >
+              <i class="pi pi-spin pi-spinner" /> {{ t('item.replyUnsure') }}
+            </Message>
+            <Message
               v-if="replyError"
               severity="error"
               size="small"
@@ -568,7 +608,7 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
                 :label="t('item.sendReply')"
                 icon="pi pi-send"
                 :loading="sending"
-                :disabled="!reply.trim() || !canReply || tooLong"
+                :disabled="!reply.trim() || !canReply || tooLong || unsure"
                 @click="send"
               />
             </div>

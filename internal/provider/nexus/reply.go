@@ -45,9 +45,31 @@ type match struct {
 	sent          time.Time
 }
 
+// fresh: the account's reply that was not there before the post and is not
+// older than the send.
+func (m match) fresh(id, author string, created time.Time) bool {
+	return !m.before[id] && author == m.account && (created.IsZero() || !created.Before(m.sent.Add(-readBackSkew)))
+}
+
+// ok: a fresh reply with the sent text. The site shows BBCode rendered
+// ([url=…]GitHub Issues[/url] reads back as "GitHub Issues"), so the sent
+// body is compared both as typed and with its tags dropped.
 func (m match) ok(id, author, body string, created time.Time) bool {
-	return !m.before[id] && author == m.account && modkit.SameText(body, m.body) &&
-		(created.IsZero() || !created.Before(m.sent.Add(-readBackSkew)))
+	return m.fresh(id, author, created) && modkit.SameRendered(body, m.body)
+}
+
+// pick is the read-back verdict over the thread's replies: the newest fresh
+// reply with the sent text, else the only fresh reply of the account (the
+// thread is locked to one write at a time; rendering can change the text
+// beyond a tag strip: images, quotes, smileys), else "" (unknown).
+func (m match) pick(text, fresh []string) string {
+	if id := newest(text); id != "" {
+		return id
+	}
+	if len(fresh) == 1 {
+		return fresh[0]
+	}
+	return ""
 }
 
 // Reply implements provider.Provider: a reply inside the Posts thread
@@ -221,10 +243,18 @@ func (p *Provider) commentReplyIDs(ctx context.Context, game string, mod int, pa
 }
 
 func (p *Provider) findCommentReply(ctx context.Context, game string, mod int, parent string, m match) (string, error) {
-	var hits []string // the thread may show up twice while pages shift
+	// The thread may show up twice while pages shift: ids are deduplicated.
+	var hits, fresh []string
+	seen := map[string]bool{}
 	err := p.threadReplies(ctx, game, mod, parent, func(rs []post) bool {
 		for _, rp := range rs {
-			if m.ok(rp.ID, rp.Author, rp.Body, modkit.Time(rp.CreatedAt)) {
+			created := modkit.Time(rp.CreatedAt)
+			if seen[rp.ID] || !m.fresh(rp.ID, rp.Author, created) {
+				continue
+			}
+			seen[rp.ID] = true
+			fresh = append(fresh, rp.ID)
+			if m.ok(rp.ID, rp.Author, rp.Body, created) {
 				hits = append(hits, rp.ID)
 			}
 		}
@@ -233,7 +263,7 @@ func (p *Provider) findCommentReply(ctx context.Context, game string, mod int, p
 	if err != nil {
 		return "", err
 	}
-	return newest(hits), nil
+	return m.pick(hits, fresh), nil
 }
 
 func (p *Provider) bugReplies(ctx context.Context, issue string) ([]bugPost, error) {
@@ -260,11 +290,15 @@ func (p *Provider) findBugReply(ctx context.Context, issue string, m match) (str
 	if err != nil {
 		return "", err
 	}
-	var hits []string
+	var hits, fresh []string
 	for _, rp := range rs {
+		if !m.fresh(rp.ID, rp.Author, time.Time{}) {
+			continue
+		}
+		fresh = append(fresh, rp.ID)
 		if m.ok(rp.ID, rp.Author, rp.Body, time.Time{}) {
 			hits = append(hits, rp.ID)
 		}
 	}
-	return newest(hits), nil
+	return m.pick(hits, fresh), nil
 }

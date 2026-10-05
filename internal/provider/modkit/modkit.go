@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -123,6 +124,21 @@ func HTTPS(u, fallback string) string {
 // SameText compares two bodies ignoring whitespace differences (read-back).
 func SameText(a, b string) bool {
 	return strings.Join(strings.Fields(a), " ") == strings.Join(strings.Fields(b), " ")
+}
+
+// bbTagRe matches one BBCode tag: [b], [/b], [url=...], [*], [color=#fff].
+var bbTagRe = regexp.MustCompile(`\[/?[A-Za-z*][A-Za-z0-9*]*(?:=[^\]\n]*)?\]`)
+
+// PlainBBCode drops the BBCode tags of s and keeps their text, as a site
+// renders it ([url=https://x]GitHub Issues[/url] → "GitHub Issues").
+func PlainBBCode(s string) string {
+	return bbTagRe.ReplaceAllString(s, "")
+}
+
+// SameRendered compares a body read back from a site that renders BBCode
+// (got: the shown text) with the BBCode that was sent.
+func SameRendered(got, sent string) bool {
+	return SameText(got, sent) || SameText(got, PlainBBCode(sent))
 }
 
 // ReadBackSkew is how much older than the send time a found reply may look

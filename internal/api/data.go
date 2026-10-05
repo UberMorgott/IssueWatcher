@@ -11,6 +11,7 @@ import (
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/curseforge"
+	"github.com/UberMorgott/issuewatcher/internal/provider/modkit"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 	"github.com/UberMorgott/issuewatcher/internal/syncer"
 )
@@ -410,10 +411,30 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		s.replyConflict(w, r, id, "too_long", "the reply is longer than %s accepts")
 	case errors.As(err, &rl):
 		errJSON(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, modkit.ErrUnknownOutcome):
+		s.replyUnsure(w, r, id, err)
 	default:
 		s.opts.Log.Error("api: reply", "item", id, "err", err)
 		errJSON(w, http.StatusBadGateway, "posting the comment failed: "+err.Error())
 	}
+}
+
+// replyUnsure answers 202 code "unknown_outcome": the post was sent once and
+// may be on the site though its read-back did not find it. It is never sent
+// again; a sync of the item's project runs now, so a reply that is there
+// attaches to the item (the UI shows "probably sent, checking" and waits for it).
+func (s *Server) replyUnsure(w http.ResponseWriter, r *http.Request, id int64, err error) {
+	s.opts.Log.Warn("api: reply outcome unknown, syncing to find it", "item", id, "err", err)
+	platform := "github"
+	if ref, rerr := s.opts.Store.ItemRef(r.Context(), id); rerr == nil && ref.Platform != "" {
+		platform = ref.Platform
+	}
+	if d, derr := s.opts.Store.Issue(r.Context(), id); derr == nil {
+		if targets, terr := s.opts.Store.GroupTargets(r.Context(), d.RepoID); terr == nil {
+			s.opts.Sync.SyncProjects(r.Context(), targets)
+		}
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"error": err.Error(), "code": "unknown_outcome", "platform": platform})
 }
 
 // replyConflict answers 409 with a machine code and the item's platform, so

@@ -789,7 +789,7 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
       />
       <Button
         v-if="canLogout(c.id)"
-        :label="t('platforms.logout')"
+        :label="t(c.id === 'steam' ? 'platforms.logoutQr' : 'platforms.logout')"
         icon="pi pi-sign-out"
         severity="secondary"
         text

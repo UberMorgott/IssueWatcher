@@ -51,6 +51,8 @@ type replySite struct {
 	replies []postTile
 	bugReps []postTile
 	posts   []browser.Request
+	// render turns a saved Posts reply into the HTML the site shows (nil: as sent).
+	render func(string) string
 }
 
 func newReplyNative(t *testing.T, answer func(req browser.Request, save func()) (browser.Response, error)) (*Provider, *replySite) {
@@ -74,6 +76,9 @@ func newReplyNative(t *testing.T, answer func(req browser.Request, save func()) 
 				rs.bugReps = append(rs.bugReps, postTile{fmt.Sprint(7000 + len(rs.bugReps)), "UberMorgott", form.Get("content")})
 			} else {
 				text, _ := url.PathUnescape(form.Get("post"))
+				if rs.render != nil {
+					text = rs.render(text)
+				}
 				rs.replies = append(rs.replies, postTile{fmt.Sprint(600 + len(rs.replies)), "UberMorgott", text})
 			}
 			rs.mu.Unlock()
@@ -206,5 +211,40 @@ func TestNativeReplyNeedsSession(t *testing.T) {
 		Author: func() string { return "UberMorgott" }})
 	if _, err := p.Reply(context.Background(), "comment:windrose/147/500", "x"); !errors.Is(err, provider.ErrNotSignedIn) || posted != 0 {
 		t.Fatalf("err = %v, posted %d", err, posted)
+	}
+}
+
+// The live case (wartales/202, 2026-10-05): the post answers "1" without an
+// id and the thread shows the BBCode rendered, so the read-back must match the
+// rendered text, not report an unknown outcome for a reply that is there.
+func TestNativeReplyBBCodeReadBack(t *testing.T) {
+	body := "Thanks a lot for the feedback!\n\nPost them here:\n[url=https://github.com/UberMorgott/wartales-mp/issues]GitHub Issues[/url]\n[b]All[/b] welcome 😄"
+	rendered := "Thanks a lot for the feedback!<br><br>Post them here:<br><a href=\"https://github.com/UberMorgott/wartales-mp/issues\">GitHub Issues</a><br><strong>All</strong> welcome 😄"
+	p, rs := newReplyNative(t, func(_ browser.Request, save func()) (browser.Response, error) { return ok1(save) })
+	rs.render = func(string) string { return rendered }
+	c, err := p.Reply(context.Background(), "comment:windrose/147/500", body)
+	if err != nil || c.ExternalID != "600" || len(rs.posts) != 1 {
+		t.Fatalf("reply = %+v, %v, posts %d", c, err, len(rs.posts))
+	}
+}
+
+// A rendering the tag strip cannot follow (an image) still resolves: the only
+// new reply of the account in the locked thread is the one just posted; two
+// such replies stay unknown (never guessed, never re-sent).
+func TestNativeReplyReadBackOnlyFreshReply(t *testing.T) {
+	p, rs := newReplyNative(t, func(_ browser.Request, save func()) (browser.Response, error) { return ok1(save) })
+	rs.render = func(string) string { return `<img src="https://x/a.png">` }
+	c, err := p.Reply(context.Background(), "comment:windrose/147/500", "[img]https://x/a.png[/img]")
+	if err != nil || c.ExternalID != "600" {
+		t.Fatalf("reply = %+v, %v", c, err)
+	}
+	p, rs = newReplyNative(t, func(_ browser.Request, save func()) (browser.Response, error) {
+		save()
+		save() // a second new own reply shows up (another tab)
+		return browser.Response{Status: 200, Body: "1"}, nil
+	})
+	rs.render = func(string) string { return "other text" }
+	if _, err := p.Reply(context.Background(), "comment:windrose/147/500", "hello"); !errors.Is(err, ErrUnknownOutcome) || len(rs.posts) != 1 {
+		t.Fatalf("err = %v, posts %d", err, len(rs.posts))
 	}
 }
