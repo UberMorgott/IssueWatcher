@@ -104,6 +104,7 @@ type Runner struct {
 
 	mu      sync.Mutex
 	running map[int64]*activeRun
+	held    map[string]bool // folderKeys reserved by AcquireFolder (release runs)
 	wake    chan struct{}
 	wg      sync.WaitGroup
 }
@@ -226,8 +227,9 @@ func (r *Runner) schedule(ctx context.Context) {
 	cfg := r.opts.Settings().Agents
 	for _, j := range queued {
 		r.mu.Lock()
-		busyProject, perProfile := false, 0
+		perProfile := 0
 		folder := folderKey(j.LocalPath)
+		busyProject := folder != "" && r.held[folder] // a release run holds the folder
 		for _, a := range r.running {
 			busyProject = busyProject || a.project == j.ProjectID || (folder != "" && a.folder == folder)
 			if a.profile == j.ProfileID {

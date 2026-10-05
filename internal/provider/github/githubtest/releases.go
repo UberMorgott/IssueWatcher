@@ -54,6 +54,9 @@ func (s *Server) releaseJSON(rel *Release) map[string]any {
 func (s *Server) releaseByTag(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
+	if s.injected(w) { // FailNext: a release probe that cannot tell
+		return
+	}
 	repo := r.PathValue("owner") + "/" + r.PathValue("repo")
 	for _, rel := range s.Releases {
 		if rel.Repo == repo && rel.TagName == r.PathValue("tag") && !rel.Draft {
