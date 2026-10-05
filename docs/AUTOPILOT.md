@@ -147,11 +147,11 @@ Every publisher implements `provider.Publisher`; Steam's "archive" is the conten
 
 ## Verify gate and smoke tests
 
-1. **Static gate** (fix runs and release runs): `aegis verify -root <dir>` when the folder has `.aegis`, else the project `verify` command (existing runner logic, 30 min). Must pass on the exact sha that is pushed / released; result stored on the step.
+1. **Static gate** (fix runs and release runs): `aegis verify -root <dir>` when the folder has `.aegis`, else the project `verify` command (existing runner logic, 30 min). Must pass on the exact sha that is pushed / released; result stored on the step. A project with neither is **held** (`no_verify`, unread attention event), never skipped: no publish without verification (owner rule, 2026-10-05).
 2. **Archive check** (release runs, all games, Phase 1): the archive opens, expected root layout (per adapter), version inside == bumped version, size within ±50 % of the previous release (outside → held).
 3. **Smoke adapter** (release runs, on the built artifact), isolated temp dirs, job object, timeout 10 min:
    - `factorio`: the owner's Factorio install (auto-detected: Steam library / standalone; path overridable), temp `--mod-directory` with the archive + `mod-list.json` enabling it (dependencies copied from the owner's mods folder), then `factorio --mod-directory D --create T.zip` (data stage + map) and `factorio --mod-directory D --benchmark <copy of save or T.zip> --benchmark-ticks N` (control stage, migrations on the owner's save). Pass = exit 0 and no mod error lines in the log. Never touches the owner's real mods folder or saves. Flags re-checked against the installed version in the step.
-   - `command`: any script from the profile (exit code + log tail), e.g. a batch-mode launch where a game supports it.
+   - `command`: any script from the profile (exit code + log tail), e.g. a batch-mode launch where a game supports it. Runs in a temp dir holding a copy of the archive; `{archive}` (quoted path), `{name}`, `{version}` are replaced.
    - `none`: allowed only with «Публиковать без смоук-теста» (default off) — otherwise the release is held.
 4. **Fail** → no push of the bump, no tag, no publish; run `held`, notification with the failing step and log link.
 
@@ -186,7 +186,8 @@ Owner decision 2026-10-05: **no phone push** (no ntfy, no Telegram). `internal/n
 Self-describing tools (descriptions state preconditions, side effects and the refusal codes; every write has `dryRun`), through the same endpoints as the UI:
 
 - `get_publish_profile {project}` → profile + resolved values (current version, next version, targets with their latest versions, auth state per target, smoke kind, autopilot switches) — the one call an external agent needs.
-- `set_publish_profile {project, profile}` (validated; no secrets accepted; refused for agent-run callers).
+- `set_publish_profile {project, profile, dryRun}` (validated; no secrets accepted; refused for agent-run callers unless `dryRun`).
+- `get_autopilot_settings {project}` / `set_autopilot_settings {project, autopilot, revision?, dryRun}` → the project's autopilot block (set refused for agent-run callers unless `dryRun`).
 - `plan_release {project, version?, head?}` → the full dry-run plan.
 - `release {project, version?, head?, items?, targets?, dryRun}` → starts a release run (origin `mcp`; same gate and rails; explicit `version` may be minor/major).
 - `list_runs`, `get_run {id}`, `resume_run`, `cancel_run`, `skip_step {run, step}`, `pause_autopilot {project?}`.
@@ -217,9 +218,17 @@ Not adopted: **agent isolation** — Codex proposed a separate restricted execut
 ## Phase 1 implementation notes (2026-10-05)
 
 - Origins: `manual` (the owner's browser session) is not blocked by `paused` / project `enabled`; `mcp` (bearer: MCP/CLI) is refused by both.
-- `smoke` is recorded `skipped` until the Phase 2 adapters land; a project with neither Aegis nor a verify command records `gate` as skipped ("no verify command").
+- ~~`smoke` is recorded `skipped` until the Phase 2 adapters land; a project with neither Aegis nor a verify command records `gate` as skipped~~ — superseded in Phase 2: smoke runs its adapter; no verify command → `held` (`no_verify`).
 - Daily caps count every release run created on the same UTC day (a cancelled or failed run keeps its slot).
 - Nexus probe: version listed on the target file (the API exposes no md5); Factorio probe: release version + sha1.
 - The 72 h availability deadline is stored on the step at its first run and survives a restart.
-- `set_publish_profile` (MCP) takes only the publish profile; the autopilot block (it can switch a project on) is UI / owner CLI only.
+- `set_publish_profile` (MCP) takes only the publish profile; the autopilot block (it can switch a project on) has its own tool `set_autopilot_settings` (Phase 2), refused for agent-run callers like the other control tools.
 - Activity log: events are written (held / failed / done / cancelled) and readable via `GET /api/autopilot/events` and MCP `list_autopilot_events`; the top-bar badge and log page are Phase 2.
+
+## Phase 2 implementation notes (2026-10-05)
+
+- **Gate without verification**: neither Aegis nor a project verify command → the `gate` step fails and the run is `held` with `no_verify` + an unread attention event (was: skipped). Resume after adding a verify command re-runs the gate.
+- **Smoke step** (`internal/smoke`): kind `factorio` / `command` runs on the built archive in `data\release\<run>\smoke` (removed after); the result JSON is the step's external ref. Failure → `smoke_failed`; adapter cannot run here (no install, a flag missing, a required dependency not installed, bad save path) → `smoke_unavailable`; kind `none` / unset → `smoke_missing` unless the project's `publishWithoutSmoke` (then `skipped`). All hold before any push. «Проверить настройку» runs the same smoke on the trial archive (`smoke` in the check result).
+- **Factorio adapter**: install = profile `smoke.install` (root or `factorio.exe`) else auto-detect (Steam `SteamPath` → `libraryfolders.vdf` libraries → `steamapps\common\Factorio`, then Program Files). The owner's mods folder comes from the install's `config-path.cfg` → `config.ini` `path.write-data` (else `%APPDATA%\Factorio`); it is only read. Each run writes its own `config.ini` (read-data = the install's data, **write-data = the temp dir**: log, lock and player data never touch the owner's folders), a temp `--mod-directory` with the archive + required dependencies (recursively, newest installed version; `?` / `(?)` / `!` skipped, `~` counted; `space-age` / `quality` / `elevated-rails` enabled only when required) and a `mod-list.json` enabling exactly those. `--version` + `--help` are checked first (flags `--config --mod-directory --create --benchmark --benchmark-ticks`), then `--create <temp map>` and `--benchmark <copy of the save | the new map> --benchmark-ticks N` (default 600) with `--disable-audio`, each in a job object, 10 min in total. Pass = exit 0 and no error lines (`Error …`, `Failed to load mod`, `non-recoverable error`, `Error while running`, `__mod__/file.lua:N:` traces) in stdout or `factorio-current.log`. Verified on Factorio 2.0.77 (Steam) with Lazy Builder 1.1.6 (fresh map and an owner save): create + 600-tick benchmark ≈ 1.3 s; the Steam build runs without Steam.
+- **Activity log UI**: «Автопилот» in the top bar with the unread counter (red while attention events are unread), log page `/autopilot` (newest first, links to the run / project, «Отметить прочитанным»); opening it marks the loaded unread events read by id (an event arriving meanwhile stays unread). SSE `autopilot.unread {unread, attention}` after every new event and every mark-read; `POST /api/autopilot/events/read` answers the counts too.
+- **Dry runs**: `PUT …/publish-profile` and the new `GET/PUT /api/projects/{id}/autopilot` take `dryRun` (validated by the config store, nothing written, allowed for agent callers); MCP `set_publish_profile {dry_run}`, `get_autopilot_settings`, `set_autopilot_settings {dry_run}`.
