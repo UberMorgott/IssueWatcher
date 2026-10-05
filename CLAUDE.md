@@ -13,6 +13,12 @@
 - Parallel agents share one index: commit with `git commit --only -- <explicit paths>`, don't stage ahead of time.
 - Design and phases: `docs/ARCHITECTURE.md`; checklist: `TASKS.md`.
 
+## Portable, UI-only (owner, 2026-10-05)
+- Every helper the app needs (steamcmd, steam_api64.dll, other tools, their caches/sessions) lives in the folder
+  next to the portable binary (app data dir). Never install into or depend on system/other-program locations
+  (no %APPDATA%/registry/global PATH writes; don't run tools from other apps' folders). Game installs are only read.
+- Owner only ever acts through the app UI (one-time login forms). Everything else is automatic under the hood.
+
 ## Releases: standing OK (owner, 2026-09-30)
 - After verified user-facing fixes/features land on `main`, cut a release without asking: push `main`, then
   `pwsh -File release.ps1 -Version vX.Y.Z` (patch for fixes), Russian release notes in the v0.9.0 style.
