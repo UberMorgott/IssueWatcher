@@ -213,3 +213,13 @@ Not adopted: **agent isolation** — Codex proposed a separate restricted execut
 4. **Agent isolation**: risk accepted — no separate Windows account; the mirror push and the agent-caller refusal on control tools stay.
 5. **Notifications**: no phone push; an in-app autopilot activity log with an unread counter badge (see Activity log).
 6. **Reply timing**: replies wait until every enabled (non-skipped) target shows the file as available, at most 72 h; then the step is held and an unread "needs attention" event is recorded.
+
+## Phase 1 implementation notes (2026-10-05)
+
+- Origins: `manual` (the owner's browser session) is not blocked by `paused` / project `enabled`; `mcp` (bearer: MCP/CLI) is refused by both.
+- `smoke` is recorded `skipped` until the Phase 2 adapters land; a project with neither Aegis nor a verify command records `gate` as skipped ("no verify command").
+- Daily caps count every release run created on the same UTC day (a cancelled or failed run keeps its slot).
+- Nexus probe: version listed on the target file (the API exposes no md5); Factorio probe: release version + sha1.
+- The 72 h availability deadline is stored on the step at its first run and survives a restart.
+- `set_publish_profile` (MCP) takes only the publish profile; the autopilot block (it can switch a project on) is UI / owner CLI only.
+- Activity log: events are written (held / failed / done / cancelled) and readable via `GET /api/autopilot/events` and MCP `list_autopilot_events`; the top-bar badge and log page are Phase 2.
