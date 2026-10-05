@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/UberMorgott/issuewatcher/internal/config"
+	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
 // The release run's folder lock: one holder per folder (case-insensitive),
@@ -25,6 +26,15 @@ func TestAcquireFolder(t *testing.T) {
 	again, err := r.AcquireFolder(dir)
 	if err != nil {
 		t.Fatalf("after release: %v", err)
+	}
+	// launch re-checks under the lock: a job of a held folder is not started
+	// (Options.Store is nil here: reaching UpdateJob would panic).
+	r.launch(t.Context(), store.Job{ID: 7, LocalPath: dir})
+	r.mu.Lock()
+	_, started := r.running[7]
+	r.mu.Unlock()
+	if started {
+		t.Fatal("job launched in a held folder")
 	}
 	again()
 

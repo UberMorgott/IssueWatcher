@@ -250,19 +250,31 @@ func (r *Runner) schedule(ctx context.Context) {
 }
 
 func (r *Runner) launch(parent context.Context, j store.Job) {
+	// Claim the folder before the job turns running: a release run's
+	// AcquireFolder between schedule's check and here must win or lose cleanly.
+	ctx, cancel := context.WithCancelCause(parent)
+	folder := folderKey(j.LocalPath)
+	r.mu.Lock()
+	if folder != "" && r.held[folder] {
+		r.mu.Unlock()
+		cancel(nil)
+		return // stays queued until the folder is released
+	}
+	r.running[j.ID] = &activeRun{cancel: cancel, project: j.ProjectID, profile: j.ProfileID, folder: folder}
+	r.mu.Unlock()
 	nj, err := r.opts.Store.UpdateJob(parent, j.ID, []string{store.JobQueued}, store.JobChange{
 		State: new(store.JobRunning), Phase: new("prepare"), Error: new(""), Result: json.RawMessage("{}"), Started: true,
 	})
 	if err != nil {
+		r.mu.Lock()
+		delete(r.running, j.ID)
+		r.mu.Unlock()
+		cancel(nil)
 		if !errors.Is(err, store.ErrJobState) {
 			r.opts.Log.Error("runner: start job", "job", j.ID, "err", err)
 		}
 		return
 	}
-	ctx, cancel := context.WithCancelCause(parent)
-	r.mu.Lock()
-	r.running[j.ID] = &activeRun{cancel: cancel, project: j.ProjectID, profile: j.ProfileID, folder: folderKey(j.LocalPath)}
-	r.mu.Unlock()
 	r.opts.OnJob(nj)
 	r.wg.Go(func() {
 		defer func() {
