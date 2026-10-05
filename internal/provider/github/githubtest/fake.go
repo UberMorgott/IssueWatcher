@@ -323,6 +323,10 @@ func (s *Server) graphql(w http.ResponseWriter, r *http.Request) {
 		s.issuesByNumber(w, req.Query, req.Variables)
 	case strings.Contains(req.Query, "addComment"):
 		s.addComment(w, req.Variables)
+	case strings.Contains(req.Query, "closeIssue"):
+		s.closeIssue(w, req.Variables)
+	case strings.Contains(req.Query, "node(id:"):
+		s.node(w, req.Variables)
 	case strings.Contains(req.Query, "repository("):
 		s.issues(w, req.Variables)
 	default:
@@ -385,6 +389,34 @@ func issueNode(is *Issue) map[string]any {
 		"author": map[string]string{"login": is.Author}, "labels": map[string]any{"nodes": labels},
 		"comments": map[string]any{"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""}, "nodes": comments},
 	}
+}
+
+// closeIssue closes the issue with node id vars.id (GraphQL closeIssue).
+func (s *Server) closeIssue(w http.ResponseWriter, vars map[string]any) {
+	for _, is := range s.Issues {
+		if is.ID != str(vars["id"]) {
+			continue
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		if is.Open {
+			is.Open, is.ClosedAt, is.UpdatedAt = false, now, now
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"closeIssue": map[string]any{
+			"issue": map[string]any{"state": "CLOSED"}}}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"errors": []map[string]string{{"message": "not found"}}})
+}
+
+// node answers node(id) for an issue: state and comments.
+func (s *Server) node(w http.ResponseWriter, vars map[string]any) {
+	for _, is := range s.Issues {
+		if is.ID == str(vars["id"]) {
+			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"node": issueNode(is)}})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"node": nil}})
 }
 
 func (s *Server) addComment(w http.ResponseWriter, vars map[string]any) {

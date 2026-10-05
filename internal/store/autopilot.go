@@ -133,6 +133,9 @@ type NewReleaseRun struct {
 	MaxPerProjectPerDay int
 	MaxGlobalPerDay     int
 	Now                 time.Time // zero = time.Now()
+	// Claim are pushed fix runs of the project this release answers for: their
+	// release_id is set in the same transaction (all or none → ErrClaimRace).
+	Claim []int64
 }
 
 func terminalStep(state string) bool {
@@ -262,6 +265,9 @@ func (s *Store) CreateReleaseRun(ctx context.Context, nr NewReleaseRun) (Run, er
 			return Run{}, ErrRunBusy
 		}
 		return Run{}, fmt.Errorf("store: create release run: %w", err)
+	}
+	if err := claimFixRuns(ctx, tx, id, nr.ProjectID, nr.Claim); err != nil {
+		return Run{}, err
 	}
 	for _, it := range nr.Items {
 		role := it.Role

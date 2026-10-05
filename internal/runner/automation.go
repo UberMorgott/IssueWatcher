@@ -18,6 +18,9 @@ const (
 	ReasonAutoFixOff  = "auto_fix_off" // fix rule where allowAutoFix is off
 	ReasonNoFolder    = "no_folder"    // fix rule without a working mapped folder
 	ReasonUnavailable = "unavailable"  // label rule without a label-capable provider, or for a mod page item
+	// ReasonAutopilot: fix rule of a project whose autopilot does the fixing
+	// (autopilot.enabled + autoFix): the inbox starts a fix run instead.
+	ReasonAutopilot = "autopilot"
 )
 
 // Automate applies the automation rules to sync events (docs/ARCHITECTURE.md →
@@ -71,7 +74,9 @@ func (r *Runner) Automate(ctx context.Context, events []store.Event) []store.Aut
 			At: r.opts.Now(), ItemID: ev.ItemID, Event: string(ev.Kind), RuleID: rule.ID, Flow: rule.Flow, ProfileID: profile,
 			TotalCap: pol.TotalPerDay, DayCap: pol.ProjectPerDay, RuleCap: rule.MaxPerDay, MaxAttempts: pol.MaxAttempts,
 		}
-		if _, ok := cfg.Profile(profile); !ok {
+		if rule.Flow == config.FlowFix && AutopilotFixes(cfg, cmp.Or(ev.CodeProject, ev.Project)) {
+			req.Skip = ReasonAutopilot
+		} else if _, ok := cfg.Profile(profile); !ok {
 			req.Skip = ReasonNoProfile
 		} else if rule.Flow == config.FlowLabel && (r.opts.Labels == nil || item.Mod) {
 			req.Skip = ReasonUnavailable

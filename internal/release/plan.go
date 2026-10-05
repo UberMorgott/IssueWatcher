@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +80,14 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 	}
 	if prof.Changelog.Kind == "" {
 		refuse(CodeNoProfile, "publishProfile.changelog.kind is not set")
+	}
+	// Owner rule: nothing is published without verification. Refused up front
+	// (no run, no daily slot) instead of a run held at its gate / smoke step.
+	if !e.hasGate(repo.Key, repo.LocalPath) {
+		refuse(CodeNoVerify, "no verify gate: enable Aegis in %s or set the project's verify command (Settings › Projects › %s)", repo.LocalPath, repo.Key)
+	}
+	if (prof.Smoke.Kind == "" || prof.Smoke.Kind == config.SmokeNone) && !ap.PublishWithoutSmoke {
+		refuse(CodeNoSmoke, "no smoke test: set publishProfile.smoke (factorio or command), or turn on «Публиковать без смоук-теста» (autopilot.publishWithoutSmoke)")
 	}
 	repoName := strings.TrimPrefix(repo.Key, "github:")
 
@@ -231,13 +240,22 @@ func (e *Engine) Plan(ctx context.Context, projectID int64, req Request) (Plan, 
 	p.Asset = m.Asset
 	m.Identity = e.identity(ctx, m)
 
-	// Items.
+	// Items: each gets a reply (autoReply, platform can reply) and, a GitHub
+	// issue, a close step after it (autoClose); the rest wait for the owner.
 	for _, id := range req.Items {
 		in, err := e.d.Store.JobInput(ctx, id)
 		if err != nil || in.CodeKey != repo.Key {
 			refuse(CodeBadRequest, "item %d is not an item of %s or its mod pages", id, repo.Key)
+			continue
 		}
+		if !ap.AutoReply || e.d.Items == nil || !e.d.Items.CanReply(ctx, id) {
+			m.RepliesPending = append(m.RepliesPending, id)
+			continue
+		}
+		m.Replies = append(m.Replies, ReplyItem{ID: id, Platform: in.Platform, Number: in.Number, URL: in.URL,
+			Close: ap.AutoClose && in.Platform == store.CodePlatform})
 	}
+	m.FixRuns = req.Claim
 
 	// Serialization and caps.
 	e.planCaps(ctx, &p, projectID, cfg, ap, len(selected), refuse)
@@ -429,6 +447,18 @@ func planSteps(m *Manifest) []PlanStep {
 	for _, t := range m.Targets {
 		st = append(st, PlanStep{Step: StepAvailable, Target: t.Key, Request: "poll " + t.Key + " until " + m.Version + " is listed (max 72 h)"})
 	}
+	for _, it := range m.Replies {
+		id := strconv.FormatInt(it.ID, 10)
+		st = append(st, PlanStep{Step: StepReply, Target: id, IdemKey: id + ":<run>",
+			Request: fmt.Sprintf("reply on %s %s: fixed in %s + links of the available targets", it.Platform, it.URL, m.Tag),
+			Note:    "waits until every target is available or skipped"})
+	}
+	for _, it := range m.Replies {
+		if it.Close {
+			id := strconv.FormatInt(it.ID, 10)
+			st = append(st, PlanStep{Step: StepClose, Target: id, IdemKey: id + ":<run>", Request: "close " + it.URL + " (completed)"})
+		}
+	}
 	return st
 }
 
@@ -456,6 +486,9 @@ func (e *Engine) Release(ctx context.Context, projectID int64, req Request) (sto
 		return store.Run{}, p, err
 	}
 	if !p.OK {
+		if !req.DryRun {
+			e.refusedEvent(ctx, p, req.Origin)
+		}
 		return store.Run{}, p, &RefusedError{Plan: p}
 	}
 	if req.DryRun {
@@ -478,9 +511,9 @@ func (e *Engine) Release(ctx context.Context, projectID int64, req Request) (sto
 	origin := cmpOrStr(req.Origin, store.RunOriginManual)
 	run, err := e.d.Store.CreateReleaseRun(ctx, store.NewReleaseRun{ProjectID: projectID, Origin: origin, Version: m.Version,
 		Manifest: b, Items: items, Steps: steps, MaxPerProjectPerDay: cfg.Agents.AutopilotFor(m.Project).MaxReleasesPerDay,
-		MaxGlobalPerDay: cfg.Agents.Autopilot.MaxReleasesPerDay, Now: e.d.Now()})
+		MaxGlobalPerDay: cfg.Agents.Autopilot.MaxReleasesPerDay, Now: e.d.Now(), Claim: req.Claim})
 	switch {
-	case errors.Is(err, store.ErrRunBusy):
+	case errors.Is(err, store.ErrRunBusy), errors.Is(err, store.ErrClaimRace):
 		p.OK, p.Refusals = false, append(p.Refusals, Refusal{Code: CodeBusy, Message: "an unfinished release run of this project exists"})
 		return store.Run{}, p, &RefusedError{Plan: p}
 	case errors.Is(err, store.ErrCapReached):

@@ -35,18 +35,22 @@ const (
 
 // LocalResult is what a direct fix did to the mapped folder (Result.Local).
 type LocalResult struct {
-	Dir         string        `json:"dir"`
-	Branch      string        `json:"branch"` // checked out at the end ("" = detached HEAD)
-	StartSHA    string        `json:"startSha"`
-	HeadSHA     string        `json:"headSha"`
-	Commits     []LocalCommit `json:"commits"`  // StartSHA..HeadSHA, oldest first
-	FixesRef    bool          `json:"fixesRef"` // a commit message closes the issue (Fixes #N)
-	DirtyBefore []string      `json:"dirtyBefore,omitempty"`
-	DirtyAfter  []string      `json:"dirtyAfter,omitempty"`
-	Outcome     string        `json:"outcome"`
-	Pushed      bool          `json:"pushed"`
-	PushedAt    string        `json:"pushedAt,omitempty"`
-	Closed      bool          `json:"closed"`
+	Dir      string        `json:"dir"`
+	Branch   string        `json:"branch"` // checked out at the end ("" = detached HEAD)
+	StartSHA string        `json:"startSha"`
+	HeadSHA  string        `json:"headSha"`
+	Commits  []LocalCommit `json:"commits"`  // StartSHA..HeadSHA, oldest first
+	FixesRef bool          `json:"fixesRef"` // a commit message closes the issue (Fixes #N)
+	// RefsRef: a commit message references the issue neutrally (Refs #N, autopilot fixes).
+	RefsRef bool `json:"refsRef,omitempty"`
+	// Autopilot: the fix was queued by an autopilot fix run (commits say Refs #N).
+	Autopilot   bool     `json:"autopilot,omitempty"`
+	DirtyBefore []string `json:"dirtyBefore,omitempty"`
+	DirtyAfter  []string `json:"dirtyAfter,omitempty"`
+	Outcome     string   `json:"outcome"`
+	Pushed      bool     `json:"pushed"`
+	PushedAt    string   `json:"pushedAt,omitempty"`
+	Closed      bool     `json:"closed"`
 	// Changed (folder mode, ModeFolder): files the run changed in the folder,
 	// "A|M|D path" relative to Dir (a file snapshot, not git).
 	Changed []string `json:"changed,omitempty"`
@@ -57,6 +61,12 @@ type LocalCommit struct {
 	SHA     string `json:"sha"`
 	Subject string `json:"subject"`
 	Fixes   bool   `json:"fixes"`
+	Refs    bool   `json:"refs,omitempty"` // references the issue neutrally (Refs #N)
+}
+
+// autopilotJob reports a fix job queued by an autopilot fix run.
+func autopilotJob(j *store.Job) bool {
+	return j.Origin == store.OriginRule && j.RuleID == store.RuleAutopilot
 }
 
 // flowFixDirect selects the direct fix schema and prompt (the job flow stays fix).
@@ -70,7 +80,7 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 ) (string, error) {
 	dir := in.LocalPath
 	res.Mode = config.ModeDirect
-	loc := &LocalResult{Dir: dir, Commits: []LocalCommit{}}
+	loc := &LocalResult{Dir: dir, Commits: []LocalCommit{}, Autopilot: autopilotJob(j)}
 	res.Local = loc
 	loc.StartSHA, _ = r.git(ctx, dir, nil, "rev-parse", "--verify", "--quiet", "HEAD")
 	loc.Branch, _ = r.git(ctx, dir, nil, "symbolic-ref", "--short", "-q", "HEAD")
@@ -91,7 +101,7 @@ func (r *Runner) runDirect(ctx context.Context, j *store.Job, res *Result, log *
 	}
 
 	r.phase(ctx, j, "agent")
-	system, task := prompts(cfg, flowFixDirect, promptInput{in: in})
+	system, task := prompts(cfg, flowFixDirect, promptInput{in: in, autopilot: loc.Autopilot})
 	// Claude: our whole prompt is appended to the user's own system prompt; the
 	// user turn only starts the task. Codex gets both in its input.
 	kickoff := "Handle the IssueWatcher task described in the appended instructions: issue #" + strconv.Itoa(in.Number) + " of " + in.ProjectName + "."
@@ -217,6 +227,11 @@ func closesRe(n int) *regexp.Regexp {
 	return regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:[\w.-]+/[\w.-]+)?#` + strconv.Itoa(n) + `\b`)
 }
 
+// refsRe matches a neutral reference to issue n ("Refs #12", "ref: owner/repo#12").
+func refsRe(n int) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)\brefs?:?\s+(?:[\w.-]+/[\w.-]+)?#` + strconv.Itoa(n) + `\b`)
+}
+
 // localFacts fills loc from git: commits since the start, "Fixes #N", the
 // working tree afterwards, whether the head is on a remote branch; it stores
 // the commits' diff and returns it.
@@ -241,22 +256,30 @@ func (r *Runner) localFacts(ctx context.Context, j *store.Job, in store.JobInput
 	if err != nil {
 		return "", err
 	}
-	re := closesRe(in.Number)
+	re, refs := closesRe(in.Number), refsRe(in.Number)
 	loc.Commits = []LocalCommit{}
+	loc.FixesRef, loc.RefsRef = false, false
 	for rec := range strings.SplitSeq(out, "\x1e") {
 		f := strings.SplitN(strings.TrimLeft(rec, "\r\n"), "\x1f", 3)
 		if len(f) < 3 {
 			continue
 		}
-		c := LocalCommit{SHA: f[0], Subject: f[1], Fixes: re.MatchString(f[2])}
+		c := LocalCommit{SHA: f[0], Subject: f[1], Fixes: re.MatchString(f[2]), Refs: refs.MatchString(f[2])}
 		loc.FixesRef = loc.FixesRef || c.Fixes
+		loc.RefsRef = loc.RefsRef || c.Refs
 		loc.Commits = append(loc.Commits, c)
 	}
-	log.addf(StepInfo, "check: %d new commit(s), Fixes #%d: %t, uncommitted after: %d", len(loc.Commits), in.Number, loc.FixesRef, len(after))
+	log.addf(StepInfo, "check: %d new commit(s), Fixes #%d: %t, Refs #%d: %t, uncommitted after: %d", len(loc.Commits), in.Number, loc.FixesRef,
+		in.Number, loc.RefsRef, len(after))
 	if len(loc.Commits) == 0 {
 		return "", nil
 	}
 	switch {
+	case loc.Autopilot && loc.FixesRef:
+		log.addf(StepInfo, "warning: a commit message closes #%d: pushing would close the issue before the release; autopilot holds this fix", in.Number)
+	case loc.Autopilot && !in.Mod && !loc.RefsRef:
+		log.addf(StepInfo, "warning: no commit message says \"Refs #%d\"", in.Number)
+	case loc.Autopilot:
 	case in.Mod && loc.FixesRef:
 		log.addf(StepInfo, "warning: a commit message says \"#%d\" of a mod-page report: pushing it may close an unrelated issue of %s", in.Number, in.CodeRepo())
 	case !in.Mod && !loc.FixesRef:

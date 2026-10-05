@@ -307,7 +307,7 @@ func TestMigration016OnExistingDB(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	var version int
-	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 16 {
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 17 {
 		t.Fatalf("version %d %v", version, err)
 	}
 	s := New(db)

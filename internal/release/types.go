@@ -24,6 +24,12 @@ const (
 	StepGHAsset      = "gh_asset"  // target = asset file name
 	StepPublish      = "publish"   // target = platform:external_id
 	StepAvailable    = "available" // target = platform:external_id
+	StepReply        = "reply"     // target = item id: the reporter's reply with the version and links
+	StepClose        = "close"     // target = item id: close the GitHub issue (after its reply)
+
+	// Fix run steps (docs/AUTOPILOT.md → Fix run): fix → verify → push (StepPush).
+	StepFix    = "fix"    // the autopilot direct fix job (external_ref = job id)
+	StepVerify = "verify" // the static gate on the fix head + diff limits
 )
 
 // Refusal codes of a plan / start (Refusal.Code) and held reasons.
@@ -42,6 +48,10 @@ const (
 	CodeDisabled         = "disabled"           // the project's autopilot.enabled is off
 	CodeBadRequest       = "bad_request"        // bad version / items / targets in the request
 	CodeRemote           = "remote_error"       // the remote / platform could not be read
+	// CodeNoVerify: neither Aegis nor a verify command (no run, no daily slot used).
+	CodeNoVerify = "no_verify"
+	// CodeNoSmoke: no smoke test while «Публиковать без смоук-теста» is off.
+	CodeNoSmoke = "smoke_missing"
 )
 
 // Held reasons (store.Run.HeldReason) besides check:<step> and failed:<step>.
@@ -64,6 +74,17 @@ const (
 	HeldSmokeMissing = "smoke_missing"
 	// HeldSmokeUnavailable: the smoke adapter cannot run here (no install, missing dependency).
 	HeldSmokeUnavailable = "smoke_unavailable"
+	// HeldReplyWaiting: a reply step found a target neither available nor skipped.
+	HeldReplyWaiting = "reply_waiting"
+
+	// Fix run held reasons.
+	HeldDiffTooBig     = "diff_too_big"    // more changed lines than autopilot.maxDiffLines
+	HeldDiffReview     = "diff_review"     // touches CI / build / release / profile / dependency files, or deletes files
+	HeldClosingKeyword = "closing_keyword" // a commit closes the issue (Fixes #N) before the release
+	HeldNeedsInfo      = "needs_info"
+	HeldNotReproduced  = "not_reproduced"
+	HeldNoCommit       = "no_commit"
+	HeldNotDefault     = "not_default_branch" // the fix is not on the default branch
 )
 
 // Manifest is a release run's frozen input (store.Run.Manifest). Written once
@@ -89,6 +110,22 @@ type Manifest struct {
 	Identity      [2]string             `json:"identity"` // committer / tagger name, email
 	BumpSHA       string                `json:"bumpSha,omitempty"`
 	Changelog     string                `json:"changelog,omitempty"`
+	// Replies are the items answered by reply:<item> (and closed by close:<item>);
+	// RepliesPending the items whose reply waits for the owner (autoReply off,
+	// or the platform cannot reply).
+	Replies        []ReplyItem `json:"replies,omitempty"`
+	RepliesPending []int64     `json:"repliesPending,omitempty"`
+	// FixRuns are the fix runs this release claimed (autopilot).
+	FixRuns []int64 `json:"fixRuns,omitempty"`
+}
+
+// ReplyItem is an item a release answers.
+type ReplyItem struct {
+	ID       int64  `json:"id"`
+	Platform string `json:"platform"`
+	Number   int    `json:"number"`
+	URL      string `json:"url"`
+	Close    bool   `json:"close"` // a close:<item> step follows its reply (GitHub issue, autoClose)
 }
 
 // Target is one publish target (a linked mod page with a Publisher).
@@ -132,6 +169,9 @@ type Request struct {
 	// Origin is set by the API from the caller: manual (the owner's browser session)
 	// bypasses paused / disabled; mcp (bearer: MCP / CLI) is refused by both. "" = manual.
 	Origin string `json:"-"`
+	// Claim are pushed fix runs the release answers for (the coalescing timer):
+	// claimed in the run's create transaction.
+	Claim []int64 `json:"-"`
 }
 
 // PlanTarget is a target as the plan sees it.

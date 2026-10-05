@@ -221,6 +221,17 @@ func (g *Group) ReplyMarkdown(platform string) bool {
 	return false
 }
 
+// CanReply reports the Reply capability of platform's provider (false when no
+// syncer of platform exists).
+func (g *Group) CanReply(platform string) bool {
+	for _, s := range g.Syncers() {
+		if s.opts.Provider.Platform() == platform {
+			return s.opts.Provider.Capabilities().Reply
+		}
+	}
+	return false
+}
+
 // MaxReply is the Capabilities.MaxReply of platform's provider: the longest
 // reply it accepts, 0 when the platform has no limit of its own.
 func (g *Group) MaxReply(platform string) int {

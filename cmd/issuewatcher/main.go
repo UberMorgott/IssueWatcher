@@ -39,6 +39,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
 	"github.com/UberMorgott/issuewatcher/internal/redact"
+	"github.com/UberMorgott/issuewatcher/internal/release"
 	"github.com/UberMorgott/issuewatcher/internal/runner"
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -238,7 +239,8 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	var group atomic.Bool
 	group.Store(cfg.Notifications.Group)
 	gh := github.NewProvider(auth)
-	var jobs *runner.Runner // set below; the sync loop starts after it exists
+	var jobs *runner.Runner      // set below; the sync loop starts after it exists
+	var releases *release.Engine // set below; autopilot: inbox → fix runs → releases
 	onUpdate := func(events []store.Event, unread int) {
 		popups := events
 		if group.Load() {
@@ -261,6 +263,9 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		if jobs != nil {
 			jobs.Automate(context.Background(), events) // rules → rule jobs (off by default)
 			jobs.Refresh()                              // a closed issue ends its direct fix job
+		}
+		if releases != nil {
+			releases.Kick() // new inbox events → fix runs
 		}
 	}
 	// One syncer per connected account (source); GitHub is the primary one.
@@ -292,7 +297,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 	})
 	var testN atomic.Int64
 	jobs = newRunner(log, dataDir, cfgs, st, gh, sy, func() *api.Server { return srv }, func() *notify.Tray { return tray })
-	releases := newReleaseEngine(log, dataDir, cfgs, st, gh, jobs, mods.Publisher, func() *api.Server { return srv })
+	releases = newReleaseEngine(log, dataDir, cfgs, st, gh, jobs, sy, mods.Publisher, func() *api.Server { return srv })
 
 	focus := notify.FocusDashboard
 	var picker api.FolderPicker

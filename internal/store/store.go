@@ -31,6 +31,21 @@ type Store struct {
 	db      *sql.DB      // the writer (one connection): writes and transactions
 	rd      *sql.DB      // readers: a query_only pool, or db itself (New)
 	changes atomic.Int64 // rows sync really changed (items, comments, projects)
+	// inbox decides, per code project settings key, whether sync events go to
+	// the autopilot inbox (nil = never); see SetInboxFilter.
+	inbox atomic.Pointer[func(codeKey string) bool]
+}
+
+// SetInboxFilter makes sync write its new_issue / new_comment / new_item
+// events into autopilot_inbox, in the sync's own transaction, when accept
+// reports true for the item's code project key (a mod page's linked code
+// project, else the project itself). nil turns the inbox off.
+func (s *Store) SetInboxFilter(accept func(codeKey string) bool) {
+	if accept == nil {
+		s.inbox.Store(nil)
+		return
+	}
+	s.inbox.Store(&accept)
 }
 
 // Changes is a counter of synced rows that really changed (new, edited, closed,
@@ -79,6 +94,9 @@ type Event struct {
 	Title       string
 	Actor       string // issue/comment author; "" for closes
 	Body        string // comment text for new_comment
+	// SourceEvent identifies the change on its platform (platform:item external
+	// id[:comment external id]): the autopilot inbox's UNIQUE key.
+	SourceEvent string
 }
 
 // UpsertSource returns the id of (platform, account), creating it if needed.
@@ -233,6 +251,9 @@ func (s *Store) applyItems(ctx context.Context, sourceID, projectID int64, items
 	if _, err := tx.ExecContext(ctx, `UPDATE projects SET sync_cursor = ?, synced_at = ? WHERE id = ?`,
 		cursor, ts(time.Now()), projectID); err != nil {
 		return nil, fmt.Errorf("store: update cursor: %w", err)
+	}
+	if err := s.inboxEvents(ctx, tx, projectID, pr.key, events); err != nil {
+		return nil, err
 	}
 	if !fullAt.IsZero() {
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET poll_state = json_set(CASE WHEN json_valid(poll_state) THEN poll_state ELSE '{}' END,
@@ -460,9 +481,11 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 	}
 
 	base := Event{ItemID: id, ItemKind: kind, Project: pr.key, Repo: pr.name, Number: it.Number, Title: it.Title}
+	platform, _, _ := strings.Cut(pr.key, ":")
+	itemEvent := platform + ":" + it.ExternalID
 	if !baseline && !existed && it.Author != self {
 		e := base
-		e.Kind, e.Actor = EventNewIssue, it.Author
+		e.Kind, e.Actor, e.SourceEvent = EventNewIssue, it.Author, itemEvent
 		if kind != KindIssue {
 			e.Kind = EventNewItem
 		}
@@ -487,7 +510,7 @@ func applyItem(ctx context.Context, tx *sql.Tx, sourceID, projectID int64, pr pr
 		changed = changed || inserted
 		if inserted && !baseline && existed && c.Author != self {
 			e := base
-			e.Kind, e.Actor, e.Body = EventNewComment, c.Author, c.Body
+			e.Kind, e.Actor, e.Body, e.SourceEvent = EventNewComment, c.Author, c.Body, itemEvent+":"+c.ExternalID
 			events = append(events, e)
 		}
 	}

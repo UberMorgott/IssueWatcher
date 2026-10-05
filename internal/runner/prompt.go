@@ -76,6 +76,9 @@ type promptInput struct {
 	labels []provider.Label   // label flow: the repository's labels
 	triage *store.TriageInput // triage flow: the project's open issues
 	topN   int                // triage flow: picks that get a fix job
+	// autopilot: an autopilot fix (docs/AUTOPILOT.md → Fix run): commits
+	// reference the issue neutrally ("Refs #N"); the release run closes it.
+	autopilot bool
 }
 
 // maxTriageIssuesBytes bounds {issues}.
@@ -187,7 +190,11 @@ func prompts(cfg config.Agents, flow string, p promptInput) (system, task string
 	case flowReply:
 		task = render(cfg.Prompts.Reply, p)
 	case flowFixDirect:
-		task = render(modTemplate(cfg.Prompts.FixDir, p.in), p) + modNote(p.in)
+		tmpl := modTemplate(cfg.Prompts.FixDir, p.in)
+		if p.autopilot {
+			tmpl = autopilotTemplate(tmpl, p.in)
+		}
+		task = render(tmpl, p) + modNote(p.in) + autopilotNote(p)
 	case flowFixFolder:
 		task = render(folderFixPrompt, p) + modNote(p.in)
 	case flowLabel:
@@ -226,6 +233,27 @@ func modTemplate(tmpl string, in store.JobInput) string {
 		return tmpl
 	}
 	return closingRefRe.ReplaceAllString(tmpl, `"Reported on {issue.url}"`)
+}
+
+// autopilotTemplate: an autopilot fix must not close its issue on push (the
+// release run closes it after the reply), so the closing reference becomes a
+// neutral "Refs #N" (a mod-page report keeps its report URL).
+func autopilotTemplate(tmpl string, in store.JobInput) string {
+	if in.Mod {
+		return tmpl
+	}
+	return closingRefRe.ReplaceAllString(tmpl, `"Refs #{issue.number}"`)
+}
+
+// autopilotNote spells the reference rule out for autopilot fixes.
+func autopilotNote(p promptInput) string {
+	if !p.autopilot || p.in.Mod {
+		return ""
+	}
+	n := strconv.Itoa(p.in.Number)
+	return "\n\nThis fix runs unattended (IssueWatcher autopilot). Reference the issue neutrally with \"Refs #" + n +
+		"\" in the commit message. Never use a closing keyword (Fixes, Closes, Resolves and their forms) for #" + n +
+		": the issue is closed by the release, after the reporter is answered."
 }
 
 // modNote tells the agent where a mod-page report comes from and forbids #N references.

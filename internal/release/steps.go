@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -524,6 +525,12 @@ func (e *Engine) ext(step string) extStep {
 	case StepPublish:
 		return extStep{probe: e.probePublish, check: e.checkPublish, send: e.sendPublish,
 			idem: func(c *rc, st store.Step) string { return st.Target + ":" + c.m.Version + ":" + artSHA(c) }}
+	case StepReply:
+		return extStep{probe: e.probeReply, check: e.checkReply, send: e.sendReply,
+			idem: func(c *rc, st store.Step) string { return st.Target + ":" + strconv.FormatInt(c.run.ID, 10) }}
+	case StepClose:
+		return extStep{probe: e.probeClose, send: e.sendClose,
+			idem: func(c *rc, st store.Step) string { return st.Target + ":" + strconv.FormatInt(c.run.ID, 10) }}
 	}
 	return extStep{
 		probe: func(context.Context, *rc, store.Step) (probeResult, error) {

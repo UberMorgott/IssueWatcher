@@ -137,6 +137,7 @@ type tenv struct {
 	mu       sync.Mutex
 	cfg      config.Settings
 	gateOK   bool
+	hasGate  bool
 	gates    int
 	smokeRes smoke.Result // fake smoke adapter's answer (OK by default)
 	smokeErr error
@@ -186,7 +187,7 @@ Date: 2026-09-01
 func newEnv(t *testing.T) *tenv {
 	t.Helper()
 	root := t.TempDir()
-	e := &tenv{t: t, folder: filepath.Join(root, "mod"), bare: filepath.Join(root, "origin.git"), gateOK: true,
+	e := &tenv{t: t, folder: filepath.Join(root, "mod"), bare: filepath.Join(root, "origin.git"), gateOK: true, hasGate: true,
 		nexus:    &fakePub{platform: "nexus", fileID: "file-main", versions: []provider.PublishVersion{{ID: "v0", Version: "1.0.0"}}},
 		factorio: &fakePub{platform: "factorio", fileID: "my-mod", versions: []provider.PublishVersion{{ID: "1.0.0", Version: "1.0.0"}}},
 		git:      &countGit{pushes: map[string]int{}}}
@@ -293,6 +294,7 @@ func newEnv(t *testing.T) *tenv {
 			}
 			return CmdResult{Command: "verify", OK: true}, true
 		},
+		HasGate: func(string, string) bool { e.mu.Lock(); defer e.mu.Unlock(); return e.hasGate },
 		Command: e.build,
 		Smoke: func(_ context.Context, req smoke.Request) (smoke.Result, error) {
 			e.mu.Lock()
@@ -886,28 +888,64 @@ func TestReleaseSmokeFailedHolds(t *testing.T) {
 	}
 }
 
-// No smoke test: held unless the project allows publishing without one.
+// No smoke test: refused up front (no run, no daily slot) unless the project
+// allows publishing without one; then the smoke step is skipped.
 func TestReleaseWithoutSmoke(t *testing.T) {
 	e := newEnv(t)
 	pa := e.cfg.Agents.Projects[codeKey]
 	pa.PublishProfile.Smoke = config.SmokeProfile{Kind: config.SmokeNone}
 	e.cfg.Agents.Projects[codeKey] = pa
 	en := e.engine(false)
-	r := e.release(en, Request{})
-	if got := e.run(r.ID); got.State != store.RunHeld || got.HeldReason != HeldSmokeMissing || e.git.count("refs/heads/main") != 0 {
-		t.Fatalf("no smoke %+v", got)
+	_, p, err := en.Release(t.Context(), e.codeID, Request{})
+	var refused *RefusedError
+	if !errors.As(err, &refused) || !slices.ContainsFunc(p.Refusals, func(r Refusal) bool { return r.Code == CodeNoSmoke }) {
+		t.Fatalf("no smoke: %v %+v", err, p.Refusals)
+	}
+	if runs, _ := e.st.Runs(t.Context(), store.RunFilter{}); len(runs) != 0 {
+		t.Fatalf("a refused release created a run: %+v", runs)
 	}
 	e.mu.Lock()
 	pa.Autopilot.PublishWithoutSmoke = true
 	e.cfg.Agents.Projects[codeKey] = pa
 	e.mu.Unlock()
-	if _, err := en.Resume(t.Context(), r.ID); err != nil {
-		t.Fatal(err)
-	}
-	en.Wait()
+	r := e.release(en, Request{})
 	st := e.steps(r.ID)["smoke"]
 	if got := e.run(r.ID); got.State != store.RunDone || st.State != store.StepSkipped || len(e.smokes) != 0 {
 		t.Fatalf("publishWithoutSmoke %+v smoke %+v", got, st)
+	}
+}
+
+// No verify gate at all: the plan refuses before a run exists (no daily slot
+// used) and one unread attention event says what to configure; asking again
+// does not repeat the event.
+func TestReleaseRefusedWithoutGate(t *testing.T) {
+	e := newEnv(t)
+	e.hasGate = false
+	en := e.engine(false)
+	for range 2 {
+		_, p, err := en.Release(t.Context(), e.codeID, Request{})
+		var refused *RefusedError
+		if !errors.As(err, &refused) || len(p.Refusals) != 1 || p.Refusals[0].Code != CodeNoVerify || p.Caps.ProjectReleasesToday != 0 {
+			t.Fatalf("refusal %v %+v", err, p)
+		}
+	}
+	if runs, _ := e.st.Runs(t.Context(), store.RunFilter{}); len(runs) != 0 {
+		t.Fatalf("runs %+v", runs)
+	}
+	evs, _ := e.st.Events(t.Context(), true, 0)
+	if len(evs) != 1 || evs[0].Kind != "release.refused" || evs[0].Severity != store.SeverityAttention ||
+		!strings.Contains(string(evs[0].Detail), "verify command") {
+		t.Fatalf("events %+v", evs)
+	}
+	// A dry run (the UI plan) never writes an event.
+	if _, err := e.st.MarkEventsRead(t.Context(), nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := en.Release(t.Context(), e.codeID, Request{DryRun: true}); err == nil {
+		t.Fatal("dry run not refused")
+	}
+	if evs, _ := e.st.Events(t.Context(), true, 0); len(evs) != 0 {
+		t.Fatalf("dry run wrote %+v", evs)
 	}
 }
 

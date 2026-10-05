@@ -153,7 +153,9 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 	add(s, &mcp.Tool{Name: "get_run", Description: "Get one run {run, steps, items}: run.state and heldReason (check:<step> = unclear outcome, " +
 		"re-probed on resume, never resent; failed:<step>, auth:<platform>, foreign_commits, remote_moved, gate_failed, no_verify (no Aegis " +
 		"and no verify command), smoke_failed, smoke_missing (no smoke test, publishWithoutSmoke off), smoke_unavailable, ...), and every step " +
-		"(bump, build, archive_check, gate, smoke, push, tag, gh_release, gh_asset, publish:<target>, available:<target>) with its state " +
+		"(release: bump, build, archive_check, gate, smoke, push, tag, gh_release, gh_asset, publish:<target>, available:<target>, " +
+		"reply:<item>, close:<item>; fix run (kind fix): fix, verify, push; fix heldReason diff_too_big, diff_review, closing_keyword, " +
+		"needs_info, not_reproduced, no_commit, fix:<reason>) with its state " +
 		"(pending|sending|sent|failed|unknown|skipped), externalRef and error. Read-only.", Annotations: ro},
 		func(ctx context.Context, in runID) (json.RawMessage, error) { return c.Run(ctx, in.ID) })
 
@@ -168,11 +170,12 @@ func addReleaseTools(s *mcp.Server, c *Client) {
 
 	type skip struct {
 		Run    int64  `json:"run" jsonschema:"run id"`
-		Step   string `json:"step" jsonschema:"publish or available, or publish:<target> / available:<target>"`
+		Step   string `json:"step" jsonschema:"publish, available, reply or close, or publish:<target> / available:<target> / reply:<item> / close:<item>"`
 		Target string `json:"target,omitempty" jsonschema:"target key (e.g. nexus:game/123) when step has none"`
 	}
 	add(s, &mcp.Tool{Name: "skip_step", Description: "Skip a held or pending run's publish or available step of one target (the target is then " +
-		"left out; the rest goes on). Only publish / available steps (else code bad_step); a publish already sent cannot be skipped (bad_state); " +
+		"left out of the replies; the rest goes on), or one item's reply / close step (target = item id). Only publish / available / " +
+		"reply / close steps (else code bad_step); a publish already sent cannot be skipped (bad_state); " +
 		"no such step: 404. No dry run." + descCallerRefusal},
 		func(ctx context.Context, in skip) (json.RawMessage, error) {
 			return c.SkipStep(ctx, in.Run, in.Step, in.Target)

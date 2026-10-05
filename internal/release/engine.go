@@ -69,6 +69,39 @@ type Deps struct {
 	// longest wait (default 72 h, then held).
 	PollEvery    time.Duration
 	AvailableFor time.Duration
+
+	// HasGate reports whether the project has a verify gate in its folder
+	// (runner.HasGate); nil = Gate != nil. A release plan refuses without one.
+	HasGate func(project, localPath string) bool
+	// Items replies to and closes the items a release answers (nil = no reply / close steps).
+	Items ItemActions
+	// Fixer queues the fix jobs of autopilot fix runs (nil = no fix runs).
+	Fixer Fixer
+	// TickEvery paces the autopilot loop: inbox → fix runs → coalescing timer (default 30 s).
+	TickEvery time.Duration
+}
+
+// ItemActions are the platform actions on an item (the app's syncers).
+type ItemActions interface {
+	// CanReply reports whether the item's platform posts replies.
+	CanReply(ctx context.Context, itemID int64) bool
+	// Reply posts body on the item and returns the comment's URL (or id).
+	Reply(ctx context.Context, itemID int64, body string) (ref string, err error)
+	// FindReply looks for an own reply containing marker; an answer that cannot
+	// prove absence (no read-back on the platform) is an error, never "not found".
+	FindReply(ctx context.Context, itemID int64, marker string) (ref string, found bool, err error)
+	// CloseItem closes the item (GitHub issue: completed).
+	CloseItem(ctx context.Context, itemID int64) error
+	// ItemClosed reads whether the item is closed on its platform.
+	ItemClosed(ctx context.Context, itemID int64) (bool, error)
+}
+
+// Fixer queues autopilot fix jobs (runner.Runner).
+type Fixer interface {
+	// AutopilotMatch reports whether an enabled fix rule covers the item for event.
+	AutopilotMatch(ctx context.Context, itemID int64, event string) (bool, error)
+	// AutopilotFix queues the fix job (job nil = skipped, entry.Reason says why).
+	AutopilotFix(ctx context.Context, itemID int64, event string) (store.AutomationEntry, *store.Job, error)
 }
 
 // Engine runs release runs. One executor goroutine per running run.
@@ -79,6 +112,8 @@ type Engine struct {
 	active map[int64]*active
 	ctx    context.Context // set by Start; executors outlive requests
 	wg     sync.WaitGroup
+	kick   chan struct{} // wakes the autopilot loop (Kick)
+	tickMu sync.Mutex    // one Tick at a time
 
 	// hook is called around every external send (tests simulate crashes):
 	// point "before" (after sending is committed, before the call) and "after"
@@ -98,7 +133,7 @@ var (
 	// ErrState: the run (or step) state does not allow the action.
 	ErrState = errors.New("release: not allowed in this state")
 	// ErrBadStep: skip of a step that is not publish/available of a target.
-	ErrBadStep = errors.New("release: only publish:<target> / available:<target> can be skipped")
+	ErrBadStep = errors.New("release: only publish:<target> / available:<target> / reply:<item> / close:<item> can be skipped")
 	// errCrash aborts an executor (tests).
 	errCrash = errors.New("release: executor stopped")
 )
@@ -132,7 +167,10 @@ func New(d Deps) *Engine {
 	if d.TokenEnv == nil {
 		d.TokenEnv = func(string, string) ([]string, string) { return nil, "" }
 	}
-	return &Engine{d: d, active: map[int64]*active{}, ctx: context.Background()}
+	if d.TickEvery <= 0 {
+		d.TickEvery = 30 * time.Second
+	}
+	return &Engine{d: d, active: map[int64]*active{}, ctx: context.Background(), kick: make(chan struct{}, 1)}
 }
 
 // Start reconciles unfinished runs left by a previous process (sending →
@@ -148,6 +186,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	for _, id := range ids {
 		e.launch(id) //nolint:contextcheck // executors run under the engine's context (set above)
 	}
+	go e.loop(ctx) // not in wg: Wait is for executors; the loop ends with ctx
 	return nil
 }
 
@@ -212,7 +251,7 @@ func targetStep(st store.Step) bool { return st.Step == StepPublish || st.Step =
 
 func external(step string) bool {
 	switch step {
-	case StepPush, StepTag, StepGHRelease, StepGHAsset, StepPublish:
+	case StepPush, StepTag, StepGHRelease, StepGHAsset, StepPublish, StepReply, StepClose:
 		return true
 	}
 	return false
@@ -393,8 +432,16 @@ func (e *Engine) Execute(ctx context.Context, id int64) error {
 	for _, t := range m.Targets {
 		targets = append(targets, t.Key)
 	}
+	if _, err := e.d.Store.SetFixRunsReleased(context.WithoutCancel(ctx), id); err != nil {
+		e.d.Log.Error("release: fix runs released", "run", id, "err", err)
+	}
 	e.event(ctx, r, "release.done", store.SeverityInfo, "Релиз v"+r.Version+" выпущен",
 		map[string]any{"version": r.Version, "tag": m.Tag, "targets": targets})
+	if len(c.m.RepliesPending) > 0 {
+		e.event(ctx, r, "release.replies_pending", store.SeverityAttention,
+			fmt.Sprintf("Релиз v%s: ответы авторам ждут отправки (%d)", r.Version, len(c.m.RepliesPending)),
+			map[string]any{"items": c.m.RepliesPending, "reason": "autoReply is off or the platform cannot reply: reply from the item"})
+	}
 	return nil
 }
 
@@ -505,6 +552,9 @@ func (e *Engine) step(ctx context.Context, c *rc, st store.Step) (hold string, e
 	ctx = context.WithoutCancel(ctx)
 	if serr == nil {
 		_, err := e.transition(ctx, sending, store.StepSending, store.StepSent, store.StepUpdate{ExternalRef: &ref, Error: new("")})
+		if err == nil {
+			e.sentEvent(ctx, c, sending, ref)
+		}
 		return "", err
 	}
 	var hf holdError
@@ -762,7 +812,7 @@ func (e *Engine) Reconcile(ctx context.Context) ([]int64, error) {
 // Skip marks a target's publish (and its availability) or only its
 // availability step skipped; the run must be held. Resume continues it.
 func (e *Engine) Skip(ctx context.Context, id int64, step, target string) (store.Run, error) {
-	if (step != StepPublish && step != StepAvailable) || target == "" {
+	if (step != StepPublish && step != StepAvailable && step != StepReply && step != StepClose) || target == "" {
 		return store.Run{}, ErrBadStep
 	}
 	run, err := e.d.Store.Run(ctx, id)
@@ -855,6 +905,11 @@ func (e *Engine) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 		store.RunUpdate{State: store.RunCancelled})
 	if err != nil {
 		return CancelResult{}, err
+	}
+	if !public { // nothing went out: its fixes wait for the next release
+		if _, err := e.d.Store.UnclaimFixRuns(context.WithoutCancel(ctx), id); err != nil {
+			e.d.Log.Error("release: unclaim fix runs", "run", id, "err", err)
+		}
 	}
 	e.d.OnChange(id)
 	e.event(ctx, r, "release.cancelled", store.SeverityInfo, "Релиз v"+r.Version+" отменён",

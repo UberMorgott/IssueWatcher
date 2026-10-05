@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,35 @@ func TestProviderReply(t *testing.T) {
 	c, err := NewProvider(a).Reply(t.Context(), "I_1", "thanks")
 	if err != nil || c.Body != "thanks" || c.Author != githubtest.Login || c.ExternalID == "" {
 		t.Fatalf("reply %+v %v", c, err)
+	}
+}
+
+// The release run's close step and reply probe: IssueStatus reads the state
+// and comments, CloseIssue closes as completed (closing twice is fine).
+func TestProviderCloseIssueAndStatus(t *testing.T) {
+	gh := githubtest.New(t)
+	seed(gh)
+	a := newAuth(t, gh)
+	signIn(t, gh, a)
+	p := NewProvider(a)
+	if _, err := p.Reply(t.Context(), "I_1", "Fixed in v1.0.1.\n<!-- issuewatcher:reply:3:1 -->"); err != nil {
+		t.Fatal(err)
+	}
+	open, comments, err := p.IssueStatus(t.Context(), "I_1")
+	if err != nil || !open || len(comments) == 0 || !strings.Contains(comments[len(comments)-1].Body, "issuewatcher:reply:3:1") ||
+		comments[len(comments)-1].Author != githubtest.Login {
+		t.Fatalf("status %v %v %+v", open, err, comments)
+	}
+	for range 2 {
+		if err := p.CloseIssue(t.Context(), "I_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if open, _, err := p.IssueStatus(t.Context(), "I_1"); err != nil || open {
+		t.Fatalf("after close: open %v %v", open, err)
+	}
+	if _, _, err := p.IssueStatus(t.Context(), "I_missing"); !errors.Is(err, ErrNotIssue) {
+		t.Fatalf("missing: %v", err)
 	}
 }
 
