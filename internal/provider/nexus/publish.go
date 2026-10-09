@@ -211,8 +211,8 @@ func (p *Provider) Publish(ctx context.Context, project provider.Project, req pr
 		id, err := c.upload(ctx, req.Path, func(sent, total int64) {
 			progress(provider.PublishProgress{Stage: provider.StageUpload, Sent: sent, Total: total})
 		}, func() { progress(provider.PublishProgress{Stage: provider.StageWait}) })
-		if ue, ok := errors.AsType[*UploadError](err); ok {
-			res.UploadID = ue.UploadID
+		if upErr, ok := errors.AsType[*UploadError](err); ok {
+			res.UploadID = upErr.UploadID
 		}
 		if err != nil {
 			return fail(provider.StageUpload, err)

@@ -533,10 +533,10 @@ func (c *v3) waitAvailable(ctx context.Context, id string) error {
 
 // stripQueryErr drops a presigned URL's query (its signature) from err's text.
 func stripQueryErr(err error) error {
-	if ue, ok := errors.AsType[*url.Error](err); ok {
-		if p, perr := url.Parse(ue.URL); perr == nil {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok {
+		if p, perr := url.Parse(urlErr.URL); perr == nil {
 			p.RawQuery = ""
-			return &url.Error{Op: ue.Op, URL: p.String(), Err: ue.Err}
+			return &url.Error{Op: urlErr.Op, URL: p.String(), Err: urlErr.Err}
 		}
 	}
 	return err

@@ -242,8 +242,8 @@ func TestV3UploadNotAvailableKeepsUploadID(t *testing.T) {
 	c.opts.PollWait = func(int) time.Duration { return 5 * time.Millisecond }
 	path, _ := writeArchive(t, 10)
 	_, err := c.upload(t.Context(), path, nil, nil)
-	ue, ok := errors.AsType[*UploadError](err)
-	if !ok || ue.UploadID != fakeUploadID || !errors.Is(err, errNotAvailable) {
+	upErr, ok := errors.AsType[*UploadError](err)
+	if !ok || upErr.UploadID != fakeUploadID || !errors.Is(err, errNotAvailable) {
 		t.Fatalf("err %v", err)
 	}
 }

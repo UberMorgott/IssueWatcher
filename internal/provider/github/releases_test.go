@@ -58,8 +58,8 @@ func TestReleaseCreateGetUpload(t *testing.T) {
 	if err != nil || !found || back.ID != rel.ID || len(back.Assets) != 1 {
 		t.Fatalf("get %+v %v %v", back, found, err)
 	}
-	if ba, ok := back.Asset("mod_1.2.3.zip"); !ok || ba != as {
-		t.Fatalf("asset by name %+v, want %+v", ba, as)
+	if byName, ok := back.Asset("mod_1.2.3.zip"); !ok || byName != as {
+		t.Fatalf("asset by name %+v, want %+v", byName, as)
 	}
 
 	var paths []string

@@ -1,5 +1,5 @@
 -- Phase 2 job queue (internal/runner). The 001 placeholder table was never
--- written to, so it is replaced rather than altered (SQLite cannot change CHECKs).
+-- written to, so it is replaced rather than altered (SQLite cannot change CHECK constraints).
 DROP TABLE jobs;
 
 CREATE TABLE jobs (

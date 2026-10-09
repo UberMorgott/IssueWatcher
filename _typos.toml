@@ -1,3 +1,11 @@
+[files]
+# Captured real platform payloads (comments, pages, logs): must stay byte-for-byte as the sites send them.
+extend-exclude = ["**/testdata/**"]
+
+[default]
+# Opaque hex tokens (ETags, hashes) are not words.
+extend-ignore-re = ["\\b[0-9a-f]{16,}\\b"]
+
 [default.extend-words]
 # Win32 notify-icon message prefix (NIN_SELECT, NIN_BALLOONUSERCLICK).
 nin = "nin"
