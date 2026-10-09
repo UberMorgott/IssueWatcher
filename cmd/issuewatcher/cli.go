@@ -71,6 +71,14 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
                       (nexus, factorio, steam via the running Steam client, curseforge); public unless --dry-run; --wait polls to the end
   publish status <taskId>
 
+  Mod changelogs (Nexus mod editor, signed-in session; one version = all its entries):
+  changelog list <project>
+  changelog set <project> --version V (--file FILE | -) [--dry-run]
+                      replace every entry of V with the file's lines (one entry per non-empty line,
+                      leading "- " dropped); adds V when absent, identical lines send nothing; public unless --dry-run
+  changelog delete <project> --version V [--dry-run]
+                      delete every entry of V (cannot be undone)
+
   Steam Workshop items of a code project (Steam client running, signed in as the owner):
   workshop status [<project>] [--app-id N]
                       is the Steam client running and signed in (uploads need it); read-only, as --app-id or else
@@ -268,6 +276,8 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.publish(rest)
 	case "workshop":
 		return c.workshop(rest)
+	case "changelog":
+		return c.changelog(rest)
 	case "release":
 		return c.release(rest)
 	case "runs":

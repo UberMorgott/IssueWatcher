@@ -208,6 +208,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.PageEditors != nil && opts.Store != nil {
 		s.registerModPage(mux)
+		s.registerChangelogs(mux)
 	}
 	if opts.Platforms != nil {
 		s.registerPlatforms(mux)

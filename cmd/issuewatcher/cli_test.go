@@ -133,22 +133,25 @@ func TestCLIMCPScopeFlags(t *testing.T) {
 
 func TestCLIActionCommands(t *testing.T) {
 	calls := fakeAPI(t, map[string]string{
-		"POST /api/sync":                       `202 `,
-		"POST /api/items/4/comments":           `201 {"id":10}`,
-		"POST /api/jobs":                       `201 {"jobs":[]}`,
-		"POST /api/jobs/9/cancel":              `200 {"id":9}`,
-		"POST /api/jobs/9/retry":               `200 {"id":9}`,
-		"POST /api/jobs/9/dismiss":             `200 {"id":9}`,
-		"POST /api/jobs/9/push":                `200 {"id":9}`,
-		"POST /api/jobs/9/pr":                  `200 {"id":9}`,
-		"POST /api/jobs/9/reply":               `200 {"id":9}`,
-		"POST /api/jobs/9/labels":              `200 {"id":9}`,
-		"POST /api/projects/69/publish":        `200 {"dryRun":true}`,
-		"GET /api/projects/69/publish/targets": `200 {"files":[]}`,
-		"POST /api/projects/69/steam/item":     `200 {"dryRun":true}`,
-		"POST /api/projects/69/steam/page":     `200 {"dryRun":true}`,
-		"GET /api/publish/t1":                  `200 {"id":"t1","state":"done"}`,
-		"GET /api/steam/status":                `200 {"running":true,"loggedOn":true,"appId":480}`,
+		"POST /api/sync":                           `202 `,
+		"POST /api/items/4/comments":               `201 {"id":10}`,
+		"POST /api/jobs":                           `201 {"jobs":[]}`,
+		"POST /api/jobs/9/cancel":                  `200 {"id":9}`,
+		"POST /api/jobs/9/retry":                   `200 {"id":9}`,
+		"POST /api/jobs/9/dismiss":                 `200 {"id":9}`,
+		"POST /api/jobs/9/push":                    `200 {"id":9}`,
+		"POST /api/jobs/9/pr":                      `200 {"id":9}`,
+		"POST /api/jobs/9/reply":                   `200 {"id":9}`,
+		"POST /api/jobs/9/labels":                  `200 {"id":9}`,
+		"POST /api/projects/69/publish":            `200 {"dryRun":true}`,
+		"GET /api/projects/69/publish/targets":     `200 {"files":[]}`,
+		"POST /api/projects/69/steam/item":         `200 {"dryRun":true}`,
+		"POST /api/projects/69/steam/page":         `200 {"dryRun":true}`,
+		"GET /api/publish/t1":                      `200 {"id":"t1","state":"done"}`,
+		"GET /api/steam/status":                    `200 {"running":true,"loggedOn":true,"appId":480}`,
+		"GET /api/projects/69/changelogs":          `200 [{"version":"0.2.3","entries":[]}]`,
+		"PUT /api/projects/69/changelogs/0.2.3":    `200 {"dryRun":true,"action":"edit"}`,
+		"DELETE /api/projects/69/changelogs/0.2.3": `200 {"dryRun":true,"action":"delete"}`,
 	})
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("from file"), 0o600); err != nil {
@@ -184,6 +187,10 @@ func TestCLIActionCommands(t *testing.T) {
 		{"", []string{"workshop", "status", "69"}, apiCall{"GET", "/api/steam/status", "project=69", ""}, `"loggedOn": true`},
 		{"", []string{"workshop", "status", "--app-id", "839770"}, apiCall{"GET", "/api/steam/status", "appId=839770", ""}, `loggedOn`},
 		{"", []string{"workshop", "status", "69", "--app-id", "839770"}, apiCall{"GET", "/api/steam/status", "appId=839770&project=69", ""}, `loggedOn`},
+		{"", []string{"changelog", "list", "69"}, apiCall{"GET", "/api/projects/69/changelogs", "", ""}, `"0.2.3"`},
+		{"- Fixed: a\n\n* Added: b\n", []string{"changelog", "set", "69", "--version", "0.2.3", "-", "--dry-run"},
+			apiCall{"PUT", "/api/projects/69/changelogs/0.2.3", "", `{"dryRun":true,"lines":["Fixed: a","Added: b"]}`}, `"edit"`},
+		{"", []string{"changelog", "delete", "69", "--version", "0.2.3", "--dry-run"}, apiCall{"DELETE", "/api/projects/69/changelogs/0.2.3", "dryRun=1", ""}, `"delete"`},
 	} {
 		code, out, stderr := cliRun(tc.stdin, tc.args...)
 		if code != exitOK || !strings.Contains(out, tc.out) {
@@ -193,7 +200,7 @@ func TestCLIActionCommands(t *testing.T) {
 			t.Fatalf("%v: request %+v, want %+v", tc.args, got, tc.want)
 		}
 	}
-	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}, {"workshop", "status"}, {"workshop", "status", "69", "70"}} {
+	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}, {"workshop", "status"}, {"workshop", "status", "69", "70"}, {"changelog", "set", "69", "-"}, {"changelog", "set", "69", "--version", "1"}, {"changelog", "delete", "69"}, {"changelog", "nope"}} {
 		if code, _, stderr := cliRun("", args...); code != exitUsage {
 			t.Fatalf("%v: %d %q", args, code, stderr)
 		}

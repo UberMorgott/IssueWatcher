@@ -217,6 +217,7 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 		func(ctx context.Context, in taskID) (json.RawMessage, error) { return c.PublishTask(ctx, in.ID) })
 	addReleaseTools(s, c)
 	addWorkshopTools(s, c)
+	addChangelogTools(s, c, ro)
 	return s
 }
 

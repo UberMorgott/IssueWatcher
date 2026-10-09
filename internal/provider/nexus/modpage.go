@@ -262,28 +262,46 @@ func (n *native) loadPage(ctx context.Context, externalID string) (loadedPage, e
 	if d.Mod == nil {
 		return loadedPage{}, fmt.Errorf("%w: mod %s/%d", errNotFound, game, mod)
 	}
-	r, err := n.opts.Browser.Fetch(ctx, browser.Request{URL: fmt.Sprintf("%s/api/flamework/mods/settings?gameId=%d&modId=%d", n.opts.Site, gid, mod),
-		Page: n.modPage(game, mod)})
+	s, err := n.editorSettings(ctx, game, gid, mod)
 	if err != nil {
 		return loadedPage{}, err
-	}
-	if r.Status != http.StatusOK {
-		if r.Status == http.StatusUnauthorized || r.Status == 419 {
-			return loadedPage{}, fmt.Errorf("%w: nexus: mod settings HTTP %d", provider.ErrRelogin, r.Status)
-		}
-		return loadedPage{}, fmt.Errorf("nexus: mod settings: HTTP %d: %s", r.Status, snippet([]byte(r.Body)))
-	}
-	var s editorSettings
-	if err := json.Unmarshal([]byte(r.Body), &s); err != nil {
-		return loadedPage{}, fmt.Errorf("nexus: mod settings: %w", err)
-	}
-	if s.Permissions == nil || !jsTruthy(s.Permissions.CanEdit) {
-		return loadedPage{}, fmt.Errorf("%w: %s/%d (not its author or a team member)", provider.ErrCannotEdit, game, mod)
 	}
 	lp := loadedPage{game: game, mod: mod, m: *d.Mod, s: s}
 	lp.summary = decodeBBCode(deref(d.Mod.Summary))
 	lp.description = decodeBBCode(deref(d.Mod.Description))
 	return lp, nil
+}
+
+// editorSettings is GET www /api/flamework/mods/settings in the browser (www
+// is Cloudflare-challenged); a mod the account may not edit is ErrCannotEdit.
+func (n *native) editorSettings(ctx context.Context, game string, gid, mod int) (editorSettings, error) {
+	var s editorSettings
+	if err := n.flameworkGet(ctx, "mod settings", fmt.Sprintf("%s/api/flamework/mods/settings?gameId=%d&modId=%d", n.opts.Site, gid, mod),
+		n.modPage(game, mod), &s); err != nil {
+		return editorSettings{}, err
+	}
+	if s.Permissions == nil || !jsTruthy(s.Permissions.CanEdit) {
+		return editorSettings{}, fmt.Errorf("%w: %s/%d (not its author or a team member)", provider.ErrCannotEdit, game, mod)
+	}
+	return s, nil
+}
+
+// flameworkGet is a credentialed GET of the editor's backend in the browser, decoded into out.
+func (n *native) flameworkGet(ctx context.Context, what, u, modPage string, out any) error {
+	r, err := n.opts.Browser.Fetch(ctx, browser.Request{URL: u, Page: modPage})
+	if err != nil {
+		return err
+	}
+	if r.Status != http.StatusOK {
+		if r.Status == http.StatusUnauthorized || r.Status == 419 {
+			return fmt.Errorf("%w: nexus: %s HTTP %d", provider.ErrRelogin, what, r.Status)
+		}
+		return fmt.Errorf("nexus: %s: HTTP %d: %s", what, r.Status, snippet([]byte(r.Body)))
+	}
+	if err := json.Unmarshal([]byte(r.Body), out); err != nil {
+		return fmt.Errorf("nexus: %s: %w", what, err)
+	}
+	return nil
 }
 
 func deref(s *string) string {
@@ -389,7 +407,7 @@ func (n *native) saveEditor(ctx context.Context, u, modPage string, body []byte)
 	r, err := n.opts.Browser.Fetch(ctx, browser.Request{URL: u, Page: modPage, Method: http.MethodPost,
 		Headers: map[string]string{"Content-Type": "application/json"}, Body: string(body)})
 	if err != nil {
-		return fmt.Errorf("%w: POST mods/save: %w", errWriteUnsure, err)
+		return fmt.Errorf("%w: POST %s: %w", errWriteUnsure, strings.TrimPrefix(u, n.opts.Site+"/api/flamework/"), err)
 	}
 	var j struct {
 		Success any    `json:"success"`
@@ -401,7 +419,7 @@ func (n *native) saveEditor(ctx context.Context, u, modPage string, body []byte)
 	case r.Status >= 200 && r.Status < 300 && decoded && jsTruthy(j.Success):
 		return nil
 	case r.Status >= 200 && r.Status < 300 && decoded:
-		return fmt.Errorf("nexus: page save refused (success=false): %s", strings.TrimSpace(j.Error+" "+j.Message))
+		return fmt.Errorf("nexus: save refused (success=false): %s", strings.TrimSpace(j.Error+" "+j.Message))
 	case refused(r.Status):
 		return n.refusal(r)
 	}

@@ -23,6 +23,7 @@ type editorSite struct {
 	mu       sync.Mutex
 	settings string
 	save     func(req browser.Request) browser.Response
+	extra    func(req browser.Request) (browser.Response, bool) // other editor endpoints (changelogs)
 	reqs     []browser.Request
 }
 
@@ -30,6 +31,11 @@ func (f *editorSite) Fetch(_ context.Context, req browser.Request) (browser.Resp
 	f.mu.Lock()
 	f.reqs = append(f.reqs, req)
 	f.mu.Unlock()
+	if f.extra != nil {
+		if r, ok := f.extra(req); ok {
+			return r, nil
+		}
+	}
 	switch {
 	case strings.HasPrefix(req.URL, "https://www.nexusmods.com/api/flamework/mods/settings?") && req.Method == "":
 		return browser.Response{Status: 200, ContentType: "application/json", Body: f.settings}, nil
