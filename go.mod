@@ -1,11 +1,11 @@
 module github.com/UberMorgott/issuewatcher
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/image v0.46.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sys v0.48.0
 	modernc.org/sqlite v1.59.0
 )
