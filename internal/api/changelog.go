@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/UberMorgott/issuewatcher/internal/provider"
+	"github.com/UberMorgott/issuewatcher/internal/provider/nexus"
 )
 
 // Mod changelogs (Nexus: the mod editor's changelog; one version = all its entries):
@@ -16,13 +17,18 @@ import (
 //	PUT    /api/projects/{id}/changelogs/{version} {lines[] | text, dryRun?}
 //	       replaces every entry of the version (adds it when absent; equal = nothing sent)
 //	DELETE /api/projects/{id}/changelogs/{version}[?dryRun=1] (or body {dryRun})
-//	       → provider.ChangelogSave {dryRun, version, action none|add|edit|delete, changed, before, after, request, saved}
+//	       → provider.ChangelogSave {dryRun, version, action none|add|edit|delete, changed, before, after, request, saved,
+//	         check?} (check: the public API read back after a real change, per version; a failed read is
+//	         check.code no_api_key | bad_api_key | check_failed and does not fail the change)
+//	GET    /api/projects/{id}/changelogs/check → provider.ChangelogCheck (editor vs the public API, Nexus v1
+//	       changelogs.json read with the stored API key); 409 {code: no_api_key | bad_api_key}
 //
 // Errors as /page, plus 403 {code: agent_caller | caller_unknown} (non-dry-run from an agent run): 404 project, 400 {code: bad_request}, 403 {code: cannot_edit},
 // 409 {code: unavailable | not_signed_in | relogin}, 502 {code: save_unsure | platform_error}.
 
 func (s *Server) registerChangelogs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{id}/changelogs", s.handleChangelogs)
+	mux.HandleFunc("GET /api/projects/{id}/changelogs/check", s.handleChangelogCheck)
 	mux.HandleFunc("PUT /api/projects/{id}/changelogs/{version}", s.handleChangelogSet)
 	mux.HandleFunc("DELETE /api/projects/{id}/changelogs/{version}", s.handleChangelogDelete)
 }
@@ -43,11 +49,34 @@ func (s *Server) changelogTarget(w http.ResponseWriter, r *http.Request) (provid
 
 // changelogErr answers a failed read or change.
 func (s *Server) changelogErr(w http.ResponseWriter, err error) {
-	if errors.Is(err, provider.ErrBadChangelog) {
+	switch {
+	case errors.Is(err, provider.ErrBadChangelog):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "code": "bad_request"})
+	case errors.Is(err, nexus.ErrNoAPIKey):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "no_api_key"})
+	case errors.Is(err, nexus.ErrBadAPIKey):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "bad_api_key"})
+	default:
+		s.pageErr(w, err)
+	}
+}
+
+func (s *Server) handleChangelogCheck(w http.ResponseWriter, r *http.Request) {
+	project, ce, ok := s.changelogTarget(w, r)
+	if !ok {
 		return
 	}
-	s.pageErr(w, err)
+	cc, ok := ce.(provider.ChangelogChecker)
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no public changelog API for this platform", "code": "unavailable"})
+		return
+	}
+	out, err := cc.CheckChangelogs(r.Context(), project)
+	if err != nil {
+		s.changelogErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleChangelogs(w http.ResponseWriter, r *http.Request) {

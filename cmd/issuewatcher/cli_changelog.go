@@ -11,7 +11,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/provider"
 )
 
-// changelog: `changelog list <project>` · `changelog set <project> --version V (--file F | -) [--dry-run]`
+// changelog: `changelog list|check <project>` · `changelog set <project> --version V (--file F | -) [--dry-run]`
 // · `changelog delete <project> --version V [--dry-run]` (the MCP list_mod_changelogs /
 // set_mod_changelog / delete_mod_changelog).
 func (c *cli) changelog(args []string) (json.RawMessage, error) {
@@ -22,7 +22,7 @@ func (c *cli) changelog(args []string) (json.RawMessage, error) {
 	cmd := "changelog " + sub
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	switch sub {
-	case "list":
+	case "list", "check":
 		pos, err := flags(fs, args[1:])
 		if err != nil {
 			return nil, err
@@ -30,6 +30,9 @@ func (c *cli) changelog(args []string) (json.RawMessage, error) {
 		id, err := c.project(cmd, pos)
 		if err != nil {
 			return nil, err
+		}
+		if sub == "check" {
+			return c.c.CheckChangelogs(c.ctx, id)
 		}
 		return c.c.Changelogs(c.ctx, id)
 	case "set", "delete":
@@ -75,5 +78,5 @@ func (c *cli) changelog(args []string) (json.RawMessage, error) {
 		}
 		return c.c.SetChangelog(c.ctx, id, *version, lines, *dry)
 	}
-	return nil, usagef("changelog: want list, set or delete")
+	return nil, usagef("changelog: want list, check, set or delete")
 }

@@ -125,8 +125,13 @@ func parseChangelog(raw json.RawMessage) ([]provider.ChangelogVersion, error) {
 		}
 		out = append(out, cv)
 	}
-	slices.SortFunc(out, func(a, b provider.ChangelogVersion) int { return compareVersionsDesc(a.Version, b.Version) })
+	sortVersionsDesc(out)
 	return out, nil
+}
+
+// sortVersionsDesc orders versions as the editor does (newest first).
+func sortVersionsDesc(vs []provider.ChangelogVersion) {
+	slices.SortFunc(vs, func(a, b provider.ChangelogVersion) int { return compareVersionsDesc(a.Version, b.Version) })
 }
 
 // compareVersionsDesc is the editor's sort: numeric parts descending, other
@@ -221,6 +226,9 @@ func (p *Provider) changeChangelog(ctx context.Context, project provider.Project
 	out := provider.ChangelogSave{DryRun: dryRun, Version: version, Action: action, Before: before, After: after}
 	if action == provider.ChangelogActionNone {
 		out.After = before
+		if !dryRun {
+			out.Check = p.readBack(ctx, t, current, version, want)
+		}
 		return out, nil
 	}
 	out.Changed = true
@@ -248,5 +256,19 @@ func (p *Provider) changeChangelog(ctx context.Context, project provider.Project
 		return provider.ChangelogSave{}, err
 	}
 	out.Saved = true
+	out.Check = p.readBack(ctx, t, current, version, want)
 	return out, nil
+}
+
+// readBack checks the change through v1 changelogs.json (nil without a key
+// store). A failed read is reported in the check, never as the change's error.
+func (p *Provider) readBack(ctx context.Context, t changelogTarget, current []provider.ChangelogVersion, version string, want []string) *provider.ChangelogCheck {
+	if p.opts.Keys == nil {
+		return nil
+	}
+	c, err := p.v1Check(ctx, t, afterChange(current, version, want), version)
+	if err != nil {
+		p.opts.Log.Warn("nexus: changelog read-back", "project", t.game+"/"+strconv.Itoa(t.mod), "err", err)
+	}
+	return &c
 }

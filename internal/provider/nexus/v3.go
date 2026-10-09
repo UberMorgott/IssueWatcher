@@ -60,7 +60,7 @@ func newV3(o V3Options) *v3 {
 		o.HTTP = http.DefaultClient
 	}
 	if o.Key == nil {
-		o.Key = func() (string, error) { return "", ErrNoAPIKey }
+		o.Key = func() (string, error) { return "", errNoKey }
 	}
 	if o.Version == "" {
 		o.Version = "dev"
@@ -96,6 +96,9 @@ func (e *V3Error) Error() string {
 	msg := strings.TrimSpace(cmpName(e.Detail, e.Title))
 	if msg == "" {
 		msg = http.StatusText(e.Status)
+	}
+	if e.Status == http.StatusUnauthorized {
+		msg += " (" + hintBadKey + ")"
 	}
 	return fmt.Sprintf("nexus v3: %s %s: HTTP %d: %s", e.Method, e.Path, e.Status, msg)
 }

@@ -35,6 +35,20 @@ var ErrNoAPIKey = errors.New("nexus: no API key")
 // ErrBadAPIKey: the key was refused by users/validate (or is malformed).
 var ErrBadAPIKey = errors.New("nexus: API key refused")
 
+// The owner-facing hints: the key is set only in Settings › Платформы › Nexus.
+const (
+	hintNoKey  = "ключ Nexus API не задан: вставьте его в Настройки › Платформы › Nexus"
+	hintBadKey = "Nexus отклонил ключ API: замените его в Настройки › Платформы › Nexus"
+)
+
+// errNoKey is ErrNoAPIKey with the hint where to set the key.
+var errNoKey = fmt.Errorf("%w (%s)", ErrNoAPIKey, hintNoKey)
+
+// badKeyErr is ErrBadAPIKey for an HTTP status, with the hint.
+func badKeyErr(status int) error {
+	return fmt.Errorf("%w: HTTP %d (%s)", ErrBadAPIKey, status, hintBadKey)
+}
+
 // KeysOptions configures Keys.
 type KeysOptions struct {
 	Dir     string       // data\secrets
@@ -119,7 +133,7 @@ func (k *Keys) Key() (string, error) {
 		return "", err
 	}
 	if f.APIKey == "" {
-		return "", ErrNoAPIKey
+		return "", errNoKey
 	}
 	return f.APIKey, nil
 }
@@ -201,7 +215,7 @@ func (k *Keys) validate(ctx context.Context, key string) (validUser, error) {
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 	switch {
 	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
-		return validUser{}, fmt.Errorf("%w: HTTP %d", ErrBadAPIKey, res.StatusCode)
+		return validUser{}, badKeyErr(res.StatusCode)
 	case res.StatusCode != http.StatusOK:
 		return validUser{}, fmt.Errorf("nexus: users/validate: HTTP %d: %s", res.StatusCode, redact(snippet(body), key))
 	}

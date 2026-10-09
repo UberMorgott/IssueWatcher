@@ -73,9 +73,13 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
 
   Mod changelogs (Nexus mod editor, signed-in session; one version = all its entries):
   changelog list <project>
+  changelog check <project>
+                      editor vs the public API (v1 changelogs.json, API key from Settings › Платформы › Nexus):
+                      per-version expected/public counts and match (the public API may be cached a few minutes)
   changelog set <project> --version V (--file FILE | -) [--dry-run]
                       replace every entry of V with the file's lines (one entry per non-empty line,
-                      leading "- " dropped); adds V when absent, identical lines send nothing; public unless --dry-run
+                      leading "- " dropped); adds V when absent, identical lines send nothing; public unless --dry-run;
+                      the result's check re-reads the public API per version
   changelog delete <project> --version V [--dry-run]
                       delete every entry of V (cannot be undone)
 
