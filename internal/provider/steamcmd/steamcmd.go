@@ -99,6 +99,9 @@ type Workshop struct {
 	cur  *loginRun
 	last LoginState
 	prog tools.Progress // steamcmd's provisioning
+	// trace sees every sign-in state as it is set, in order (tests: polling
+	// Status misses short-lived states). Set before StartLogin.
+	trace func(state string)
 }
 
 var _ provider.Publisher = (*Workshop)(nil)

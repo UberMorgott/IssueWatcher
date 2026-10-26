@@ -351,21 +351,23 @@ func TestLoginWrongPasswordFails(t *testing.T) {
 // the Steam Mobile approval, which only its connection log mentions.
 func TestLoginRealMobileApproval(t *testing.T) {
 	h := newHarness(t, "FAKE_GUARD=mobile_real", "FAKE_UPDATE=1")
+	// Every state as it is set: polling Status misses short ones (logging_in
+	// lasts only until the next connection-log poll).
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	h.w.trace = func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, s)
+	}
 	if _, err := h.w.StartLogin("owner_acc", fakePassword, ""); err != nil {
 		t.Fatal(err)
 	}
-	var seen []string
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		st, _ := h.w.Status()
-		if s := st.Login.State; len(seen) == 0 || seen[len(seen)-1] != s {
-			seen = append(seen, s)
-		}
-		if st.Login.State == LoginOK || st.Login.State == LoginFailed {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	h.waitLogin(t, LoginOK, LoginFailed)
+	mu.Lock()
+	defer mu.Unlock()
 	want := []string{LoginUpdating, LoginLoggingIn, LoginConfirm, LoginOK}
 	i := 0
 	for _, s := range seen {

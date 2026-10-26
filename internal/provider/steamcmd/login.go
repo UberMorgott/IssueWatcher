@@ -68,6 +68,7 @@ type loginRun struct {
 	code   chan string
 	dir    string // steamcmd's folder (its logs\connection_log.txt)
 	logOff int64  // the connection log's size before this run
+	trace  func(state string)
 }
 
 func (l *loginRun) state() LoginState {
@@ -83,6 +84,9 @@ func (l *loginRun) set(state, msg string, now time.Time) {
 func (l *loginRun) setCode(state, code, msg string, now time.Time) {
 	l.mu.Lock()
 	l.st = LoginState{State: state, Code: code, Error: msg, At: now.UTC().Format(time.RFC3339)}
+	if l.trace != nil {
+		l.trace(state)
+	}
 	l.mu.Unlock()
 }
 
@@ -115,7 +119,7 @@ func (w *Workshop) StartLogin(user, password, code string) (LoginState, error) {
 		w.run.Unlock()
 		return LoginState{}, fmt.Errorf("steam: start steamcmd: %w", err)
 	}
-	l := &loginRun{proc: p, code: make(chan string, 1), dir: filepath.Dir(exe), logOff: off}
+	l := &loginRun{proc: p, code: make(chan string, 1), dir: filepath.Dir(exe), logOff: off, trace: w.trace}
 	l.set(LoginStarting, "", w.opts.Now())
 	w.mu.Lock()
 	w.cur = l
