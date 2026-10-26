@@ -36,7 +36,7 @@ func TestModPlatformsApplyLive(t *testing.T) {
 	if p := platformState(t, m, "steam"); p.Enabled || p.State != api.PlatformDisabled {
 		t.Fatalf("steam without a SteamID: %+v", p)
 	}
-	if p := platformState(t, m, factorio.Platform); p.Enabled || p.State != api.PlatformDisabled || p.Name != "Factorio Mod Portal" || p.Capabilities.Reply {
+	if p := platformState(t, m, factorio.Platform); p.Enabled || p.State != api.PlatformDisabled || p.Name != "Factorio Mod Portal" || !p.Capabilities.Reply {
 		t.Fatalf("factorio card %+v", p)
 	}
 
