@@ -34,9 +34,9 @@ const (
 	sigKey    = "v2:factorio:page1"
 )
 
-// canReply stays off until one owner-authorised post and its read-back pass
-// (the signed-in reply form is unverified: TASKS.md Phase 6 step 11/15).
-const canReply = false
+// canReply: on by the owner's decision (2026-10-26); first live post is its check
+// (TASKS.md Phase 6 step 15).
+const canReply = true
 
 // FullEvery is how often a project is swept in full (edits, deletes and
 // category moves do not change the list order the delta relies on).

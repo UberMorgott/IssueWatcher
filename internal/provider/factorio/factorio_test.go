@@ -266,8 +266,8 @@ func TestAccountAndSignIn(t *testing.T) {
 	if _, err := p.whoAmI(context.Background(), websession.Memory(nil, "")); !errors.Is(err, provider.ErrNotSignedIn) {
 		t.Fatalf("signed out: %v", err)
 	}
-	if p.Capabilities().Reply {
-		t.Fatal("reply must stay off until the live check")
+	if !p.Capabilities().Reply {
+		t.Fatal("reply must be on (owner-enabled)")
 	}
 }
 

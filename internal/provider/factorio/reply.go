@@ -56,7 +56,6 @@ func (p *Provider) modOf(ctx context.Context, id string) (string, error) {
 // Reply implements provider.Provider: the thread's own reply form, posted
 // once; a login page answer is a refusal, anything unclear is read back
 // (author + text + time, messages present before ignored), never re-sent.
-// Capabilities.Reply stays off until the form is verified live.
 func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (provider.Comment, error) {
 	id, ok := strings.CutPrefix(itemExternalID, "thread:")
 	if !ok || !threadHrefRe.MatchString("/discussion/"+id) {
