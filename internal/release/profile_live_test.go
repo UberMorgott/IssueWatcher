@@ -13,6 +13,7 @@ import (
 // commands, and a folder ahead of the remote pushed by the run.
 
 func TestExpandCommand(t *testing.T) {
+	t.Parallel()
 	got, err := expandCommand(`pwsh -c "& { zip {name}_{version}.zip }" {version}`, "my-mod", "1.2.3-rc.1+b5")
 	if err != nil || got != `pwsh -c "& { zip my-mod_1.2.3-rc.1+b5.zip }" 1.2.3-rc.1+b5` {
 		t.Fatalf("%q %v", got, err)
@@ -31,6 +32,7 @@ func TestExpandCommand(t *testing.T) {
 }
 
 func TestReleaseExpandsBuildAndVerifyPlaceholders(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	pa := e.cfg.Agents.Projects[codeKey]
 	pa.PublishProfile.Build.Command = "build.cmd {name} {version}"
@@ -70,6 +72,7 @@ func TestReleaseExpandsBuildAndVerifyPlaceholders(t *testing.T) {
 }
 
 func TestReleasePushesUnpushedFolderCommits(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	write(t, filepath.Join(e.folder, "control.lua"), "-- v1 fixed twice\n")
 	git(t, e.folder, "commit", "-q", "-am", "Fix the second crash")

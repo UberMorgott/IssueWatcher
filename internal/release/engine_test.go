@@ -153,13 +153,139 @@ type tenv struct {
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:noctx,gosec // test helper
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	return gitCtx(t.Context(), t, dir, args...)
+}
+
+// gitCtx is git under the caller's ctx (fakes called by the engine).
+func gitCtx(ctx context.Context, t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitOut(ctx, dir, args...)
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	return strings.TrimSpace(string(out))
+	return out
+}
+
+// gitOut runs a test git command; the child is killed when ctx ends (and its
+// pipes released after a grace period), so a stuck git cannot hang the test.
+func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // test helper
+	cmd.Dir = dir
+	cmd.WaitDelay = 5 * time.Second
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// gitFixture is the folder + bare origin every env starts from, built once
+// per test binary (13 git processes) and copied per env as plain files.
+var gitFixture struct {
+	once sync.Once
+	root string // holds mod/ and origin.git/
+	head string
+	err  error
+}
+
+func buildGitFixture() (string, string, error) {
+	root, err := os.MkdirTemp("", "iw-release-fixture-")
+	if err != nil {
+		return "", "", err
+	}
+	folder, bare := filepath.Join(root, "mod"), filepath.Join(root, "origin.git")
+	ctx := context.Background()
+	run := func(dir string, args ...string) (string, error) {
+		out, err := gitOut(ctx, dir, args...)
+		if err != nil {
+			return "", fmt.Errorf("git %v: %w\n%s", args, err, out)
+		}
+		return out, nil
+	}
+	steps := [][]string{{root, "init", "-q", "--bare", "-b", "main", bare}, {root, "init", "-q", "-b", "main", folder}}
+	for _, kv := range [][2]string{{"user.name", "Maintainer"}, {"user.email", "m@example.com"}, {"core.autocrlf", "false"}} {
+		steps = append(steps, []string{folder, "config", kv[0], kv[1]})
+	}
+	for _, s := range steps {
+		if _, err := run(s[0], s[1:]...); err != nil {
+			return root, "", err
+		}
+	}
+	files := map[string]string{"info.json": infoJSON, "changelog.txt": changelogTxt, "control.lua": "-- v1\n", ".gitignore": ""}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte(body), 0o600); err != nil {
+			return root, "", err
+		}
+	}
+	steps = [][]string{{"add", "."}, {"commit", "-q", "-m", "init"}, {"tag", "v1.0.0"}}
+	for _, s := range steps {
+		if _, err := run(folder, s...); err != nil {
+			return root, "", err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(folder, "control.lua"), []byte("-- v1 fixed\n"), 0o600); err != nil {
+		return root, "", err
+	}
+	// The origin URL uses forward slashes so copyGitFixture can retarget it verbatim.
+	steps = [][]string{{"commit", "-q", "-am", "Fix the crash on load"}, {"remote", "add", "origin", filepath.ToSlash(bare)},
+		{"push", "-q", "origin", "main", "v1.0.0"}}
+	for _, s := range steps {
+		if _, err := run(folder, s...); err != nil {
+			return root, "", err
+		}
+	}
+	head, err := run(folder, "rev-parse", "HEAD")
+	return root, head, err
+}
+
+// copyGitFixture copies the fixture into root (root/mod, root/origin.git) with
+// the folder's origin pointing at the copy; it returns the folder HEAD.
+func copyGitFixture(t *testing.T, root string) string {
+	t.Helper()
+	gitFixture.once.Do(func() { gitFixture.root, gitFixture.head, gitFixture.err = buildGitFixture() })
+	if gitFixture.err != nil {
+		t.Fatal(gitFixture.err)
+	}
+	src := gitFixture.root
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(root, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o750)
+		}
+		b, err := os.ReadFile(p) //nolint:gosec // test fixture
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dst, b, 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(root, "mod", ".git", "config")
+	b, err := os.ReadFile(cfg) //nolint:gosec // test fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to := filepath.ToSlash(filepath.Join(src, "origin.git")), filepath.ToSlash(filepath.Join(root, "origin.git"))
+	if !strings.Contains(string(b), from) {
+		t.Fatalf("fixture origin %q not in %s", from, b)
+	}
+	if err := os.WriteFile(cfg, []byte(strings.ReplaceAll(string(b), from, to)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return gitFixture.head
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if gitFixture.root != "" {
+		_ = os.RemoveAll(gitFixture.root)
+	}
+	os.Exit(code)
 }
 
 func write(t *testing.T, path, body string) {
@@ -194,23 +320,7 @@ func newEnv(t *testing.T) *tenv {
 		nexus:    &fakePub{platform: "nexus", fileID: "file-main", versions: []provider.PublishVersion{{ID: "v0", Version: "1.0.0"}}},
 		factorio: &fakePub{platform: "factorio", fileID: "my-mod", versions: []provider.PublishVersion{{ID: "1.0.0", Version: "1.0.0"}}},
 		git:      &countGit{pushes: map[string]int{}}}
-	git(t, root, "init", "-q", "--bare", "-b", "main", e.bare)
-	git(t, root, "init", "-q", "-b", "main", e.folder)
-	for _, kv := range [][2]string{{"user.name", "Maintainer"}, {"user.email", "m@example.com"}, {"core.autocrlf", "false"}} {
-		git(t, e.folder, "config", kv[0], kv[1])
-	}
-	write(t, filepath.Join(e.folder, "info.json"), infoJSON)
-	write(t, filepath.Join(e.folder, "changelog.txt"), changelogTxt)
-	write(t, filepath.Join(e.folder, "control.lua"), "-- v1\n")
-	write(t, filepath.Join(e.folder, ".gitignore"), "")
-	git(t, e.folder, "add", ".")
-	git(t, e.folder, "commit", "-q", "-m", "init")
-	git(t, e.folder, "tag", "v1.0.0")
-	write(t, filepath.Join(e.folder, "control.lua"), "-- v1 fixed\n")
-	git(t, e.folder, "commit", "-q", "-am", "Fix the crash on load")
-	git(t, e.folder, "remote", "add", "origin", e.bare)
-	git(t, e.folder, "push", "-q", "origin", "main", "v1.0.0")
-	e.head = git(t, e.folder, "rev-parse", "HEAD")
+	e.head = copyGitFixture(t, root)
 
 	e.gh = githubtest.New(t)
 	a := github.NewAuth(filepath.Join(root, "secrets"))
@@ -441,6 +551,7 @@ func (e *tenv) release(en *Engine, req Request) store.Run {
 }
 
 func TestReleaseHappyPath(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	en := e.engine(false)
 	p, err := en.Plan(t.Context(), e.codeID, Request{})
@@ -508,10 +619,12 @@ func TestReleaseHappyPath(t *testing.T) {
 // Crash right before and right after every external action: a fresh engine
 // (app restart) reconciles with probes and finishes; each action is sent once.
 func TestReleaseCrashResumeSendsOnce(t *testing.T) {
+	t.Parallel()
 	actions := []string{"push", "tag", "gh_release", "gh_asset:my-mod_1.0.1.zip", "publish:" + nexusKey, "publish:" + factorioKey}
 	for _, action := range actions {
 		for _, point := range []string{"before", "after"} {
 			t.Run(action+"/"+point, func(t *testing.T) {
+				t.Parallel()
 				e := newEnv(t)
 				e.crashAt, e.crashPnt = action, point
 				r := e.release(e.engine(true), Request{})
@@ -540,6 +653,7 @@ func TestReleaseCrashResumeSendsOnce(t *testing.T) {
 
 // An ambiguous probe (platform answers 500) holds the run; nothing is resent.
 func TestReleaseAmbiguousProbeHolds(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.crashAt, e.crashPnt = "publish:"+nexusKey, "after"
 	r := e.release(e.engine(true), Request{})
@@ -584,6 +698,7 @@ func TestReleaseAmbiguousProbeHolds(t *testing.T) {
 
 // GitHub answers 500 to the release probe after a crash: held, not resent.
 func TestReleaseGitHub500Holds(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.crashAt, e.crashPnt = "gh_release", "after"
 	r := e.release(e.engine(true), Request{})
@@ -610,6 +725,7 @@ func TestReleaseGitHub500Holds(t *testing.T) {
 }
 
 func TestReleaseOneUnfinishedRunPerProject(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.crashAt, e.crashPnt = "push", "before"
 	r := e.release(e.engine(true), Request{})
@@ -630,6 +746,7 @@ func TestReleaseOneUnfinishedRunPerProject(t *testing.T) {
 
 // A failed gate holds the run before any public step; cancel drops the bump commit.
 func TestReleaseCancelBeforePushDropsBump(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.gateOK = false
 	en := e.engine(false)
@@ -663,6 +780,7 @@ func TestReleaseCancelBeforePushDropsBump(t *testing.T) {
 
 // Cancel after a public step stops the rest and keeps the bump.
 func TestReleaseCancelAfterPushKeepsBump(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.crashAt, e.crashPnt = "tag", "before"
 	en := e.engine(true)
@@ -678,6 +796,7 @@ func TestReleaseCancelAfterPushKeepsBump(t *testing.T) {
 
 // A refused target fails alone; skip it and resume: the rest finishes.
 func TestReleaseSkipTarget(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.factorio.checkErr = fmt.Errorf("%w: portal says no", provider.ErrBadPublish)
 	en := e.engine(false)
@@ -712,6 +831,7 @@ func TestReleaseSkipTarget(t *testing.T) {
 }
 
 func TestReleasePlanRefusals(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	write(t, filepath.Join(e.folder, "control.lua"), "-- dirty\n")
 	e.cfg.Agents.Autopilot.Paused = true
@@ -748,6 +868,7 @@ func TestReleasePlanRefusals(t *testing.T) {
 // plan's answer (unchecked before one). Git-ignored files never make the folder
 // dirty, untracked ones do.
 func TestLocalPlan(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	branches := 0
 	e.deps.DefaultBranch = func(context.Context, string) (string, error) { branches++; return "main", nil }
@@ -799,6 +920,7 @@ func TestLocalPlan(t *testing.T) {
 // The owner's click bypasses the kill switch and the project switch; an MCP /
 // CLI release is refused by both.
 func TestReleaseOriginRules(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.mu.Lock()
 	e.cfg.Agents.Autopilot.Paused = true
@@ -834,6 +956,7 @@ func TestReleaseOriginRules(t *testing.T) {
 // The 72 h availability wait is measured from the step's first run, persisted:
 // a restart does not start it over.
 func TestReleaseAvailabilityDeadlineSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	var mu sync.Mutex
 	now := time.Now()
@@ -890,6 +1013,7 @@ func TestReleaseAvailabilityDeadlineSurvivesRestart(t *testing.T) {
 // publish without verification) — the run is held with an unread attention
 // event before anything is pushed; once a verify command exists, resume ships it.
 func TestReleaseHeldWithoutVerify(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	hasVerify := false
 	gate := e.deps.Gate
@@ -927,6 +1051,7 @@ func TestReleaseHeldWithoutVerify(t *testing.T) {
 // The smoke adapter runs on the built archive after the gate; a failure holds
 // the run before any push with the failing output in the step and the event.
 func TestReleaseSmokeFailedHolds(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.smokeRes = smoke.Result{Kind: config.SmokeCommand, Steps: []smoke.CmdResult{{Command: "smoke.cmd", ExitCode: 3, Output: "mod crashed"}}}
 	r := e.release(e.engine(false), Request{})
@@ -955,6 +1080,7 @@ func TestReleaseSmokeFailedHolds(t *testing.T) {
 // No smoke test: refused up front (no run, no daily slot) unless the project
 // allows publishing without one; then the smoke step is skipped.
 func TestReleaseWithoutSmoke(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	pa := e.cfg.Agents.Projects[codeKey]
 	pa.PublishProfile.Smoke = config.SmokeProfile{Kind: config.SmokeNone}
@@ -983,6 +1109,7 @@ func TestReleaseWithoutSmoke(t *testing.T) {
 // used) and one unread attention event says what to configure; asking again
 // does not repeat the event.
 func TestReleaseRefusedWithoutGate(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	e.hasGate = false
 	en := e.engine(false)
@@ -1017,6 +1144,7 @@ func TestReleaseRefusedWithoutGate(t *testing.T) {
 // (version written there only), checks it and asks every target for its dry
 // run; the folder, the remote and the platforms stay untouched.
 func TestReleaseCheckFullDryRun(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	res, err := e.engine(false).Check(t.Context(), e.codeID, Request{})
 	if err != nil || !res.OK {

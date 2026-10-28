@@ -101,7 +101,7 @@ func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string, 
 	closing, big, needsInfo, nonBug := f.closing, f.big, f.needsInfo, f.nonBug
 	f.mu.Unlock()
 	if needsInfo || nonBug != "" {
-		head := git(e.t, e.folder, "rev-parse", "HEAD")
+		head := gitCtx(ctx, e.t, e.folder, "rev-parse", "HEAD")
 		outcome, summary := "needs_info", "Which save triggers it?"
 		if nonBug != "" {
 			outcome, summary = nonBug, "Not a bug: the reporter says thanks."
@@ -111,7 +111,7 @@ func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string, 
 		nj, err := e.st.UpdateJob(ctx, j.ID, nil, store.JobChange{State: new(store.JobNeedsReview), Result: res})
 		return entry, &nj, err
 	}
-	start := git(e.t, e.folder, "rev-parse", "HEAD")
+	start := gitCtx(ctx, e.t, e.folder, "rev-parse", "HEAD")
 	body := fmt.Sprintf("-- v1 fixed\n-- fix %d\n", n)
 	if big {
 		body += "-- a\n-- b\n"
@@ -121,8 +121,8 @@ func (f *fakeFixer) AutopilotFix(ctx context.Context, item int64, event string, 
 	if closing {
 		msg = "Fix the crash on save\n\nFixes #1"
 	}
-	git(e.t, e.folder, "commit", "-q", "-am", msg)
-	head := git(e.t, e.folder, "rev-parse", "HEAD")
+	gitCtx(ctx, e.t, e.folder, "commit", "-q", "-am", msg)
+	head := gitCtx(ctx, e.t, e.folder, "rev-parse", "HEAD")
 	res, _ := json.Marshal(map[string]any{"mode": "direct", "local": map[string]any{"dir": e.folder, "branch": "main",
 		"startSha": start, "headSha": head, "commits": []map[string]any{{"sha": head, "subject": "Fix the crash on save", "refs": !closing, "fixes": closing}},
 		"fixesRef": closing, "refsRef": !closing, "outcome": "fixed_local", "autopilot": true}})
@@ -223,6 +223,7 @@ func (c *chain) eventKinds() []string {
 // (claims the fix) → publish → reply (version + links) → close; then the own
 // reply and the reporter's thanks start nothing.
 func TestAutopilotChainEndToEnd(t *testing.T) {
+	t.Parallel()
 	c := newChain(t)
 	en := c.engine(false)
 	c.tick(en) // inbox → fix run → job queued (and "done" by the fake coder)
@@ -321,6 +322,7 @@ func crashHook(en *Engine, step, point string) *bool {
 // A crash right after the fix push and right after the reply: a fresh engine
 // (app restart) probes, finds both done and finishes; nothing is sent twice.
 func TestAutopilotChainCrashResume(t *testing.T) {
+	t.Parallel()
 	c := newChain(t)
 	en := c.engine(false)
 	crashed := crashHook(en, StepPush, "after")
@@ -371,7 +373,9 @@ func TestAutopilotChainCrashResume(t *testing.T) {
 // push; a fix over maxDiffLines is held for review; the kill switch stops the
 // inbox and the push.
 func TestAutopilotFixRails(t *testing.T) {
+	t.Parallel()
 	t.Run("closing keyword", func(t *testing.T) {
+		t.Parallel()
 		c := newChain(t)
 		c.fixer.closing = true
 		en := c.engine(false)
@@ -382,6 +386,7 @@ func TestAutopilotFixRails(t *testing.T) {
 		}
 	})
 	t.Run("diff limit", func(t *testing.T) {
+		t.Parallel()
 		c := newChain(t)
 		pa := c.cfg.Agents.Projects[codeKey]
 		pa.Autopilot.MaxDiffLines = 2
@@ -399,12 +404,14 @@ func TestAutopilotFixRails(t *testing.T) {
 		}
 	})
 	t.Run("review paths", func(t *testing.T) {
+		t.Parallel()
 		if !needsReview(".github/workflows/ci.yml", nil) || !needsReview("build.ps1", nil) || !needsReview("info.json", []string{"info.json"}) ||
 			!needsReview("go.mod", nil) || !needsReview("sub/.gitmodules", nil) || needsReview("control.lua", []string{"info.json"}) {
 			t.Fatal("needsReview")
 		}
 	})
 	t.Run("paused", func(t *testing.T) {
+		t.Parallel()
 		c := newChain(t)
 		c.cfg.Agents.Autopilot.Paused = true
 		en := c.engine(false)

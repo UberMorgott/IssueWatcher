@@ -157,7 +157,9 @@ func (c *triageChain) items0() *fakeItems { return c.chain.items }
 // asked for (held, and the reporter's answer looks at it again), feature
 // requests and spam are ignored without a reply.
 func TestTriageClasses(t *testing.T) {
+	t.Parallel()
 	t.Run("bug without rules", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		en := c.engine(false)
 		c.tick(en)
@@ -171,6 +173,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("rules filter", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.fixer.rules = "filtered"
 		en := c.engine(false)
@@ -180,6 +183,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("without triage a rule is needed", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		pa := c.cfg.Agents.Projects[codeKey]
 		pa.Autopilot.AutoTriage = false
@@ -191,6 +195,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("question", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.byNum[1] = Classification{Kind: KindQuestion, Language: "ru", Reason: "asks how"}
 		en := c.engine(false)
@@ -205,6 +210,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("needs info, then the reporter answers", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.byNum[1] = Classification{Kind: KindBug, Actionable: false, Missing: "the save file", Language: "ru"}
 		en := c.engine(false)
@@ -230,6 +236,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("fix agent: not a bug → short reply, no release", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.fixer.nonBug = "feedback"
 		en := c.engine(false)
@@ -245,6 +252,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("triage feedback → short reply", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.byNum[1] = Classification{Kind: KindFeedback, Language: "ru", Reason: "says thanks"}
 		en := c.engine(false)
@@ -255,6 +263,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("slop draft → template", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.byNum[1] = Classification{Kind: KindFeedback, Language: "en", Reason: "says thanks"}
 		c.dr.draft = func(DraftRequest) string { return "Thank you so much for your kind words! Happy gaming!" }
@@ -265,6 +274,7 @@ func TestTriageClasses(t *testing.T) {
 		}
 	})
 	t.Run("fix agent needs info → asks", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.fixer.needsInfo = true
 		en := c.engine(false)
@@ -278,6 +288,7 @@ func TestTriageClasses(t *testing.T) {
 	})
 	for _, kind := range []string{KindFeature, KindSpam, KindOther} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
 			c := newTriageChain(t)
 			c.tr.byNum[1] = Classification{Kind: kind}
 			en := c.engine(false)
@@ -288,6 +299,7 @@ func TestTriageClasses(t *testing.T) {
 		})
 	}
 	t.Run("triage retried then held", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.failing = 99
 		en := c.engine(false)
@@ -304,6 +316,7 @@ func TestTriageClasses(t *testing.T) {
 // after the release); a duplicate of an already released fix is answered at
 // once with that release.
 func TestTriageDuplicates(t *testing.T) {
+	t.Parallel()
 	c := newTriageChain(t)
 	en := c.engine(false)
 	c.tick(en) // #1 → triage → fix job
@@ -370,8 +383,10 @@ func (c *triageChain) releaseFirst(en *Engine) {
 // only notes it; a second reporter (or a collaborator alone) switches the
 // project's autopilot off.
 func TestRegressionBreaker(t *testing.T) {
+	t.Parallel()
 	reg := Classification{Kind: KindBug, Actionable: true, Regression: true, Language: "en"}
 	t.Run("two reporters", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		en := c.engine(false)
 		c.releaseFirst(en)
@@ -391,6 +406,7 @@ func TestRegressionBreaker(t *testing.T) {
 		}
 	})
 	t.Run("same reporter twice", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		en := c.engine(false)
 		c.releaseFirst(en)
@@ -404,6 +420,7 @@ func TestRegressionBreaker(t *testing.T) {
 		}
 	})
 	t.Run("collaborator", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		en := c.engine(false)
 		c.releaseFirst(en)
@@ -422,7 +439,9 @@ func TestRegressionBreaker(t *testing.T) {
 // template; a crash after the send posts nothing twice (the stored draft's
 // marker is found).
 func TestDraftedReleaseReply(t *testing.T) {
+	t.Parallel()
 	t.Run("drafted in the reporter's language", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		c.tr.byNum[1] = Classification{Kind: KindBug, Actionable: true, Language: "ru"}
 		en := c.engine(false)
@@ -448,6 +467,7 @@ func TestDraftedReleaseReply(t *testing.T) {
 		"no version":    func(DraftRequest) string { return "Спасибо, исправлено!" },
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			c := newTriageChain(t)
 			c.dr.draft = draft
 			en := c.engine(false)
@@ -458,6 +478,7 @@ func TestDraftedReleaseReply(t *testing.T) {
 		})
 	}
 	t.Run("crash after the send", func(t *testing.T) {
+		t.Parallel()
 		c := newTriageChain(t)
 		en := c.engine(false)
 		id := strconv.FormatInt(c.item, 10)
@@ -479,6 +500,7 @@ func TestDraftedReleaseReply(t *testing.T) {
 		}
 	})
 	t.Run("steam limit", func(t *testing.T) {
+		t.Parallel()
 		if replyLimit("steam") != 999 || replyLimit("nexus") != maxReplyRunes {
 			t.Fatal("reply limits")
 		}
@@ -500,6 +522,7 @@ func (c *triageChain) releaseFirst2(en *Engine) {
 // A fix run's own reply (a question) after a crash right after the send: the
 // restart finds it by the stored marker and posts nothing again.
 func TestTriageReplyCrashSendsOnce(t *testing.T) {
+	t.Parallel()
 	c := newTriageChain(t)
 	c.tr.byNum[1] = Classification{Kind: KindQuestion, Language: "ru"}
 	en := c.engine(false)
