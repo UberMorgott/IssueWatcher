@@ -235,6 +235,30 @@ func TestListProjectsAndSync(t *testing.T) {
 	}
 }
 
+// TestReadDiscussionByURL: one thread or the whole mod, read without a sync and
+// without moving the hourly full-sweep clock.
+func TestReadDiscussionByURL(t *testing.T) {
+	pt := newPortal(t)
+	p := pt.provider(Options{})
+	ctx := context.Background()
+	items, err := p.ReadDiscussion(ctx, "auto-build-and-deconstruct", "6ab8e16ca3e387a150232548")
+	if err != nil || len(items) != 1 || items[0].ExternalID != "thread:6ab8e16ca3e387a150232548" || items[0].Body == "" {
+		t.Fatalf("one thread = %+v, %v", items, err)
+	}
+	if items, err = p.ReadDiscussion(ctx, "auto-build-and-deconstruct", ""); err != nil || len(items) != 27 {
+		t.Fatalf("whole mod = %d, %v", len(items), err)
+	}
+	if _, err := p.ReadDiscussion(ctx, "auto-build-and-deconstruct", "nothex"); err == nil {
+		t.Fatal("bad thread id accepted")
+	}
+	p.mu.Lock()
+	swept := !p.full["auto-build-and-deconstruct"].IsZero()
+	p.mu.Unlock()
+	if swept {
+		t.Fatal("ReadDiscussion moved the full-sweep clock")
+	}
+}
+
 func TestShiftedPagesAndErrors(t *testing.T) {
 	pt := newPortal(t)
 	pt.list[2] = fixture(t, "list_1.html") // page 2 repeats page 1 (a shift): deduped

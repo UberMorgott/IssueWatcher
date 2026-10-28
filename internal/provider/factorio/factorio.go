@@ -236,6 +236,54 @@ func (p *Provider) thread(ctx context.Context, mod string, r row) (provider.Item
 	return threadItem(mod, r, msgs), true, nil
 }
 
+// ReadDiscussion reads thread (24 hex) of mod, or every thread of mod when
+// thread is "", by URL without a prior sync (internal/outbound): unlike
+// SyncItems it leaves the hourly full-sweep clock alone. A single thread has
+// no list row, so its title is "(untitled)".
+func (p *Provider) ReadDiscussion(ctx context.Context, mod, thread string) ([]provider.Item, error) {
+	if mod == "" {
+		return nil, errors.New("factorio: empty mod name")
+	}
+	if thread != "" {
+		if !threadHrefRe.MatchString("/discussion/" + thread) {
+			return nil, fmt.Errorf("factorio: bad thread id %q", thread)
+		}
+		it, ok, err := p.thread(ctx, mod, row{ID: thread})
+		if err != nil || !ok {
+			return nil, err
+		}
+		p.mods.Store(thread, mod)
+		return []provider.Item{it}, nil
+	}
+	seen := map[string]bool{}
+	var items []provider.Item
+	for page, last := 1, 1; page <= last && page <= maxPages; page++ {
+		rows, lp, err := p.listPage(ctx, mod, page)
+		if err != nil {
+			return nil, fmt.Errorf("discussion page %d: %w", page, err)
+		}
+		last = lp
+		for _, r := range rows {
+			if seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+			p.mods.Store(r.ID, mod)
+			it, ok, err := p.thread(ctx, mod, r)
+			if err != nil {
+				return nil, fmt.Errorf("thread %s: %w", r.ID, err)
+			}
+			if ok {
+				items = append(items, it)
+			}
+		}
+		if len(rows) == 0 {
+			break
+		}
+	}
+	return items, nil
+}
+
 // threadItem builds the item: the first message is the body, the rest are
 // comments with external id <thread>/<time> (+ "#n" on a collision).
 func threadItem(mod string, r row, msgs []message) provider.Item {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/store"
 )
 
@@ -250,6 +251,18 @@ func (g *Group) MaxReply(platform string) int {
 		}
 	}
 	return 0
+}
+
+// Provider is the provider of platform's first syncer (the primary account
+// when several are connected), nil when no syncer of platform exists: the
+// URL-addressed outbound calls (internal/outbound) use it.
+func (g *Group) Provider(platform string) provider.Provider {
+	for _, s := range g.Syncers() {
+		if s.opts.Provider.Platform() == platform {
+			return s.opts.Provider
+		}
+	}
+	return nil
 }
 
 // syncerFor is the syncer of source sourceID, else the only syncer of platform, else nil.
