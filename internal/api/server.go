@@ -80,6 +80,8 @@ type Options struct {
 	Steam SteamSettings
 	// SteamComments posts new top-level comments on Workshop items (POST /api/steam/items/{id}/comments); nil disables it.
 	SteamComments SteamComments
+	// Outbound posts, replies and reads by target URL (POST /api/outbound/{verb}); nil disables it.
+	Outbound Outbound
 	// NexusKey is the Nexus API key store (/api/providers/nexus); nil disables it.
 	NexusKey NexusKeys
 	// CurseForgeUpload / SteamUpload are the upload credentials
@@ -199,6 +201,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.SteamComments != nil {
 		mux.HandleFunc("POST /api/steam/items/{id}/comments", s.handleSteamComment)
+	}
+	if opts.Outbound != nil {
+		mux.HandleFunc("POST /api/outbound/{verb}", s.handleOutbound)
 	}
 	if opts.NexusKey != nil {
 		s.registerNexus(mux)

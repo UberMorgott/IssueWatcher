@@ -97,6 +97,17 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
                       new top-level comment (not a reply) on a Workshop item with the stored Steam
                       web session; --dry-run: endpoint, creator SteamID64, body; public unless --dry-run
 
+  By target URL, no prior sync (docs/AGENT-CLI.md; exit 4 refused before sending, 5 outcome unknown):
+  post --url URL (--body-file FILE | -) [--dry-run] [--json]
+                      new top-level comment: GitHub issue, Steam Workshop item; public unless --dry-run
+  reply --url URL [--parent ID|URL] (--body-file FILE | -) [--dry-run] [--json]
+                      reply in a thread / to a comment: GitHub issue, Steam comment, Nexus comment or
+                      bug:<id>, Factorio thread, CurseForge comment; public unless --dry-run
+  read --url URL [--parent ID|URL] [--json]
+                      the target's thread(s) with comments, live from the platform
+  download --url URL [--parent ID|URL] --out FILE [--json]
+                      the read result exported as a JSON file
+
   Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
   profile get <project>
                       profile + autopilot + a local plan (no network; release plan is the full one)
@@ -165,6 +176,9 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	c := &cli{c: control.New(dataDir), stdin: stdin, ctx: context.Background()}
+	if isOutbound(args) {
+		return runOutbound(c, args, stdout, stderr)
+	}
 	out, err := c.run(args)
 	var apiErr *control.APIError
 	switch {

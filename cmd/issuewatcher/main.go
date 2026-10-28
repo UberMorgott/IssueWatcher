@@ -34,6 +34,7 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/config"
 	"github.com/UberMorgott/issuewatcher/internal/instance"
 	"github.com/UberMorgott/issuewatcher/internal/notify"
+	"github.com/UberMorgott/issuewatcher/internal/outbound"
 	"github.com/UberMorgott/issuewatcher/internal/paths"
 	folderpicker "github.com/UberMorgott/issuewatcher/internal/picker"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
@@ -374,6 +375,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Picker:           picker,
 		Steam:            stm,
 		SteamComments:    stm,
+		Outbound:         &outbound.Service{Providers: sy.Provider},
 		NexusKey:         mods.nexusKeys,
 		CurseForgeUpload: mods.cfUpload,
 		SteamUpload:      mods.workshop,

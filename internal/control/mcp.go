@@ -218,6 +218,7 @@ func NewMCPServer(c *Client, version string, log *slog.Logger) *mcp.Server {
 	addReleaseTools(s, c)
 	addWorkshopTools(s, c)
 	addChangelogTools(s, c, ro)
+	addOutboundTools(s, c, ro)
 	return s
 }
 
