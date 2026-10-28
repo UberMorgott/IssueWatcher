@@ -373,6 +373,7 @@ func serve(log *slog.Logger, dataDir string, cfgs *config.Store, st *store.Store
 		Runner:           jobs,
 		Picker:           picker,
 		Steam:            stm,
+		SteamComments:    stm,
 		NexusKey:         mods.nexusKeys,
 		CurseForgeUpload: mods.cfUpload,
 		SteamUpload:      mods.workshop,

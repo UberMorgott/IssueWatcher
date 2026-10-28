@@ -50,8 +50,27 @@ func (c *Client) SetWorkshopPage(ctx context.Context, project int64, p WorkshopP
 	return c.post(ctx, idPath("/api/projects/%d/steam/page", project), p)
 }
 
+// SteamComment posts body as a new top-level comment on Workshop item (not a
+// reply) with the stored Steam web session; dryRun resolves the endpoint only.
+func (c *Client) SteamComment(ctx context.Context, item, body string, dryRun bool) (json.RawMessage, error) {
+	return c.post(ctx, "/api/steam/items/"+url.PathEscape(item)+"/comments", map[string]any{"body": body, "dryRun": dryRun})
+}
+
 // addWorkshopTools registers the Steam Workshop item tools (owner server only).
 func addWorkshopTools(s *mcp.Server, c *Client) {
+	type comment struct {
+		SteamItem string `json:"steam_item" jsonschema:"the Workshop item id (publishedfileid)"`
+		Body      string `json:"body" jsonschema:"comment text (plain/BBCode, under 1000 characters), posted publicly as the owner"`
+		DryRun    bool   `json:"dry_run,omitempty" jsonschema:"plan only: the resolved endpoint, creator SteamID64 and body; nothing is posted"`
+	}
+	add(s, &mcp.Tool{Name: "post_workshop_comment", Description: "Post a new top-level comment (not a reply: no @author) on a Steam Workshop item " +
+		"with the app's stored Steam web session (Settings › Платформы › Steam). Returns the comment permalink. Public unless dry_run: " +
+		"run dry_run first, then post exactly once; code outcome_unknown = check the item page before retrying. " +
+		"Codes: not_signed_in (no or expired Steam cookies), too_long." + descCallerRefusal},
+		func(ctx context.Context, in comment) (json.RawMessage, error) {
+			return c.SteamComment(ctx, in.SteamItem, in.Body, in.DryRun)
+		})
+
 	type create struct {
 		Project int64  `json:"project" jsonschema:"the GitHub code project id from list_projects (its mapped folder holds the mod)"`
 		AppID   uint32 `json:"app_id" jsonschema:"the game's Steam app id (e.g. 839770 Phoenix Point)"`

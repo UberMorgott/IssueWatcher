@@ -49,6 +49,15 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if !ok {
 		return provider.Comment{}, fmt.Errorf("steam: not a comment item: %q", itemExternalID)
 	}
+	return p.withSession(ctx, func(s Settings) (provider.Comment, error) {
+		return p.replyOnce(ctx, s, fileID, commentID, body)
+	})
+}
+
+// withSession runs post with the stored web session: not signed in or expired
+// refuses at once; a refusal (errRefused) renews the session from the refresh
+// token once and posts again, and expires it when that is refused too.
+func (p *Provider) withSession(ctx context.Context, post func(Settings) (provider.Comment, error)) (provider.Comment, error) {
 	s, err := p.current()
 	if err != nil {
 		return provider.Comment{}, err
@@ -62,7 +71,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if s.SessionExpired {
 		return provider.Comment{}, ErrSessionExpired
 	}
-	c, err := p.replyOnce(ctx, s, fileID, commentID, body)
+	c, err := post(s)
 	if !errors.Is(err, errRefused) {
 		return c, err
 	}
@@ -77,7 +86,7 @@ func (p *Provider) Reply(ctx context.Context, itemExternalID, body string) (prov
 	if rerr != nil {
 		return provider.Comment{}, rerr
 	}
-	c, err = p.replyOnce(ctx, s2, fileID, commentID, body)
+	c, err = post(s2)
 	if errors.Is(err, errRefused) {
 		return provider.Comment{}, p.expire(s2)
 	}
@@ -102,16 +111,32 @@ func (p *Provider) replyOnce(ctx context.Context, s Settings, fileID, commentID,
 	if !strings.HasPrefix(text, "@") && target.SteamID != s.SteamID && target.Author != "" {
 		text = "@" + target.Author + " " + text
 	}
-	form := url.Values{
+	return p.postOnce(ctx, s, creator, fileID, text)
+}
+
+// commentForm is the form of a new comment on a Workshop item's thread (what
+// steamcommunity.com's comment box sends).
+func commentForm(text, sessionID string) url.Values {
+	return url.Values{
 		"comment":   {text},
 		"count":     {"10"},
-		"sessionid": {s.SessionID},
+		"sessionid": {sessionID},
 		"feature2":  {"-1"},
 	}
+}
+
+// postURL is the comment post endpoint of the item's thread.
+func (p *Provider) postURL(creator, fileID string) string {
+	return p.opts.CommunityURL + fmt.Sprintf(p.threadPath(creator, fileID), "post")
+}
+
+// postOnce posts text as a new top-level comment with the session s; a
+// refusal returns errRefused, a lost answer reads the thread back.
+func (p *Provider) postOnce(ctx context.Context, s Settings, creator, fileID, text string) (provider.Comment, error) {
+	form := commentForm(text, s.SessionID)
 	cookies := "sessionid=" + s.SessionID + "; steamLoginSecure=" + s.LoginSecure // validated tokens: no ; or spaces
 	sent := p.opts.Now()
-	u := p.opts.CommunityURL + fmt.Sprintf(p.threadPath(creator, fileID), "post")
-	a, err := p.postForm(ctx, u, form, cookies)
+	a, err := p.postForm(ctx, p.postURL(creator, fileID), form, cookies)
 	var rl *provider.RateLimitError
 	switch {
 	case errors.As(err, &rl):

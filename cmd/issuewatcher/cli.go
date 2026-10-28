@@ -93,6 +93,9 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   workshop page <project> [--item ID] [--app-id N] [--title T] [--locale-dir DIR] [--preview FILE]
           [--tags a,b] [--visibility public|friends|private|unlisted] [--change-note TEXT] [--dry-run]
                       write the page in every language of DIR/description.<language>.txt
+  comment --steam-item ID (--body-file FILE | -) [--dry-run]
+                      new top-level comment (not a reply) on a Workshop item with the stored Steam
+                      web session; --dry-run: endpoint, creator SteamID64, body; public unless --dry-run
 
   Autopilot releases (<project> = GitHub code project id, key github:owner/repo or name owner/repo):
   profile get <project>
@@ -280,6 +283,8 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.publish(rest)
 	case "workshop":
 		return c.workshop(rest)
+	case "comment":
+		return c.comment(rest)
 	case "changelog":
 		return c.changelog(rest)
 	case "release":

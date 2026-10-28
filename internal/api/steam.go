@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/steam"
 )
 
@@ -23,6 +25,55 @@ type SteamSettings interface {
 func (s *Server) registerSteam(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/providers/steam", s.handleSteam)
 	mux.HandleFunc("PUT /api/providers/steam", s.handleSteamSave)
+}
+
+// SteamComments posts new top-level comments on Workshop items (steam.Provider).
+type SteamComments interface {
+	PostComment(ctx context.Context, fileID, body string, dryRun bool) (steam.CommentResult, error)
+}
+
+// handleSteamComment: POST /api/steam/items/{id}/comments {body, dryRun} posts
+// body as a new top-level comment on Workshop item id with the stored web
+// session (dryRun: the resolved endpoint and creator only). 201 posted, 200 dry run;
+// 403 {code: agent_caller | caller_unknown} (non-dry-run from an agent run),
+// 409 {code: not_signed_in | too_long}, 502 {code: outcome_unknown}.
+func (s *Server) handleSteamComment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Body   string `json:"body"`
+		DryRun bool   `json:"dryRun"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCommentBytes)).Decode(&req); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	id := r.PathValue("id")
+	if strings.TrimSpace(req.Body) == "" || id == "" || strings.Trim(id, "0123456789") != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "want a Workshop item id and a non-empty body", "code": "bad_request"})
+		return
+	}
+	if !req.DryRun && s.refuseAgent(w, r) {
+		return
+	}
+	res, err := s.opts.SteamComments.PostComment(r.Context(), id, req.Body, req.DryRun)
+	var rl *provider.RateLimitError
+	switch {
+	case err == nil && req.DryRun:
+		writeJSON(w, http.StatusOK, res)
+	case err == nil:
+		s.opts.Log.Info("steam comment", "item", id, "comment", res.URL)
+		writeJSON(w, http.StatusCreated, res)
+	case errors.Is(err, provider.ErrNotSignedIn):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "not_signed_in"})
+	case errors.Is(err, provider.ErrReplyTooLong):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": "too_long"})
+	case errors.As(err, &rl):
+		errJSON(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, steam.ErrOutcomeUnknown):
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "code": "outcome_unknown"})
+	default:
+		s.opts.Log.Error("api: steam comment", "item", id, "err", err)
+		errJSON(w, http.StatusBadGateway, "posting the comment failed: "+err.Error())
+	}
 }
 
 func (s *Server) handleSteam(w http.ResponseWriter, _ *http.Request) {

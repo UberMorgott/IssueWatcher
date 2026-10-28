@@ -78,6 +78,8 @@ type Options struct {
 	Picker FolderPicker
 	// Steam is the Steam provider's account settings (/api/providers/steam); nil disables them.
 	Steam SteamSettings
+	// SteamComments posts new top-level comments on Workshop items (POST /api/steam/items/{id}/comments); nil disables it.
+	SteamComments SteamComments
 	// NexusKey is the Nexus API key store (/api/providers/nexus); nil disables it.
 	NexusKey NexusKeys
 	// CurseForgeUpload / SteamUpload are the upload credentials
@@ -194,6 +196,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	}
 	if opts.Steam != nil {
 		s.registerSteam(mux)
+	}
+	if opts.SteamComments != nil {
+		mux.HandleFunc("POST /api/steam/items/{id}/comments", s.handleSteamComment)
 	}
 	if opts.NexusKey != nil {
 		s.registerNexus(mux)
