@@ -567,12 +567,19 @@ func (r *Runner) verify(ctx context.Context, dir, jobFiles string, argv []string
 		return v
 	}
 	stopTrack := trackProcs(p.tree, filepath.Join(jobFiles, procsFile))
+	var waitErr error
 	select {
-	case <-p.done:
+	case waitErr = <-p.done:
 	case <-ctx.Done():
 		p.tree.kill()
-		<-p.done
+		waitErr = <-p.done
 		v.TimedOut = ctx.Err() == context.DeadlineExceeded
+	}
+	// A non-zero exit is reported through ExitCode; anything else (output pipe
+	// failure, wait error) would otherwise vanish.
+	var exitErr *exec.ExitError
+	if waitErr != nil && !errors.As(waitErr, &exitErr) {
+		log.add(StepError, "verify: "+waitErr.Error())
 	}
 	if err := p.finish(); err != nil {
 		log.add(StepError, "verify: "+err.Error())
