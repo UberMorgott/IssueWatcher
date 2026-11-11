@@ -89,6 +89,21 @@ Codes: `bad_url`, `unsupported`, `needs_parent`, `empty_body`, `no_provider` (pl
 | 4 | refused before sending (any 4xx code above) |
 | 5 | `outcome_unknown`: sent once, may be on the page — check it, never resend blindly |
 
+## Mod page description (by project id)
+
+```
+issuewatcher-cli page get <project>
+issuewatcher-cli page set <project> [--name N] [--summary S] [--version V] [--description-file F | -] [--dry-run]
+```
+
+- `<project>`: the id from `issuewatcher-cli projects`. Nexus only (mod editor, signed-in session); others → `unavailable`.
+- `get`: `{name, summary, description (BBCode), version, category, author, tags, url, maxSummary}`.
+- `set`: sends only the given fields; the description is the whole BBCode text (file UTF-8, BOM stripped, or `-` = stdin).
+  Prints `{dryRun, changed, request{method, url, body}, saved}`. `--dry-run` first, same rules as below.
+- Errors: exit 2 usage, 1 API error (`bad_request`, `cannot_edit`, `unavailable`, `not_signed_in`, `relogin`,
+  `platform_error`, `save_unsure` = sent without a clear answer: `page get` before saving again), 3 not running.
+- MCP: `get_mod_page`, `set_mod_page`.
+
 ## Safety
 
 - Every write is public under the owner's account. **Always `--dry-run` first**, show the user the plan

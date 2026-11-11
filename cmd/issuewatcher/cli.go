@@ -83,6 +83,12 @@ JSON on stdout, errors on stderr; exit 0 ok, 1 API error, 2 usage, 3 not running
   changelog delete <project> --version V [--dry-run]
                       delete every entry of V (cannot be undone)
 
+  Mod page (Nexus mod editor, signed-in session):
+  page get <project>  name, summary, description (BBCode), version, category, author, tags, url, maxSummary
+  page set <project> [--name N] [--summary S] [--version V] [--description-file FILE | -] [--dry-run]
+                      save only the given fields (description = the whole BBCode text); public unless --dry-run;
+                      code save_unsure: sent without a clear answer, page get before trying again
+
   Steam Workshop items of a code project (Steam client running, signed in as the owner):
   workshop status [<project>] [--app-id N]
                       is the Steam client running and signed in (uploads need it); read-only, as --app-id or else
@@ -301,6 +307,8 @@ func (c *cli) run(args []string) (json.RawMessage, error) {
 		return c.comment(rest)
 	case "changelog":
 		return c.changelog(rest)
+	case "page":
+		return c.page(rest)
 	case "release":
 		return c.release(rest)
 	case "runs":

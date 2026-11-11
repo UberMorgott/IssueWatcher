@@ -152,6 +152,8 @@ func TestCLIActionCommands(t *testing.T) {
 		"GET /api/projects/69/changelogs":          `200 [{"version":"0.2.3","entries":[]}]`,
 		"PUT /api/projects/69/changelogs/0.2.3":    `200 {"dryRun":true,"action":"edit"}`,
 		"DELETE /api/projects/69/changelogs/0.2.3": `200 {"dryRun":true,"action":"delete"}`,
+		"GET /api/projects/69/page":                `200 {"name":"Mod","description":"[b]x[/b]"}`,
+		"PUT /api/projects/69/page":                `200 {"dryRun":true,"changed":["description"]}`,
 	})
 	bodyFile := filepath.Join(t.TempDir(), "body.md")
 	if err := os.WriteFile(bodyFile, []byte("from file"), 0o600); err != nil {
@@ -191,6 +193,11 @@ func TestCLIActionCommands(t *testing.T) {
 		{"- Fixed: a\n\n* Added: b\n", []string{"changelog", "set", "69", "--version", "0.2.3", "-", "--dry-run"},
 			apiCall{"PUT", "/api/projects/69/changelogs/0.2.3", "", `{"dryRun":true,"lines":["Fixed: a","Added: b"]}`}, `"edit"`},
 		{"", []string{"changelog", "delete", "69", "--version", "0.2.3", "--dry-run"}, apiCall{"DELETE", "/api/projects/69/changelogs/0.2.3", "dryRun=1", ""}, `"delete"`},
+		{"", []string{"page", "get", "69"}, apiCall{"GET", "/api/projects/69/page", "", ""}, `"[b]x[/b]"`},
+		{"\ufeff[b]new[/b]\n", []string{"page", "set", "69", "-", "--summary", "", "--dry-run"},
+			apiCall{"PUT", "/api/projects/69/page", "", `{"summary":"","description":"[b]new[/b]\n","dryRun":true}`}, `"changed"`},
+		{"", []string{"page", "set", "69", "--description-file", bodyFile, "--name", "Mod 2"},
+			apiCall{"PUT", "/api/projects/69/page", "", `{"name":"Mod 2","description":"from file"}`}, `"changed"`},
 	} {
 		code, out, stderr := cliRun(tc.stdin, tc.args...)
 		if code != exitOK || !strings.Contains(out, tc.out) {
@@ -200,7 +207,7 @@ func TestCLIActionCommands(t *testing.T) {
 			t.Fatalf("%v: request %+v, want %+v", tc.args, got, tc.want)
 		}
 	}
-	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}, {"workshop", "status"}, {"workshop", "status", "69", "70"}, {"changelog", "set", "69", "-"}, {"changelog", "set", "69", "--version", "1"}, {"changelog", "delete", "69"}, {"changelog", "nope"}} {
+	for _, args := range [][]string{{"reply", "4"}, {"reply", "4", "-", "--body-file", bodyFile}, {"jobs", "create", "4"}, {"job", "labels", "9"}, {"job", "push"}, {"publish", "69"}, {"publish", "status"}, {"workshop", "status"}, {"workshop", "status", "69", "70"}, {"changelog", "set", "69", "-"}, {"changelog", "set", "69", "--version", "1"}, {"changelog", "delete", "69"}, {"changelog", "nope"}, {"page", "get"}, {"page", "set", "69", "--dry-run"}, {"page", "set", "69", "-", "--description-file", bodyFile}, {"page", "nope"}} {
 		if code, _, stderr := cliRun("", args...); code != exitUsage {
 			t.Fatalf("%v: %d %q", args, code, stderr)
 		}
