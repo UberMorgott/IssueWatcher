@@ -122,6 +122,34 @@ func TestStoredSessionIsSilent(t *testing.T) {
 	}
 }
 
+// The live Nexus jar: the session cookie expired, Cloudflare / tracking
+// cookies outlive it → not signed in, and «Подключить» goes on to the window.
+func TestExpiredSessionCookieIsSignedOut(t *testing.T) {
+	jar, err := websession.Open(filepath.Join(t.TempDir(), "p.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb := &fakeBrowser{}
+	m := New(Spec{Platform: "p", LoginURL: "https://www.example.com/login", Domains: []string{"example.com"}, SessionCookie: "sid",
+		Probe: probe, Interval: 5 * time.Millisecond, Timeout: time.Second}, jar, fb)
+	past, future := time.Now().Add(-time.Hour), time.Now().Add(365*24*time.Hour)
+	_ = jar.Replace([]websession.Cookie{
+		{Name: "sid", Value: "good", Domain: ".example.com", Path: "/", Expires: past},
+		{Name: "cf_clearance", Value: "x", Domain: ".example.com", Path: "/", Expires: future},
+	}, "UA", "Morgott", SourceWindow)
+	if jar.Empty() || m.SignedIn() || m.Status().LoggedIn {
+		t.Fatalf("empty=%v signedIn=%v status=%+v: an expired session cookie must read as signed out", jar.Empty(), m.SignedIn(), m.Status())
+	}
+	if l, err := m.Login(context.Background()); err != nil || !l.Window || fb.opened != 1 {
+		t.Fatalf("login = %+v, %v, opened %d: want the sign-in window", l, err, fb.opened)
+	}
+	m.Cancel()
+	_ = jar.Replace([]websession.Cookie{{Name: "sid", Value: "good", Domain: ".example.com", Path: "/", Expires: future}}, "UA", "Morgott", SourceWindow)
+	if !m.SignedIn() || !m.Status().LoggedIn {
+		t.Fatal("a live session cookie must read as signed in")
+	}
+}
+
 func TestProfileCapture(t *testing.T) {
 	m, fb := newManager(t)
 	_ = m.Jar().Replace([]websession.Cookie{{Name: "sid", Value: "expired", Domain: ".example.com", Path: "/"}}, "UA", "", SourceWindow)

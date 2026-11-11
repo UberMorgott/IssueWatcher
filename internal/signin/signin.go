@@ -42,9 +42,13 @@ type Spec struct {
 	Domains  []string // cookie domains captured and cleared
 	Origins  []string // storage cleared on «Выйти»
 	Probe    Probe
-	Interval time.Duration // default 2 s
-	Timeout  time.Duration // default 10 min
-	Log      *slog.Logger
+	// SessionCookie is the cookie that carries the sign-in ("" = any live
+	// cookie): once it expires the session is gone, whatever tracking or
+	// Cloudflare cookies outlive it.
+	SessionCookie string
+	Interval      time.Duration // default 2 s
+	Timeout       time.Duration // default 10 min
+	Log           *slog.Logger
 }
 
 // Session sources (provider.Login.Source).
@@ -129,6 +133,14 @@ func New(spec Spec, jar *websession.Jar, br Browser) *Manager {
 // Jar is the stored session.
 func (m *Manager) Jar() *websession.Jar { return m.jar }
 
+// SignedIn reports whether the stored session is still live (no network).
+func (m *Manager) SignedIn() bool {
+	if m.spec.SessionCookie == "" {
+		return !m.jar.Empty()
+	}
+	return m.jar.Live(m.spec.SessionCookie)
+}
+
 // Why a sign-in ended without a session (provider.Login.Detail); the
 // dashboard maps each to its own text (api.LoginDetailCode).
 const (
@@ -180,7 +192,7 @@ func (m *Manager) Login(ctx context.Context) (provider.Login, error) {
 
 func (m *Manager) login(ctx context.Context, epoch uint64) (provider.Login, error) {
 	// (1) the stored session.
-	if !m.jar.Empty() {
+	if m.SignedIn() {
 		acc, err := m.spec.Probe(ctx, m.jar)
 		switch {
 		case err == nil:
@@ -325,7 +337,7 @@ func (m *Manager) Status() provider.Login {
 	if waiting {
 		return m.windowState()
 	}
-	if !m.jar.Empty() && m.jar.Account() != "" {
+	if m.SignedIn() && m.jar.Account() != "" {
 		return provider.Login{LoggedIn: true, Account: m.jar.Account(), Source: cmp(m.jar.Source(), SourceStored)}
 	}
 	return provider.Login{Detail: detail}

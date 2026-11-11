@@ -54,6 +54,9 @@ const (
 	apiRouter   = "https://api-router.nexusmods.com/graphql"
 	signInURL   = "https://users.nexusmods.com/auth/sign_in"
 	nativeSigV2 = "v2:nexus:page1"
+	// sessionCookie carries the site sign-in (.nexusmods.com, 14 days); without
+	// it api-router answers UNAUTHORIZED and www /api/flamework 401.
+	sessionCookie = "nexusmods_session"
 )
 
 // SignInSpec is the Nexus «Подключить» for signin.New (probe = the site
@@ -64,7 +67,7 @@ func SignInSpec(hc *http.Client, log *slog.Logger) signin.Spec {
 	return signin.Spec{
 		Platform: Platform, LoginURL: signInURL,
 		Domains: []string{"nexusmods.com"}, Origins: append([]string{siteOrigin}, SignInOrigins...),
-		Log: log,
+		SessionCookie: sessionCookie, Log: log,
 		Probe: func(ctx context.Context, jar *websession.Jar) (string, error) {
 			m, err := n.whoAmI(ctx, jar)
 			if err != nil {
@@ -390,7 +393,7 @@ func refused(status int) bool {
 }
 
 func (n *native) signedIn() error {
-	if n.opts.Session == nil || n.opts.Session.Jar().Empty() {
+	if n.opts.Session == nil || !n.opts.Session.SignedIn() {
 		return fmt.Errorf("%w: nexus: not signed in (Settings › Платформы › Подключить)", provider.ErrNotSignedIn)
 	}
 	return nil

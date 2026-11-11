@@ -102,6 +102,19 @@ func (j *Jar) Empty() bool {
 	return true
 }
 
+// Live reports whether the cookie name is stored and not expired.
+func (j *Jar) Live(name string) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	now := j.now()
+	for _, c := range j.f.Cookies {
+		if c.Name == name && c.Value != "" && (c.Expires.IsZero() || c.Expires.After(now)) {
+			return true
+		}
+	}
+	return false
+}
+
 // UserAgent is the browser user agent the cookies were captured with.
 func (j *Jar) UserAgent() string {
 	j.mu.Lock()
