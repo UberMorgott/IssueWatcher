@@ -2,6 +2,8 @@ module github.com/UberMorgott/issuewatcher
 
 go 1.27.2
 
+toolchain go1.27.4
+
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/image v0.46.0
