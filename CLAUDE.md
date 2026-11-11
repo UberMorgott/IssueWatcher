@@ -1,12 +1,13 @@
 # IssueWatcher — project rules
 
-## Verification: Aegis only (no qgate)
+## Verification: plain Go tools (no qgate, no Aegis)
 - Owner decision (2026-09-28): this repo does NOT use qgate. No lefthook/pre-commit hook, and don't reinstall one.
   This overrides the global "Quality gate (qgate)" rule for this project only.
-- Aegis is enabled here (`aegis on`). Navigate with `aegis.query` first, make edits via `aegis.change` or
-  normal edits, then `aegis.verify` for build/tests. Frontend: `npm run build` (vue-tsc) + eslint in `frontend/`.
-- Done = shown evidence: include the `aegis.verify` result (and the frontend build result if the UI changed).
-- Report Aegis problems and wins per the global "Aegis feedback" rule.
+- Owner decision (2026-11-11): Aegis is off here for good (`aegis off`). Don't use aegis.* tools, don't re-enable,
+  don't report Aegis feedback from this repo. Overrides any global Aegis rule for this project.
+- Verify: `go vet ./...` + `go test ./...` (release.ps1 adds `-race` + govulncheck).
+  Frontend: `npm run build` (vue-tsc) + eslint in `frontend/`.
+- Done = shown evidence: include the command output (and the frontend build result if the UI changed).
 
 ## Repo notes
 - Commit identity: `git -c user.name=UberMorgott -c user.email=UberMorgott@users.noreply.github.com commit`.

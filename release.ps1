@@ -12,9 +12,7 @@
 param(
     [Parameter(Mandatory)][string]$Version,
     [string]$MinVersion = '',
-    [switch]$DryRun,
-    # Skip the Aegis gate and run plain go vet + go test -race instead (owner call when Aegis misjudges the tree).
-    [switch]$NoAegis
+    [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -56,14 +54,10 @@ try {
     Run { npx eslint src } 'eslint'
 } finally { Pop-Location }
 
-if (-not $NoAegis -and (Get-Command aegis -ErrorAction SilentlyContinue)) {
-    Step 'aegis verify -profile release'
-    Run { aegis verify -profile release } 'aegis verify'
-} else {
-    Step 'go vet + go test -race'
-    Run { go vet ./... } 'go vet'
-    Run { go test -race ./... } 'go test -race'
-}
+Step 'go vet + go test -race + govulncheck'
+Run { go vet ./... } 'go vet'
+Run { go test -race ./... } 'go test -race'
+Run { go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... } 'govulncheck'
 
 # --- build + pack -------------------------------------------------------------------
 $out = Join-Path $PSScriptRoot "build\release\$Version"
