@@ -23,6 +23,9 @@ type Release struct {
 	Tag   string
 	Notes string
 	Files map[string][]byte // asset name → content
+	// Prerelease is GitHub's prerelease flag (also implied by a prerelease tag):
+	// such a release is never releases/latest.
+	Prerelease bool
 }
 
 // Signed returns the asset files of a release of exe signed with priv; tamper,
@@ -44,7 +47,7 @@ func Signed(priv ed25519.PrivateKey, tag string, exe []byte, tamper func([]byte)
 	}
 }
 
-// Fake serves github.com's /<repo>/releases.atom and
+// Fake serves github.com's /<repo>/releases.atom, /<repo>/releases/latest and
 // /<repo>/releases/download/<tag>/<name>.
 type Fake struct {
 	mu       sync.Mutex
@@ -57,6 +60,7 @@ func NewFake() *Fake {
 	f := &Fake{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /"+selfupdate.Repo+"/releases.atom", f.feed)
+	mux.HandleFunc("GET /"+selfupdate.Repo+"/releases/latest", f.latest)
 	mux.HandleFunc("GET /"+selfupdate.Repo+"/releases/download/{tag}/{name}", f.download)
 	f.handler = mux
 	return f
@@ -89,6 +93,24 @@ func (f *Fake) feed(w http.ResponseWriter, r *http.Request) {
 	}
 	b.WriteString(`</feed>`)
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// latest redirects like github.com: to the highest non-prerelease release's
+// tag page, or to the releases list when there is none.
+func (f *Fake) latest(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	best := ""
+	for _, rel := range f.releases {
+		if !rel.Prerelease && !selfupdate.IsPrerelease(rel.Tag) && (best == "" || selfupdate.Compare(rel.Tag, best) > 0) {
+			best = rel.Tag
+		}
+	}
+	to := "/" + selfupdate.Repo + "/releases"
+	if best != "" {
+		to += "/tag/" + best
+	}
+	http.Redirect(w, r, "http://"+r.Host+to, http.StatusFound)
 }
 
 func esc(s string) string {

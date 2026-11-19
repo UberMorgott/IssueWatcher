@@ -1,8 +1,8 @@
 // Package selfupdate replaces the running IssueWatcher executable with a newer
 // GitHub release of UberMorgott/IssueWatcher (Windows amd64).
 //
-// Discovery uses github.com itself (the releases Atom feed and the release
-// download URLs), never the REST API: the anonymous API quota (60 an hour per
+// Discovery uses github.com itself (the releases/latest redirect, the releases
+// Atom feed and the release download URLs), never the REST API: the anonymous API quota (60 an hour per
 // IP) is shared with everything else on the network and ran out, which left
 // installs stuck on an old version.
 //
@@ -11,7 +11,7 @@
 // names a version strictly newer than the running one (no downgrades) and
 // equal to the release tag, and the downloaded executable matches the
 // manifest's size and SHA-256. Nothing on disk is touched before the download
-// verified. The feed is only a hint of which tag to try.
+// verified. The redirect and the feed are only hints of which tag to try.
 //
 // Swap (the Windows pattern proven in agent-link): the running exe is renamed
 // to ".<name>.old" (a running exe cannot be overwritten, only renamed), the
@@ -47,7 +47,7 @@ const DefaultBase = "https://github.com"
 
 // Channels.
 const (
-	ChannelStable  = "stable"  // highest release version (no prerelease tag)
+	ChannelStable  = "stable"  // the release GitHub marks Latest (never a prerelease)
 	ChannelPreview = "preview" // highest version including prereleases
 )
 
@@ -99,31 +99,114 @@ func (s Source) client() *http.Client {
 	return &http.Client{Timeout: 5 * time.Minute}
 }
 
-type atomFeed struct {
-	Entries []struct {
-		Title   string    `xml:"title"`
-		Updated time.Time `xml:"updated"`
-		Content string    `xml:"content"`
-		Link    struct {
-			Href string `xml:"href,attr"`
-		} `xml:"link"`
-	} `xml:"entry"`
+type atomEntry struct {
+	Title   string    `xml:"title"`
+	Updated time.Time `xml:"updated"`
+	Content string    `xml:"content"`
+	Link    struct {
+		Href string `xml:"href,attr"`
+	} `xml:"link"`
 }
 
-// Latest returns the newest release of channel from the releases Atom feed:
-// stable = the highest version without a prerelease part, preview = the
-// highest version. (nil, nil) when the repository has no release yet. Drafts
-// never appear in the feed.
-// shortcut: the feed lists the 10 newest releases, so stable is missed after
-// 10 prereleases in a row; upgrade to the releases/latest redirect if that happens.
+type atomFeed struct {
+	XMLName xml.Name    `xml:"http://www.w3.org/2005/Atom feed"` // any other root (a proxy's HTML page) is an error
+	Entries []atomEntry `xml:"entry"`
+}
+
+// Latest returns the newest release of channel. (nil, nil) when the
+// repository has no such release yet. Drafts are never seen.
+//   - stable: the release GitHub marks "Latest" (never a prerelease), from the
+//     github.com/<repo>/releases/latest redirect.
+//   - preview: the highest version in the releases Atom feed (10 newest).
+//
+// Notes and dates come from the feed entry of the chosen tag, when listed.
 func (s Source) Latest(ctx context.Context, channel string) (*Release, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base()+"/"+Repo+"/releases.atom", nil)
+	stable := ""
+	if channel != ChannelPreview {
+		var err error
+		if stable, err = s.latestTag(ctx); err != nil || stable == "" {
+			return nil, err
+		}
+	}
+	entries, err := s.feed(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/atom+xml")
+	var best *Release
+	for _, e := range entries {
+		tag := tagOf(e.Link.Href)
+		if stable != "" && tag == stable {
+			return s.release(tag, e), nil
+		}
+		if stable == "" && IsRelease(tag) && (best == nil || Compare(tag, best.Tag) > 0) {
+			best = s.release(tag, e)
+		}
+	}
+	if stable != "" { // not among the feed's newest entries: no notes
+		return s.release(stable, atomEntry{}), nil
+	}
+	return best, nil
+}
+
+func tagOf(href string) string {
+	_, raw, ok := strings.Cut(href, "/releases/tag/")
+	tag, err := url.PathUnescape(raw)
+	if !ok || err != nil {
+		return ""
+	}
+	return tag
+}
+
+func (s Source) release(tag string, e atomEntry) *Release {
+	dl := s.base() + "/" + Repo + "/releases/download/" + url.PathEscape(tag) + "/"
+	r := &Release{
+		Tag: tag, Name: cmp.Or(e.Title, tag), Notes: notesText(e.Content), Prerelease: IsPrerelease(tag),
+		PublishedAt: e.Updated, HTMLURL: cmp.Or(e.Link.Href, s.base()+"/"+Repo+"/releases/tag/"+url.PathEscape(tag)),
+	}
+	for _, n := range []string{ManifestAsset, SignatureAsset, ThisAsset()} {
+		r.Assets = append(r.Assets, Asset{Name: n, URL: dl + url.PathEscape(n)})
+	}
+	return r
+}
+
+func (s Source) page(ctx context.Context, path, accept string, c *http.Client) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.base()+"/"+Repo+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", s.userAgent())
-	resp, err := s.client().Do(req)
+	return c.Do(req)
+}
+
+// latestTag reads the tag GitHub's releases/latest redirects to ("" = no
+// release yet: it redirects to the releases list instead).
+func (s Source) latestTag(ctx context.Context) (string, error) {
+	c := *s.client()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := s.page(ctx, "/releases/latest", "text/html", &c)
+	if err != nil {
+		return "", fmt.Errorf("latest release: %w", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode < 300 || resp.StatusCode > 399 {
+		return "", fmt.Errorf("latest release: HTTP %d, want a redirect", resp.StatusCode)
+	}
+	loc, err := resp.Location()
+	if err != nil {
+		return "", fmt.Errorf("latest release: %w", err)
+	}
+	if !strings.Contains(loc.Path, "/releases/tag/") {
+		return "", nil
+	}
+	if tag := tagOf(loc.EscapedPath()); IsRelease(tag) && !IsPrerelease(tag) {
+		return tag, nil
+	}
+	return "", fmt.Errorf("latest release: unexpected redirect %s", loc)
+}
+
+func (s Source) feed(ctx context.Context) ([]atomEntry, error) {
+	resp, err := s.page(ctx, "/releases.atom", "application/atom+xml", s.client())
 	if err != nil {
 		return nil, fmt.Errorf("releases feed: %w", err)
 	}
@@ -135,26 +218,7 @@ func (s Source) Latest(ctx context.Context, channel string) (*Release, error) {
 	if err := xml.NewDecoder(io.LimitReader(resp.Body, maxFeedSize)).Decode(&feed); err != nil {
 		return nil, fmt.Errorf("releases feed: %w", err)
 	}
-	var best *Release
-	for _, e := range feed.Entries {
-		_, rawTag, ok := strings.Cut(e.Link.Href, "/releases/tag/")
-		tag, err := url.PathUnescape(rawTag)
-		if !ok || err != nil || !IsRelease(tag) || (channel != ChannelPreview && IsPrerelease(tag)) {
-			continue
-		}
-		if best != nil && Compare(tag, best.Tag) <= 0 {
-			continue
-		}
-		dl := s.base() + "/" + Repo + "/releases/download/" + url.PathEscape(tag) + "/"
-		best = &Release{
-			Tag: tag, Name: e.Title, Notes: notesText(e.Content), Prerelease: IsPrerelease(tag),
-			PublishedAt: e.Updated, HTMLURL: e.Link.Href,
-		}
-		for _, n := range []string{ManifestAsset, SignatureAsset, ThisAsset()} {
-			best.Assets = append(best.Assets, Asset{Name: n, URL: dl + url.PathEscape(n)})
-		}
-	}
-	return best, nil
+	return feed.Entries, nil
 }
 
 var (

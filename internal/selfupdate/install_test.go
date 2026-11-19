@@ -97,6 +97,10 @@ func TestLatestFromReleasesFeed(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/UberMorgott/IssueWatcher/releases/latest" {
+			http.Redirect(w, r, "/UberMorgott/IssueWatcher/releases/tag/v0.21.2", http.StatusFound)
+			return
+		}
 		_, _ = w.Write([]byte(feed))
 	}))
 	t.Cleanup(srv.Close)
@@ -112,9 +116,47 @@ func TestLatestFromReleasesFeed(t *testing.T) {
 		t.Fatalf("preview = %+v, %v", rel, err)
 	}
 	for _, p := range paths {
-		if p != "/UberMorgott/IssueWatcher/releases.atom" {
+		if p != "/UberMorgott/IssueWatcher/releases.atom" && p != "/UberMorgott/IssueWatcher/releases/latest" {
 			t.Fatalf("asked %s", p)
 		}
+	}
+}
+
+// Stable is what GitHub marks Latest: a release flagged prerelease with a
+// plain tag is skipped, and a stable release older than the feed's newest
+// entries is still found.
+func TestLatestStableHonorsPrereleaseFlag(t *testing.T) {
+	e := setup(t)
+	exe := []byte("new exe")
+	e.fake.Set(updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(e.priv, "v0.1.1", exe, nil)},
+		updatetest.Release{Tag: "v0.1.2", Prerelease: true, Files: updatetest.Signed(e.priv, "v0.1.2", exe, nil)})
+	if got := e.latest(t, selfupdate.ChannelStable); got.Tag != "v0.1.1" || got.Assets[0].URL != e.src.Base+"/UberMorgott/IssueWatcher/releases/download/v0.1.1/manifest.json" {
+		t.Fatalf("stable = %+v", got)
+	}
+
+	// Feed without the stable tag (more than 10 newer prereleases).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			http.Redirect(w, r, "/UberMorgott/IssueWatcher/releases/tag/v0.1.0", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte(`<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="https://github.com/UberMorgott/IssueWatcher/releases/tag/v0.2.0-rc.11"/></entry></feed>`))
+	}))
+	t.Cleanup(srv.Close)
+	if rel, err := (selfupdate.Source{Base: srv.URL}).Latest(t.Context(), selfupdate.ChannelStable); err != nil || rel == nil || rel.Tag != "v0.1.0" || rel.Prerelease {
+		t.Fatalf("stable outside feed = %+v, %v", rel, err)
+	}
+}
+
+// A 200 page that is not an Atom feed (a proxy's HTML) is a failed check, not
+// "no releases".
+func TestLatestRejectsNonAtomFeed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<html xmlns="http://www.w3.org/1999/xhtml"><body>Sign in to the proxy</body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+	if rel, err := (selfupdate.Source{Base: srv.URL}).Latest(t.Context(), selfupdate.ChannelPreview); err == nil {
+		t.Fatalf("latest = %+v, want an error", rel)
 	}
 }
 
