@@ -29,7 +29,10 @@ export const useUpdatesStore = defineStore('updates', () => {
   async function check() {
     error.value = ''
     const r = await api.updateCheck()
-    if (r.ok) apply(r.data)
+    if (r.ok) return apply(r.data)
+    // A failed check (502) carries the status with its error code: the view shows the translated headline.
+    const failed = (r.body as { status?: UpdateStatus } | undefined)?.status
+    if (failed) apply(failed)
     else {
       error.value = r.error
       await load()
