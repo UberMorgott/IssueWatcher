@@ -534,11 +534,10 @@ onBeforeUnmount(() => {
             option-label="label"
             option-value="value"
             filter
-            :placeholder="t('issues.allProjects')"
             :aria-label="t('issues.project')"
             @update:model-value="(v: number) => setQuery({ repo: v })"
           >
-            <template #value="{ placeholder }">
+            <template #value>
               <span
                 v-if="selectedRepo"
                 class="opt"
@@ -547,7 +546,7 @@ onBeforeUnmount(() => {
                 :platform="selectedRepo.platform"
                 :size="14"
               />{{ selectedRepo.label }}</span>
-              <span v-else>{{ placeholder }}</span>
+              <span v-else>{{ t('issues.allProjects') }}</span>
             </template>
             <template #option="{ option }">
               <span class="opt"><PlatformIcon
