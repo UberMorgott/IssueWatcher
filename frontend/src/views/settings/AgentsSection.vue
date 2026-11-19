@@ -851,9 +851,11 @@ function setProjTopN(v: number | null) {
 }
 
 .tabs {
-  margin: 6px 0 4px;
-  /* seven tabs: scroll sideways on narrow screens instead of crushing the labels */
-  max-width: 100%;
+  /* seven tabs: scroll sideways on narrow screens instead of crushing the labels;
+     the padding keeps the focus ring inside the scroller's clip, the negative margin keeps the layout */
+  margin: 2px -4px 0;
+  padding: 4px;
+  max-width: calc(100% + 8px);
   overflow-x: auto;
 }
 
