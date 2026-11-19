@@ -165,6 +165,9 @@ func perPage(r *http.Request) int {
 func (s *Server) issuesByNumber(w http.ResponseWriter, query string, vars map[string]any) {
 	repo := str(vars["owner"]) + "/" + str(vars["name"])
 	out := map[string]any{}
+	if strings.Contains(query, "hasIssuesEnabled") {
+		out["hasIssuesEnabled"], out["isArchived"] = !s.IssuesDisabled[repo], false
+	}
 	var errs []map[string]any
 	for line := range strings.SplitSeq(query, "\n") {
 		alias, rest, ok := strings.Cut(strings.TrimSpace(line), ": issue(number: ")

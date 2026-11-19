@@ -68,6 +68,9 @@ type Server struct {
 	Releases      []*Release // releases (GET by tag, POST, asset uploads)
 	// Labels are the repository labels by owner/name (GET /repos/{o}/{r}/labels).
 	Labels map[string][]string
+	// IssuesDisabled marks owner/name repositories with issues turned off
+	// (GraphQL hasIssuesEnabled false).
+	IssuesDisabled map[string]bool
 	// LabelAdds counts POST /repos/{o}/{r}/issues/{n}/labels calls.
 	LabelAdds int
 

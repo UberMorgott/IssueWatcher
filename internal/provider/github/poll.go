@@ -157,11 +157,16 @@ func (p *Provider) poll(ctx context.Context, u string, st *provider.PollState, c
 }
 
 // changedQuery fetches up to maxBatch issues by number with aliases.
-func changedQuery(numbers []int) string { return numbersQuery(numbers, issueFields) }
+func changedQuery(numbers []int) string { return numbersQuery(numbers, "", issueFields) }
 
-func numbersQuery(numbers []int, fields string) string {
+// numbersQuery aliases issue(number:) as iN; repoFields are extra repository
+// fields read in the same request.
+func numbersQuery(numbers []int, repoFields, fields string) string {
 	var b strings.Builder
 	b.WriteString("query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n")
+	if repoFields != "" {
+		b.WriteString("    " + repoFields + "\n")
+	}
 	for i, n := range numbers {
 		fmt.Fprintf(&b, "    i%d: issue(number: %d) { ...F }\n", i, n)
 	}
@@ -171,7 +176,10 @@ func numbersQuery(numbers []int, fields string) string {
 
 // Missing implements provider.Vanisher: an issue number that no longer
 // resolves in the repository (NOT_FOUND: transferred or deleted) is missing.
-// Any other error fails the call, so an outage never closes items.
+// Only while the repository itself resolves with issues enabled and is not
+// archived: a repo-level state (issues turned off, ...) also fails every
+// issue, and must not close them. Any other error fails the call, so an
+// outage never closes items.
 func (p *Provider) Missing(ctx context.Context, project provider.Project, numbers []int) ([]int, error) {
 	owner, name, ok := strings.Cut(project.ExternalID, "/")
 	if !ok {
@@ -181,12 +189,15 @@ func (p *Provider) Missing(ctx context.Context, project provider.Project, number
 	for start := 0; start < len(numbers); start += maxBatch {
 		batch := numbers[start:min(start+maxBatch, len(numbers))]
 		var out struct {
-			Repository map[string]*struct{ ID string } `json:"repository"`
+			Repository map[string]json.RawMessage `json:"repository"`
 		}
 		vars := map[string]any{"owner": owner, "name": name}
-		errs, err := p.c.graphqlPartial(ctx, numbersQuery(batch, "id"), vars, &out, minRemaining)
+		errs, err := p.c.graphqlPartial(ctx, numbersQuery(batch, "hasIssuesEnabled isArchived", "id"), vars, &out, minRemaining)
 		if err != nil {
 			return nil, err
+		}
+		if string(out.Repository["hasIssuesEnabled"]) != "true" || string(out.Repository["isArchived"]) != "false" {
+			return nil, nil // repo gone, issues off or archived: nothing is known missing
 		}
 		gone := map[string]bool{}
 		for _, e := range errs {

@@ -1,6 +1,8 @@
 package syncer
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"sort"
@@ -8,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/UberMorgott/issuewatcher/internal/provider"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github"
 	"github.com/UberMorgott/issuewatcher/internal/provider/github/githubtest"
 	"github.com/UberMorgott/issuewatcher/internal/store"
@@ -135,6 +138,61 @@ func TestTransferredIssueClosedInOldRepo(t *testing.T) {
 	}
 	if got["octo/app#2"] != "closed:gone" || got["octo/tools#7"] != "open:open" || len(got) != 2 {
 		t.Fatalf("items %v", got)
+	}
+}
+
+// Issues turned off on a repo fail every issue lookup: that must not close them.
+func TestIssuesDisabledKeepsItemsOpen(t *testing.T) {
+	s, gh, st, _ := setup(t, true)
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	gh.Mu.Lock()
+	gh.Issues = nil
+	gh.IssuesDisabled = map[string]bool{"octo/app": true}
+	gh.Mu.Unlock()
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.Issues(t.Context(), store.IssueFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range page.Items {
+		if it.State != "open" {
+			t.Fatalf("#%d %s:%s, want open", it.Number, it.State, it.RawStatus)
+		}
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("items %d, want 2", len(page.Items))
+	}
+}
+
+type failingVanisher struct{ *github.Provider }
+
+func (failingVanisher) Missing(context.Context, provider.Project, []int) ([]int, error) {
+	return nil, errors.New("boom")
+}
+
+// A failing vanish check is best-effort: the reconcile still succeeds and
+// reports the stored items' events.
+func TestMissingErrorDoesNotFailReconcile(t *testing.T) {
+	s, gh, _, updates := setup(t, true)
+	s.opts.Provider = failingVanisher{s.opts.Provider.(*github.Provider)}
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-updates
+	t1 := t0.Add(time.Hour)
+	gh.Mu.Lock()
+	gh.Issues = append(gh.Issues, &githubtest.Issue{ID: "I_3", Repo: "octo/app", Number: 3, Title: "three",
+		Author: "carol", Open: true, CreatedAt: t1, UpdatedAt: t1})
+	gh.Mu.Unlock()
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if u := <-updates; len(u.events) != 1 || u.events[0].Number != 3 {
+		t.Fatalf("events %+v, want new #3", u.events)
 	}
 }
 
