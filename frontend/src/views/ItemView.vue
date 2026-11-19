@@ -8,6 +8,7 @@ import Message from 'primevue/message'
 import { useToast } from 'primevue/usetoast'
 import EmptyState from '../components/EmptyState.vue'
 import LabelTag from '../components/LabelTag.vue'
+import MarkdownBody from '../components/MarkdownBody.vue'
 import PlatformIcon from '../components/PlatformIcon.vue'
 import { api } from '../api/client'
 import type { IssueDetail, Job, JobFlow } from '../api/types'
@@ -512,7 +513,13 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               class="post-body"
               :class="{ empty: !item.body }"
             >
-              {{ item.body || t('item.noDescription') }}
+              <MarkdownBody
+                v-if="item.body && platform === 'github'"
+                :text="item.body"
+              />
+              <template v-else>
+                {{ item.body || t('item.noDescription') }}
+              </template>
             </div>
           </article>
 
@@ -556,7 +563,13 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
               ><i class="pi pi-external-link" /></a>
             </header>
             <div class="post-body">
-              {{ c.body }}
+              <MarkdownBody
+                v-if="platform === 'github'"
+                :text="c.body"
+              />
+              <template v-else>
+                {{ c.body }}
+              </template>
             </div>
           </article>
           <template v-if="commentsLoading">
