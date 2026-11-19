@@ -346,6 +346,9 @@ const accountItems = computed(() => [
 
 .topbar-title {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: calc(16px * var(--iw-fs, 1));
   font-weight: 600;
 }
@@ -357,10 +360,25 @@ const accountItems = computed(() => [
   white-space: nowrap;
 }
 
-.crumbs h1 {
+.crumbs > * {
+  flex-shrink: 0;
+}
+
+/* Narrow bar: the parent crumbs ellipsize first (to a few letters), the current page keeps its text longest. */
+.crumbs > :not(.sep, h1) {
+  flex: 0 1000 auto;
+  min-width: 3ch;
+}
+
+.crumbs > :not(.sep) {
   overflow: hidden;
-  font-size: inherit;
   text-overflow: ellipsis;
+}
+
+.crumbs h1 {
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: inherit;
 }
 
 .crumb-link {
@@ -610,6 +628,11 @@ const accountItems = computed(() => [
 
 @media (width <= 599px) {
   .sync-text {
+    display: none;
+  }
+
+  /* Phone width: only the current page fits next to the buttons; the sidebar menu leads back. */
+  .crumbs > :not(:last-child) {
     display: none;
   }
 }
