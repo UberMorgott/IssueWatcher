@@ -1168,7 +1168,7 @@ const en = {
         graphite: 'Graphite',
       },
       custom: 'Custom colours: {mode}',
-      customText: 'Only the current mode changes. Preview on the right; the server refuses unreadable combinations.',
+      customText: 'Only the current mode changes, and the preview shows it live; the server refuses unreadable combinations.',
       colors: { accent: 'Accent', background: 'Background', surface: 'Panels', text: 'Text' },
       contrast: 'Text contrast: {s}:1 on panels, {b}:1 on the background (4.5:1 needed)',
       reset: 'Reset',
