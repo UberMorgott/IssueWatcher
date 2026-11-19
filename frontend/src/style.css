@@ -82,12 +82,17 @@ body,
   color: var(--iw-text);
 }
 
+/* Not on <Button as="a|router-link">: unlayered link colour beat PrimeVue's layered
+   button colour, so a primary link-button drew primary text on a primary fill (blank). */
 a {
-  color: var(--iw-primary);
   text-decoration: none;
 }
 
-a:hover {
+a:where(:not(.p-button)) {
+  color: var(--iw-primary);
+}
+
+a:where(:not(.p-button)):hover {
   color: var(--iw-primary-hover);
 }
 
