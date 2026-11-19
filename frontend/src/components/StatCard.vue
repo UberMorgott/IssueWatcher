@@ -38,9 +38,13 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
 <style scoped>
 .stat {
   padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+
+  /* Label / value / hint rows shared across a grid row: a wrapped label never pushes one number below its neighbours'. */
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  align-content: start;
+  row-gap: 6px;
   min-width: 0;
   color: var(--iw-text);
 }
@@ -55,6 +59,7 @@ defineProps<{ label: string; value: number | string | null; icon: string; tone?:
 }
 
 .stat-top {
+  align-self: start;
   display: flex;
   align-items: center;
   justify-content: space-between;
