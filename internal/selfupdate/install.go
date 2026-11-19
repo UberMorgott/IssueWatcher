@@ -37,8 +37,8 @@ type Progress func(done, total int64)
 
 // Prepare downloads rel's executable for this platform next to exe as
 // NewPath(exe) and verifies it: the manifest signature (pub), version (equal
-// to the tag, newer than current, current ≥ minVersion), size and SHA-256
-// (and GitHub's asset digest when present). On any failure NewPath is removed
+// to the tag, newer than current, current ≥ minVersion), size and SHA-256.
+// On any failure NewPath is removed
 // and the running executable is untouched.
 func (s Source) Prepare(ctx context.Context, rel *Release, pub ed25519.PublicKey, current, exe string, progress Progress) (Manifest, error) {
 	m, err := s.manifest(ctx, rel, pub)
@@ -59,12 +59,6 @@ func (s Source) Prepare(ctx context.Context, rel *Release, pub ed25519.PublicKey
 	if !ok {
 		return m, fmt.Errorf("release %s has no %s", rel.Tag, m.Asset)
 	}
-	if a.Size != 0 && a.Size != m.Size {
-		return m, fmt.Errorf("%s: GitHub lists %d bytes, the signed manifest %d", m.Asset, a.Size, m.Size)
-	}
-	if d, ok := strings.CutPrefix(a.Digest, "sha256:"); ok && !strings.EqualFold(d, m.SHA256) {
-		return m, fmt.Errorf("%s: GitHub digest %s differs from the signed manifest", m.Asset, d)
-	}
 	if err := s.download(ctx, a.URL, NewPath(exe), m, progress); err != nil {
 		_ = os.Remove(NewPath(exe))
 		return m, err
@@ -80,6 +74,9 @@ func (s Source) manifest(ctx context.Context, rel *Release, pub ed25519.PublicKe
 		return Manifest{}, fmt.Errorf("release %s has no signed manifest: refusing an unverifiable update", rel.Tag)
 	}
 	body, err := s.fetchSmall(ctx, ma.URL)
+	if errors.Is(err, fs.ErrNotExist) { // asset URLs are derived from the tag, so a missing manifest shows up here
+		return Manifest{}, fmt.Errorf("release %s has no signed manifest: refusing an unverifiable update", rel.Tag)
+	}
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -106,13 +103,16 @@ func (s Source) get(ctx context.Context, u string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/octet-stream")
-	req.Header.Set("User-Agent", "issuewatcher-selfupdate")
+	req.Header.Set("User-Agent", s.userAgent())
 	resp, err := s.client().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("download %s: %w", u, fs.ErrNotExist)
+		}
 		return nil, fmt.Errorf("download %s: HTTP %d", u, resp.StatusCode)
 	}
 	return resp, nil

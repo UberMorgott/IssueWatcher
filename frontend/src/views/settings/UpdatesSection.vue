@@ -73,6 +73,10 @@ onMounted(() => void updates.load())
               :value="t('settings.updates.preview')"
             />
           </template>
+          <span
+            v-else-if="st?.error && st.state === 'idle'"
+            class="error"
+          >· {{ t('settings.updates.checkFailed') }}</span>
           <span v-else-if="st?.available">· {{ t('settings.updates.upToDate') }}</span>
           <span v-else-if="st?.checkedAt">· {{ t('settings.updates.noReleases') }}</span>
           <span

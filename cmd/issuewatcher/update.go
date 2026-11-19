@@ -15,8 +15,8 @@ import (
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 )
 
-// envUpdateBase overrides the GitHub API root the updater asks (tests only: a
-// local fake of the releases API). Manifests must still carry the release key's
+// envUpdateBase overrides the github.com root the updater asks (tests only: a
+// local fake of the releases feed and downloads). Manifests must still carry the release key's
 // signature.
 const envUpdateBase = "IW_UPDATE_BASE"
 
@@ -127,7 +127,7 @@ func newUpdater(log *slog.Logger, cfgs *config.Store, dataDir, exe string, last 
 ) *selfupdate.Updater {
 	return selfupdate.New(selfupdate.Options{
 		Current: Version, Exe: exe, DataDir: dataDir, PID: os.Getpid(),
-		Source: selfupdate.Source{APIBase: os.Getenv(envUpdateBase), UserAgent: "IssueWatcher/" + Version},
+		Source: selfupdate.Source{Base: os.Getenv(envUpdateBase), UserAgent: "IssueWatcher/" + Version},
 		Prefs: func() selfupdate.Prefs {
 			u := cfgs.Get().Updates
 			return selfupdate.Prefs{Channel: u.Channel, AutoCheck: u.AutoCheck, Interval: time.Duration(u.IntervalHours) * time.Hour}

@@ -1458,6 +1458,7 @@ const en = {
       available: 'Available version',
       checked: 'Checked {when}',
       upToDate: 'you have the latest version',
+      checkFailed: 'the last check failed, the version may be out of date',
       noReleases: 'No releases yet',
       devBuild: 'development build',
       devBuildText: 'A development build does not update itself: download a release.',

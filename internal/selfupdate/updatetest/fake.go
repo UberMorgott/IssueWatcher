@@ -1,4 +1,4 @@
-// Package updatetest fakes the GitHub releases API for self-update tests
+// Package updatetest fakes GitHub's releases feed and downloads for self-update tests
 // (unit tests and the end-to-end run behind IW_UPDATE_BASE).
 package updatetest
 
@@ -6,24 +6,23 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/xml"
+	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/UberMorgott/issuewatcher/internal/selfupdate"
 )
 
 // Release is one fake release.
 type Release struct {
-	Tag        string
-	Prerelease bool
-	Notes      string
-	Files      map[string][]byte // asset name → content
-	NoDigest   bool              // omit GitHub's asset digest (tests the manifest check alone)
+	Tag   string
+	Notes string
+	Files map[string][]byte // asset name → content
 }
 
 // Signed returns the asset files of a release of exe signed with priv; tamper,
@@ -45,7 +44,8 @@ func Signed(priv ed25519.PrivateKey, tag string, exe []byte, tamper func([]byte)
 	}
 }
 
-// Fake serves /repos/<repo>/releases[/latest] and /download/<tag>/<name>.
+// Fake serves github.com's /<repo>/releases.atom and
+// /<repo>/releases/download/<tag>/<name>.
 type Fake struct {
 	mu       sync.Mutex
 	releases []Release
@@ -56,14 +56,13 @@ type Fake struct {
 func NewFake() *Fake {
 	f := &Fake{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /repos/"+selfupdate.Repo+"/releases/latest", f.latest)
-	mux.HandleFunc("GET /repos/"+selfupdate.Repo+"/releases", f.list)
-	mux.HandleFunc("GET /download/{tag}/{name}", f.download)
+	mux.HandleFunc("GET /"+selfupdate.Repo+"/releases.atom", f.feed)
+	mux.HandleFunc("GET /"+selfupdate.Repo+"/releases/download/{tag}/{name}", f.download)
 	f.handler = mux
 	return f
 }
 
-// Handler is the fake API.
+// Handler is the fake site.
 func (f *Fake) Handler() http.Handler { return f.handler }
 
 // Start serves the fake on a loopback httptest server.
@@ -76,57 +75,27 @@ func (f *Fake) Set(rs ...Release) {
 	f.mu.Unlock()
 }
 
-func base(r *http.Request) string { return "http://" + r.Host }
-
-func (f *Fake) json(r *http.Request, rel Release) selfupdate.Release {
-	out := selfupdate.Release{
-		Tag: rel.Tag, Name: "IssueWatcher " + rel.Tag, Notes: rel.Notes, Prerelease: rel.Prerelease,
-		PublishedAt: time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC), HTMLURL: base(r) + "/release/" + rel.Tag,
-	}
-	names := make([]string, 0, len(rel.Files))
-	for n := range rel.Files {
-		names = append(names, n)
-	}
-	slices.Sort(names)
-	for _, n := range names {
-		b := rel.Files[n]
-		a := selfupdate.Asset{Name: n, Size: int64(len(b)), URL: base(r) + "/download/" + rel.Tag + "/" + n}
-		if !rel.NoDigest {
-			sum := sha256.Sum256(b)
-			a.Digest = "sha256:" + hex.EncodeToString(sum[:])
-		}
-		out.Assets = append(out.Assets, a)
-	}
-	return out
-}
-
-func (f *Fake) latest(w http.ResponseWriter, r *http.Request) {
+// feed writes the releases as GitHub's Atom feed (notes HTML-escaped in
+// <content type="html">, like the real one).
+func (f *Fake) feed(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var best *Release
-	for i := range f.releases {
-		rel := &f.releases[i]
-		if !rel.Prerelease && (best == nil || selfupdate.Compare(rel.Tag, best.Tag) > 0) {
-			best = rel
-		}
-	}
-	if best == nil {
-		http.NotFound(w, r)
-		return
-	}
-	writeJSON(w, f.json(r, *best))
-}
-
-func (f *Fake) list(w http.ResponseWriter, r *http.Request) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := []selfupdate.Release{}
+	w.Header().Set("Content-Type", "application/atom+xml; charset=utf-8")
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">`)
 	for _, rel := range f.releases {
-		out = append(out, f.json(r, rel))
+		fmt.Fprintf(&b, `<entry><updated>2026-09-28T12:00:00Z</updated><link rel="alternate" type="text/html" href="http://%s/%s/releases/tag/%s"/><title>IssueWatcher %s</title><content type="html">%s</content></entry>`,
+			r.Host, selfupdate.Repo, rel.Tag, rel.Tag, esc(html.EscapeString(rel.Notes)))
 	}
-	writeJSON(w, out)
+	b.WriteString(`</feed>`)
+	_, _ = w.Write([]byte(b.String()))
 }
 
+func esc(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
 func (f *Fake) download(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -141,9 +110,4 @@ func (f *Fake) download(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.NotFound(w, r)
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
 }

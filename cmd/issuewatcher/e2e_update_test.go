@@ -257,8 +257,8 @@ func (a *app) sse(ctx context.Context) (<-chan string, error) {
 	return ch, nil
 }
 
-func (e *e2e) release(tag string, exe []byte, noDigest bool, tamper func([]byte) []byte, key ed25519.PrivateKey) {
-	e.fake.Set(updatetest.Release{Tag: tag, Notes: "- e2e", NoDigest: noDigest, Files: updatetest.Signed(key, tag, exe, tamper)})
+func (e *e2e) release(tag string, exe []byte, tamper func([]byte) []byte, key ed25519.PrivateKey) {
+	e.fake.Set(updatetest.Release{Tag: tag, Notes: "- e2e", Files: updatetest.Signed(key, tag, exe, tamper)})
 }
 
 func (e *e2e) checkAndInstall(a *app) {
@@ -311,7 +311,7 @@ func (e *e2e) success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.release("v0.1.1", e.new, false, nil, e.priv)
+	e.release("v0.1.1", e.new, nil, e.priv)
 	start := time.Now()
 	e.checkAndInstall(a)
 
@@ -379,16 +379,15 @@ func (e *e2e) corrupted(t *testing.T) {
 	flip := func(b []byte) []byte { b[len(b)/2] ^= 0xff; return b }
 	_, otherKey, _ := ed25519.GenerateKey(rand.Reader)
 	for _, c := range []struct {
-		name     string
-		noDigest bool
-		tamper   func([]byte) []byte
-		key      ed25519.PrivateKey
-		want     string
+		name   string
+		tamper func([]byte) []byte
+		key    ed25519.PrivateKey
+		want   string
 	}{
-		{"bad sha", true, flip, e.priv, "checksum mismatch"},
-		{"bad signature", false, nil, otherKey, "signature"},
+		{"bad sha", flip, e.priv, "checksum mismatch"},
+		{"bad signature", nil, otherKey, "signature"},
 	} {
-		e.release("v0.1.1", e.new, c.noDigest, c.tamper, c.key)
+		e.release("v0.1.1", e.new, c.tamper, c.key)
 		e.checkAndInstall(a)
 		waitIdleError(t, a, c.want)
 		if v, err := a.health(); err != nil || v != "v0.1.0" {
@@ -418,7 +417,7 @@ func (e *e2e) busyPort(t *testing.T) {
 	if err := instance.WritePort(a.data, busyPort); err != nil {
 		t.Fatal(err)
 	}
-	e.release("v0.1.1", e.new, false, nil, e.priv)
+	e.release("v0.1.1", e.new, nil, e.priv)
 	e.checkAndInstall(a)
 	if err := selfupdate.WaitPID(oldPID, 60*time.Second); err != nil {
 		t.Fatalf("old process: %v", err)

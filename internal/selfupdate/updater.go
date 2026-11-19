@@ -320,10 +320,12 @@ func (u *Updater) Run(ctx context.Context) {
 		case <-time.After(wait):
 		}
 		p := u.opts.Prefs()
-		if p.AutoCheck {
-			_, _ = u.Check(ctx)
-		}
 		iv := max(p.Interval, time.Hour)
+		if p.AutoCheck {
+			if _, err := u.Check(ctx); err != nil && !errors.Is(err, ErrBusy) {
+				iv = time.Hour // a failed check (network, GitHub down) retries soon, not a whole interval later
+			}
+		}
 		wait = iv - iv/10 + rand.N(iv/5) //nolint:gosec // G404: jitter, not security
 	}
 }

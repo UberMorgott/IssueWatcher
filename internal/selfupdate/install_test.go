@@ -42,7 +42,7 @@ func setup(t *testing.T) *env {
 	if err := os.WriteFile(exe, []byte("old exe"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return &env{src: selfupdate.Source{APIBase: srv.URL}, fake: fake, pub: pub, priv: priv, exe: exe}
+	return &env{src: selfupdate.Source{Base: srv.URL}, fake: fake, pub: pub, priv: priv, exe: exe}
 }
 
 func (e *env) latest(t *testing.T, channel string) *selfupdate.Release {
@@ -59,7 +59,7 @@ func TestLatestChannels(t *testing.T) {
 	newExe := []byte("new exe")
 	e.fake.Set(
 		updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(e.priv, "v0.1.1", newExe, nil)},
-		updatetest.Release{Tag: "v0.2.0-rc.1", Prerelease: true, Files: updatetest.Signed(e.priv, "v0.2.0-rc.1", newExe, nil)},
+		updatetest.Release{Tag: "v0.2.0-rc.1", Files: updatetest.Signed(e.priv, "v0.2.0-rc.1", newExe, nil)},
 	)
 	if got := e.latest(t, selfupdate.ChannelStable).Tag; got != "v0.1.1" {
 		t.Errorf("stable = %s", got)
@@ -70,6 +70,51 @@ func TestLatestChannels(t *testing.T) {
 	e.fake.Set()
 	if rel, err := e.src.Latest(t.Context(), selfupdate.ChannelStable); rel != nil || err != nil {
 		t.Errorf("no release = %v, %v", rel, err)
+	}
+}
+
+// The check reads github.com's releases feed, never the rate-limited REST API
+// (anonymous quota 60/h per IP ran out and hid v0.21.2 from v0.21.1).
+func TestLatestFromReleasesFeed(t *testing.T) {
+	const feed = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <updated>2026-11-20T10:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/UberMorgott/IssueWatcher/releases/tag/v0.22.0-rc.1"/>
+    <title>IssueWatcher v0.22.0-rc.1</title>
+    <content type="html">&lt;p&gt;rc&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <updated>2026-11-19T16:05:26Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/UberMorgott/IssueWatcher/releases/tag/v0.21.2"/>
+    <title>IssueWatcher v0.21.2</title>
+    <content type="html">&lt;p&gt;Изменения:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Fix &lt;code&gt;gone&lt;/code&gt; &amp;amp; more&lt;/li&gt;
+&lt;/ul&gt;</content>
+  </entry>
+</feed>`
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write([]byte(feed))
+	}))
+	t.Cleanup(srv.Close)
+	src := selfupdate.Source{Base: srv.URL}
+	rel, err := src.Latest(t.Context(), selfupdate.ChannelStable)
+	if err != nil || rel == nil || rel.Tag != "v0.21.2" || rel.Prerelease || rel.Notes != "Изменения:\n- Fix gone & more" {
+		t.Fatalf("stable = %+v, %v", rel, err)
+	}
+	if a := rel.Assets[0]; a.Name != selfupdate.ManifestAsset || a.URL != srv.URL+"/UberMorgott/IssueWatcher/releases/download/v0.21.2/manifest.json" {
+		t.Fatalf("manifest asset %+v", a)
+	}
+	if rel, err := src.Latest(t.Context(), selfupdate.ChannelPreview); err != nil || rel.Tag != "v0.22.0-rc.1" || !rel.Prerelease {
+		t.Fatalf("preview = %+v, %v", rel, err)
+	}
+	for _, p := range paths {
+		if p != "/UberMorgott/IssueWatcher/releases.atom" {
+			t.Fatalf("asked %s", p)
+		}
 	}
 }
 
@@ -112,12 +157,9 @@ func TestPrepareRefuses(t *testing.T) {
 		rel     func(e *env) updatetest.Release
 		want    string
 	}{
-		{"bad sha, no GitHub digest", "v0.1.0", func(e *env) updatetest.Release {
-			return updatetest.Release{Tag: "v0.1.1", NoDigest: true, Files: updatetest.Signed(e.priv, "v0.1.1", newExe, flip)}
-		}, "checksum mismatch"},
-		{"bad sha, GitHub digest", "v0.1.0", func(e *env) updatetest.Release {
+		{"bad sha", "v0.1.0", func(e *env) updatetest.Release {
 			return updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(e.priv, "v0.1.1", newExe, flip)}
-		}, "differs from the signed manifest"},
+		}, "checksum mismatch"},
 		{"wrong key", "v0.1.0", func(*env) updatetest.Release {
 			return updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(otherKey, "v0.1.1", newExe, nil)}
 		}, "signature"},
@@ -230,7 +272,7 @@ func TestUpdaterConcurrentChecks(t *testing.T) {
 		release = make(chan struct{})
 		mu.Unlock()
 		u := selfupdate.New(selfupdate.Options{
-			Current: "v0.1.0", Exe: filepath.Join(t.TempDir(), "x.exe"), DataDir: t.TempDir(), Source: selfupdate.Source{APIBase: srv.URL},
+			Current: "v0.1.0", Exe: filepath.Join(t.TempDir(), "x.exe"), DataDir: t.TempDir(), Source: selfupdate.Source{Base: srv.URL},
 			Prefs: func() selfupdate.Prefs { return selfupdate.Prefs{Channel: "stable"} },
 			Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		})
