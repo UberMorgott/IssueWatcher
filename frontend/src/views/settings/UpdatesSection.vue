@@ -80,14 +80,21 @@ onMounted(() => void updates.load())
           </template>
           <span
             v-else-if="st?.error && st.state === 'idle'"
-            class="error"
-          >· {{ t('settings.updates.checkFailed') }}</span>
-          <span v-else-if="st?.available">· {{ t('settings.updates.upToDate') }}</span>
-          <span v-else-if="st?.checkedAt">· {{ t('settings.updates.noReleases') }}</span>
+            class="error sep"
+          >{{ t('settings.updates.checkFailed') }}</span>
+          <span
+            v-else-if="st?.available"
+            class="sep"
+          >{{ t('settings.updates.upToDate') }}</span>
+          <span
+            v-else-if="st?.checkedAt"
+            class="sep"
+          >{{ t('settings.updates.noReleases') }}</span>
           <span
             v-if="st?.checkedAt"
             v-tooltip.top="absTime(st.checkedAt)"
-          >· {{ t('settings.updates.checked', { when: relTime(st.checkedAt) }) }}</span>
+            class="sep"
+          >{{ t('settings.updates.checked', { when: relTime(st.checkedAt) }) }}</span>
         </span>
       </template>
       <Button
@@ -225,7 +232,18 @@ onMounted(() => void updates.load())
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 6px 14px;
+  overflow: hidden; /* clips the «·» of a part that wrapped to a line start */
+}
+
+.sep {
+  position: relative;
+}
+
+.sep::before {
+  content: '·';
+  position: absolute;
+  left: -9px;
 }
 
 .current,
