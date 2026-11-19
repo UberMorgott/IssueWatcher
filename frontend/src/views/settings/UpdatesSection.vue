@@ -16,7 +16,7 @@ import { useUpdatesStore } from '../../stores/updates'
 import { useSave } from '../../lib/save'
 import { absTime, relTime } from '../../lib/format'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const app = useAppStore()
 const settings = useSettingsStore()
 const updates = useUpdatesStore()
@@ -38,6 +38,11 @@ const percent = computed(() => {
 })
 const mb = (n?: number) => ((n ?? 0) / 1048576).toFixed(1)
 const errorText = computed(() => updates.error || st.value?.error || '')
+// Translated headline of a failed check/install; the raw detail stays below it.
+const errorTitle = computed(() => {
+  const code = updates.error ? '' : st.value?.errorCode
+  return code && te('settings.updates.errors.' + code) ? t('settings.updates.errors.' + code) : ''
+})
 const canInstall = computed(() => !!st.value?.updateAvailable && !st.value.devBuild)
 // The outcome of the last update is news only for a few days.
 const RESULT_TTL = 3 * 24 * 3600 * 1000
@@ -133,7 +138,13 @@ onMounted(() => void updates.load())
       class="error"
       role="alert"
     >
-      <i class="pi pi-exclamation-triangle" /> {{ errorText }}
+      <i class="pi pi-exclamation-triangle" />
+      <template v-if="errorTitle">
+        {{ errorTitle }}<br><small class="mono">{{ errorText }}</small>
+      </template>
+      <template v-else>
+        {{ errorText }}
+      </template>
     </p>
     <p
       v-if="lastResult"

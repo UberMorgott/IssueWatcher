@@ -736,6 +736,8 @@ export interface UpdateStatus {
   devBuild: boolean
   state: 'idle' | 'checking' | 'downloading' | 'installing' | 'restarting'
   error?: string
+  /** internal/selfupdate Code*: settings.updates.errors.<code>. */
+  errorCode?: string
   done?: number
   total?: number
   available?: { version: string; name?: string; notes?: string; publishedAt: string; url?: string; prerelease: boolean }

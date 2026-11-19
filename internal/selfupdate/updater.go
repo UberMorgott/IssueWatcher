@@ -70,13 +70,25 @@ type Status struct {
 	DevBuild        bool       `json:"devBuild"` // not a release: checks only, never installs
 	State           string     `json:"state"`
 	Error           string     `json:"error,omitempty"`
-	Done            int64      `json:"done,omitempty"` // download progress, bytes
+	ErrorCode       string     `json:"errorCode,omitempty"` // Code* of Error, for the UI's translation
+	Done            int64      `json:"done,omitempty"`      // download progress, bytes
 	Total           int64      `json:"total,omitempty"`
 	Available       *Available `json:"available,omitempty"`
 	UpdateAvailable bool       `json:"updateAvailable"`
 	CheckedAt       *time.Time `json:"checkedAt,omitempty"`
 	LastResult      *Result    `json:"lastResult,omitempty"`
 }
+
+// Error codes of Status.ErrorCode.
+const (
+	CodeCheckFailed    = "check_failed"
+	CodeInstallFailed  = "install_failed" // any other install failure
+	CodeUnsigned       = "unsigned"
+	CodeSignature      = "signature"
+	CodeChecksum       = "checksum"
+	CodeStartFailed    = "start_failed" // the new version did not start; rolled back
+	CodeRollbackFailed = "rollback_failed"
+)
 
 // Errors of Install.
 var (
@@ -92,6 +104,7 @@ type Updater struct {
 	mu        sync.Mutex
 	state     string
 	err       string
+	code      string // ErrorCode of err
 	done      int64
 	total     int64
 	rel       *Release
@@ -127,7 +140,7 @@ func (u *Updater) Status() Status {
 func (u *Updater) statusLocked() Status {
 	st := Status{
 		Current: u.opts.Current, Channel: u.opts.Prefs().Channel, DevBuild: !IsRelease(u.opts.Current),
-		State: u.state, Error: u.err, Done: u.done, Total: u.total, LastResult: u.opts.LastResult,
+		State: u.state, Error: u.err, ErrorCode: u.code, Done: u.done, Total: u.total, LastResult: u.opts.LastResult,
 	}
 	if r := u.rel; r != nil {
 		st.Available = &Available{Version: r.Tag, Name: r.Name, Notes: r.Notes, PublishedAt: r.PublishedAt, URL: r.HTMLURL, Prerelease: r.Prerelease}
@@ -162,7 +175,7 @@ func (u *Updater) Check(ctx context.Context) (Status, error) {
 	}
 	u.op++
 	op := u.op
-	u.state, u.err = StateChecking, ""
+	u.state, u.err, u.code = StateChecking, "", ""
 	u.mu.Unlock()
 	u.set(func() {})
 	channel := u.opts.Prefs().Channel
@@ -175,7 +188,7 @@ func (u *Updater) Check(ctx context.Context) (Status, error) {
 		}
 		u.state = StateIdle
 		if err != nil {
-			u.err = err.Error()
+			u.err, u.code = err.Error(), CodeCheckFailed
 			return
 		}
 		u.rel, u.checkedAt = rel, time.Now().UTC()
@@ -215,7 +228,7 @@ func (u *Updater) Install() error {
 	}
 	rel := u.rel
 	u.op++
-	u.state, u.err, u.done, u.total = StateDownloading, "", 0, 0
+	u.state, u.err, u.code, u.done, u.total = StateDownloading, "", "", 0, 0
 	st := u.statusLocked()
 	go func() {
 		if u.opts.OnChange != nil {
@@ -226,9 +239,22 @@ func (u *Updater) Install() error {
 	return nil
 }
 
-func (u *Updater) fail(err error) {
-	u.opts.Log.Error("update: failed", "err", err)
-	u.set(func() { u.state, u.err, u.done, u.total = StateIdle, err.Error(), 0, 0 })
+func (u *Updater) fail(code string, err error) {
+	u.opts.Log.Error("update: failed", "code", code, "err", err)
+	u.set(func() { u.state, u.err, u.code, u.done, u.total = StateIdle, err.Error(), code, 0, 0 })
+}
+
+// prepareCode names a Prepare failure.
+func prepareCode(err error) string {
+	switch {
+	case errors.Is(err, ErrSignature):
+		return CodeSignature
+	case errors.Is(err, ErrUnsigned):
+		return CodeUnsigned
+	case errors.Is(err, ErrChecksum):
+		return CodeChecksum
+	}
+	return CodeInstallFailed
 }
 
 func (u *Updater) install(rel *Release) {
@@ -236,7 +262,7 @@ func (u *Updater) install(rel *Release) {
 	if pub == nil {
 		var err error
 		if pub, err = PublicKey(); err != nil {
-			u.fail(err)
+			u.fail(CodeInstallFailed, err)
 			return
 		}
 	}
@@ -245,14 +271,14 @@ func (u *Updater) install(rel *Release) {
 	u.opts.Log.Info("update: downloading", "version", rel.Tag)
 	m, err := u.opts.Source.Prepare(ctx, rel, pub, u.opts.Current, u.opts.Exe, u.progress)
 	if err != nil {
-		u.fail(err)
+		u.fail(prepareCode(err), err)
 		return
 	}
 	u.opts.Log.Info("update: verified", "version", m.Version, "size", m.Size, "sha256", m.SHA256)
 	u.set(func() { u.state = StateInstalling })
 	if err := Swap(u.opts.Exe); err != nil {
 		_ = Cleanup(ctx, u.opts.Exe, 1, 0)
-		u.fail(err)
+		u.fail(CodeInstallFailed, err)
 		return
 	}
 	ClearReady(u.opts.DataDir)
@@ -285,7 +311,7 @@ func (u *Updater) install(rel *Release) {
 // rollback puts the old executable back after the new one failed to start.
 func (u *Updater) rollback(cause error) {
 	if err := Restore(u.opts.Exe); err != nil {
-		u.fail(fmt.Errorf("%w; rollback failed: %w", cause, err))
+		u.fail(CodeRollbackFailed, fmt.Errorf("%w; rollback failed: %w", cause, err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -294,7 +320,7 @@ func (u *Updater) rollback(cause error) {
 		u.opts.Log.Warn("update: cleanup after rollback", "err", err)
 	}
 	u.opts.Log.Warn("update: rolled back", "cause", cause)
-	u.fail(fmt.Errorf("%w (rolled back, %s still running)", cause, u.opts.Current))
+	u.fail(CodeStartFailed, fmt.Errorf("%w (rolled back, %s still running)", cause, u.opts.Current))
 }
 
 // progress publishes download progress at most every 200 ms.

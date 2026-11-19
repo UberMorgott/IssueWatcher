@@ -215,6 +215,42 @@ func TestUpdaterCheckAndGuards(t *testing.T) {
 	}
 }
 
+// A failed check or install carries the code the UI translates.
+func TestUpdaterErrorCodes(t *testing.T) {
+	e := setup(t)
+	_, otherKey, _ := ed25519.GenerateKey(rand.Reader)
+	e.fake.Set(updatetest.Release{Tag: "v0.1.1", Files: updatetest.Signed(otherKey, "v0.1.1", []byte("x"), nil)})
+	done := make(chan selfupdate.Status, 16)
+	u := selfupdate.New(selfupdate.Options{
+		Current: "v0.1.0", Exe: e.exe, DataDir: t.TempDir(), Source: e.src, PublicKey: e.pub,
+		Prefs:    func() selfupdate.Prefs { return selfupdate.Prefs{Channel: "stable"} },
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnChange: func(st selfupdate.Status) { done <- st },
+	})
+	if _, err := u.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.Install(); err != nil {
+		t.Fatal(err)
+	}
+	for st := range done {
+		if st.State == selfupdate.StateIdle && st.Error != "" {
+			if st.ErrorCode != selfupdate.CodeSignature {
+				t.Fatalf("install code %q (%s)", st.ErrorCode, st.Error)
+			}
+			break
+		}
+	}
+	bad := selfupdate.New(selfupdate.Options{
+		Current: "v0.1.0", DataDir: t.TempDir(), Source: selfupdate.Source{Base: "http://127.0.0.1:9"},
+		Prefs: func() selfupdate.Prefs { return selfupdate.Prefs{Channel: "stable"} },
+		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if st, err := bad.Check(t.Context()); err == nil || st.ErrorCode != selfupdate.CodeCheckFailed {
+		t.Fatalf("check = %+v, %v", st, err)
+	}
+}
+
 // The last check survives a restart (also the restart into the new version),
 // and a check of another channel is not reused.
 func TestUpdaterLastCheckPersists(t *testing.T) {

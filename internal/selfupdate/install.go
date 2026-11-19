@@ -32,6 +32,12 @@ func NewPath(exe string) string {
 // rename is os.Rename; tests replace it to fail one step.
 var rename = os.Rename
 
+// Refusals of Prepare the UI names (Status.ErrorCode).
+var (
+	ErrUnsigned = errors.New("no signed manifest")
+	ErrChecksum = errors.New("checksum mismatch")
+)
+
 // Progress reports a running download: done of total bytes.
 type Progress func(done, total int64)
 
@@ -71,11 +77,11 @@ func (s Source) manifest(ctx context.Context, rel *Release, pub ed25519.PublicKe
 	ma, ok1 := rel.asset(ManifestAsset)
 	sa, ok2 := rel.asset(SignatureAsset)
 	if !ok1 || !ok2 {
-		return Manifest{}, fmt.Errorf("release %s has no signed manifest: refusing an unverifiable update", rel.Tag)
+		return Manifest{}, fmt.Errorf("release %s has %w: refusing an unverifiable update", rel.Tag, ErrUnsigned)
 	}
 	body, err := s.fetchSmall(ctx, ma.URL)
 	if errors.Is(err, fs.ErrNotExist) { // asset URLs are derived from the tag, so a missing manifest shows up here
-		return Manifest{}, fmt.Errorf("release %s has no signed manifest: refusing an unverifiable update", rel.Tag)
+		return Manifest{}, fmt.Errorf("release %s has %w: refusing an unverifiable update", rel.Tag, ErrUnsigned)
 	}
 	if err != nil {
 		return Manifest{}, err
@@ -157,7 +163,7 @@ func (s Source) download(ctx context.Context, u, path string, m Manifest, progre
 		return fmt.Errorf("download %s: got %d bytes, the signed manifest says %d", m.Asset, n, m.Size)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != m.SHA256 {
-		return fmt.Errorf("checksum mismatch for %s: sha256 %s, the signed manifest says %s", m.Asset, got, m.SHA256)
+		return fmt.Errorf("%w for %s: sha256 %s, the signed manifest says %s", ErrChecksum, m.Asset, got, m.SHA256)
 	}
 	return nil
 }
