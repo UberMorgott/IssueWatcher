@@ -662,8 +662,14 @@ function took(s: RunStep): string {
   overflow-wrap: anywhere;
 }
 
+/* a done step can carry a note (e.g. "passed: factorio"): only a failed one reads as an error */
+.tl-step:not(.failed) .tl-error {
+  color: var(--iw-muted);
+}
+
 .tl-details summary {
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .pre {

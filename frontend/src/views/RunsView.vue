@@ -297,11 +297,22 @@ function open(e: { data: ReleaseRun }) {
 }
 
 .table-panel {
-  overflow: hidden;
+  /* auto, not hidden: on narrow screens the last columns scroll instead of being cut off */
+  overflow: auto;
 }
 
 .runs :deep(tr) {
   cursor: pointer;
+}
+
+/* same header look as the Issues/Jobs/Projects tables */
+.runs :deep(.p-datatable-thead > tr > th) {
+  font-size: calc(12px * var(--iw-fs, 1));
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--iw-muted);
+  background: var(--iw-surface);
 }
 
 .proj {

@@ -462,8 +462,11 @@ async function acceptAll() {
 }
 
 @media (width <= 767px) {
+  /* stacked: more air between projects than inside one, so each folder + mode reads as its project's */
   .map-row {
     grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    padding: 12px 0;
   }
 }
 </style>

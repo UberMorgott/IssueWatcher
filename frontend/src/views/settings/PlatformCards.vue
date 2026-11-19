@@ -984,6 +984,11 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
   gap: 8px;
 }
 
+/* the input shrinks, the button label stays on one line */
+.key-row > .p-button {
+  flex: none;
+}
+
 .key-actions {
   display: flex;
   flex-wrap: wrap;

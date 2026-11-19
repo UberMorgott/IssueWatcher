@@ -886,13 +886,15 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
 .head {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px 16px;
 }
 
 /* Title first, the actions (Решено, Непрочитано, open on the platform) packed at the end. */
 .head > .head-main {
-  flex: 1 1 auto;
+  /* basis, not auto: on narrow screens the buttons wrap below the title instead of squeezing it */
+  flex: 1 1 280px;
   min-width: 0;
 }
 
@@ -995,8 +997,9 @@ const avatar = (login: string) => (login && !mod.value ? `https://github.com/${e
 
 .composer-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   font-weight: 600;
 }
 

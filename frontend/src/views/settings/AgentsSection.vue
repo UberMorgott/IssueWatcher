@@ -852,6 +852,14 @@ function setProjTopN(v: number | null) {
 
 .tabs {
   margin: 6px 0 4px;
+  /* seven tabs: scroll sideways on narrow screens instead of crushing the labels */
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tabs :deep(.p-togglebutton) {
+  flex: none;
+  white-space: nowrap;
 }
 
 .hint {
