@@ -157,14 +157,52 @@ func (p *Provider) poll(ctx context.Context, u string, st *provider.PollState, c
 }
 
 // changedQuery fetches up to maxBatch issues by number with aliases.
-func changedQuery(numbers []int) string {
+func changedQuery(numbers []int) string { return numbersQuery(numbers, issueFields) }
+
+func numbersQuery(numbers []int, fields string) string {
 	var b strings.Builder
 	b.WriteString("query($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n")
 	for i, n := range numbers {
 		fmt.Fprintf(&b, "    i%d: issue(number: %d) { ...F }\n", i, n)
 	}
-	b.WriteString("  }\n}\nfragment F on Issue {\n  " + issueFields + "\n}")
+	b.WriteString("  }\n}\nfragment F on Issue {\n  " + fields + "\n}")
 	return b.String()
+}
+
+// Missing implements provider.Vanisher: an issue number that no longer
+// resolves in the repository (NOT_FOUND: transferred or deleted) is missing.
+// Any other error fails the call, so an outage never closes items.
+func (p *Provider) Missing(ctx context.Context, project provider.Project, numbers []int) ([]int, error) {
+	owner, name, ok := strings.Cut(project.ExternalID, "/")
+	if !ok {
+		return nil, fmt.Errorf("github: bad repo id %q", project.ExternalID)
+	}
+	var missing []int
+	for start := 0; start < len(numbers); start += maxBatch {
+		batch := numbers[start:min(start+maxBatch, len(numbers))]
+		var out struct {
+			Repository map[string]*struct{ ID string } `json:"repository"`
+		}
+		vars := map[string]any{"owner": owner, "name": name}
+		errs, err := p.c.graphqlPartial(ctx, numbersQuery(batch, "id"), vars, &out, minRemaining)
+		if err != nil {
+			return nil, err
+		}
+		gone := map[string]bool{}
+		for _, e := range errs {
+			alias, ok := aliasOf(e)
+			if !ok || e.Type != "NOT_FOUND" {
+				return nil, errors.New("github graphql: " + e.Message)
+			}
+			gone[alias] = true
+		}
+		for i, num := range batch {
+			if gone["i"+strconv.Itoa(i)] {
+				missing = append(missing, num)
+			}
+		}
+	}
+	return missing, nil
 }
 
 const maxBatch = 20

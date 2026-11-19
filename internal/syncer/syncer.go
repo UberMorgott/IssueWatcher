@@ -405,6 +405,7 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 						t.poll.FullAt = full
 					}
 					s.mu.Unlock()
+					err = s.closeGone(cctx, pr, full)
 				}
 				if err != nil {
 					mu.Lock()
@@ -446,6 +447,26 @@ func (s *Syncer) cycleOnce(ctx context.Context, changed *int, bg bool) (events [
 		return events, src, false, stop // the rest waits for the next cycle
 	}
 	return events, src, true, errors.Join(errs...)
+}
+
+// closeGone closes project pr's open issues the platform no longer resolves
+// there: a transferred (or deleted) issue never shows up in the project's
+// change listings again, so without this it stays open under the old project.
+func (s *Syncer) closeGone(ctx context.Context, pr store.Project, at time.Time) error {
+	v, ok := s.opts.Provider.(provider.Vanisher)
+	if !ok {
+		return nil
+	}
+	open, err := s.opts.Store.OpenIssueNumbers(ctx, pr.ID)
+	if err != nil || len(open) == 0 {
+		return err
+	}
+	gone, err := v.Missing(ctx, provider.Project{ExternalID: pr.ExternalID, Name: pr.Name, URL: pr.URL}, open)
+	if err != nil || len(gone) == 0 {
+		return err
+	}
+	s.opts.Log.Info("sync: closing items gone from project", "project", pr.ExternalID, "numbers", gone)
+	return s.write(func() error { _, err := s.opts.Store.CloseGone(ctx, pr.ID, gone, at); return err })
 }
 
 // SyncProject re-reads one project of this syncer's source now (the project
@@ -502,6 +523,9 @@ func (s *Syncer) syncProject(ctx context.Context, sourceID int64, pr store.Proje
 	}
 	var evs []store.Event
 	err = s.write(func() (err error) { evs, err = s.opts.Store.ApplyItems(ctx, src, pr.ID, items, login); return err })
+	if err == nil {
+		err = s.closeGone(ctx, pr, s.now())
+	}
 	return evs, err
 }
 

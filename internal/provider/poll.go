@@ -68,6 +68,14 @@ type Poller interface {
 	FullReconcile(ctx context.Context, project Project, since time.Time) ([]Item, error)
 }
 
+// Vanisher is implemented by providers whose items can leave a project
+// without ever showing up in its change listings again (a GitHub issue
+// transferred to another repository, or deleted).
+type Vanisher interface {
+	// Missing returns which of numbers no longer resolve in project.
+	Missing(ctx context.Context, project Project, numbers []int) ([]int, error)
+}
+
 // RateStatus is the platform quota as last reported (GET /api/sync).
 type RateStatus struct {
 	Limit     int       `json:"limit"`

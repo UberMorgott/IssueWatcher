@@ -108,6 +108,36 @@ func TestSyncDetectsNewIssueCommentAndClose(t *testing.T) {
 	}
 }
 
+// A transferred issue vanishes from the old repo's listings: the reconcile
+// closes the stale copy instead of keeping it open under the old project.
+func TestTransferredIssueClosedInOldRepo(t *testing.T) {
+	s, gh, st, _ := setup(t, true)
+	gh.Mu.Lock()
+	gh.Repos = append(gh.Repos, "octo/tools")
+	gh.Mu.Unlock()
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t1 := t0.Add(time.Hour)
+	gh.Mu.Lock()
+	*gh.Issues[1] = githubtest.Issue{ID: "I_7", Repo: "octo/tools", Number: 7, Title: "two", Author: "alice", Open: true, CreatedAt: t0, UpdatedAt: t1}
+	gh.Mu.Unlock()
+	if err := s.SyncOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	page, err := st.Issues(t.Context(), store.IssueFilter{Text: "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range page.Items {
+		got[it.Repo+"#"+strconv.Itoa(it.Number)] = it.State + ":" + it.RawStatus
+	}
+	if got["octo/app#2"] != "closed:gone" || got["octo/tools#7"] != "open:open" || len(got) != 2 {
+		t.Fatalf("items %v", got)
+	}
+}
+
 func TestSignedOutIsQuiet(t *testing.T) {
 	s, _, _, updates := setup(t, false)
 	if err := s.SyncOnce(t.Context()); err != nil {

@@ -695,6 +695,47 @@ func (s *Store) SetResolved(ctx context.Context, ids []int64, resolved bool) (in
 	return int(n), nil
 }
 
+// OpenIssueNumbers lists the numbers of project's open issues.
+func (s *Store) OpenIssueNumbers(ctx context.Context, projectID int64) ([]int, error) {
+	rows, err := s.rd.QueryContext(ctx, `SELECT number FROM items
+		WHERE project_id = ? AND kind = 'issue' AND status = 'open' ORDER BY number`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("store: open issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("store: open issues: %w", err)
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// CloseGone closes project's open issues numbers that left the platform
+// project (transferred or deleted): raw status "gone", read. The rows stay,
+// so jobs and history that reference them keep working.
+func (s *Store) CloseGone(ctx context.Context, projectID int64, numbers []int, at time.Time) (int, error) {
+	if len(numbers) == 0 {
+		return 0, nil
+	}
+	b, err := json.Marshal(numbers)
+	if err != nil {
+		return 0, err
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE items SET status = 'closed', raw_status = 'gone', closed_at = ?, unread = 0
+		WHERE project_id = ? AND kind = 'issue' AND status = 'open' AND number IN (SELECT value FROM json_each(?))`,
+		ts(at), projectID, string(b))
+	if err != nil {
+		return 0, fmt.Errorf("store: close gone: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	s.changes.Add(n)
+	return int(n), nil
+}
+
 // UnreadCount is the tray badge: items with unseen activity.
 func (s *Store) UnreadCount(ctx context.Context) (int, error) {
 	var n int
