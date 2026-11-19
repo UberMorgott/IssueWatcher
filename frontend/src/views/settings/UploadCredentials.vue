@@ -178,10 +178,16 @@ onMounted(async () => {
 
 .key-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-/* the input shrinks, the button label stays on one line */
+/* the input shrinks to its basis, then the button wraps under it; the button label stays on one line */
+.key-row > .p-inputtext {
+  flex: 1 1 10em;
+  min-width: 0;
+}
+
 .key-row > .p-button {
   flex: none;
 }
