@@ -337,6 +337,7 @@ const nexusKeyDraft = ref('')
 const nexusKeyBusy = ref<'' | 'save' | 'check' | 'remove'>('')
 const nexusKeyEditing = ref(false)
 const NEXUS_KEY_URL = 'https://www.nexusmods.com/users/myaccount?tab=api'
+const STEAM_KEY_URL = 'https://steamcommunity.com/dev/apikey'
 async function loadNexusKey() {
   const r = await api.nexusKey()
   if (r.ok) nexusKey.value = r.data
@@ -688,7 +689,13 @@ async function doLogout(id: CardId, forget: boolean, platform: string) {
             autocomplete="off"
             fluid
           />
-          <small class="muted">{{ t('platforms.apiKeyHint') }}</small>
+          <small class="muted">{{ t('platforms.apiKeyHint') }}
+            <a
+              :href="STEAM_KEY_URL"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ t('platforms.apiKeyGet') }} <i class="pi pi-external-link" /></a>
+          </small>
         </label>
         <div
           v-if="steam?.hasCookies && !steamEdit.cookies"
