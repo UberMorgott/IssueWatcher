@@ -19,7 +19,7 @@ const confirm = useConfirm()
 const toast = useToast()
 const { t, te } = useI18n()
 
-const CF_TOKENS_URL = 'https://authors.curseforge.com/account/api-tokens'
+const CF_TOKENS_URL = 'https://authors.curseforge.com/#/settings/api-tokens'
 const busy = ref('')
 const error = ref('')
 const errorDetail = ref('')

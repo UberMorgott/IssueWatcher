@@ -29,7 +29,7 @@ import (
 // (https://support.curseforge.com/support/solutions/articles/9000197321):
 // POST https://www.curseforge.com/api/projects/{id}/upload-file, multipart
 // fields "metadata" (JSON) and "file", header X-Api-Token (the author's API
-// token from authors.curseforge.com → API tokens; never in the URL). The
+// token from https://authors.curseforge.com/#/settings/api-tokens; never in the URL). The
 // www host serves every game (per-game hosts such as hytale.curseforge.com
 // answer 404); game versions come from GET /api/game/{slug}/versions.
 //
