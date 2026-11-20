@@ -335,10 +335,16 @@ func (s *Syncer) checkDue(ctx context.Context, now time.Time) {
 	}
 	s.mu.Lock()
 	s.status.LastCheck = now.UTC().Format(time.RFC3339)
+	if stop == nil && s.checkErr { // a transient check failure (rate limit) is over: don't wait for the next reconcile
+		s.status.LastError, s.checkErr = "", false
+	}
 	s.mu.Unlock()
 	if stop != nil {
 		s.afterError(stop, now)
 		s.update(func(st *Status) { st.LastError = stop.Error() })
+		s.mu.Lock()
+		s.checkErr = true
+		s.mu.Unlock()
 	}
 	changed = int(s.opts.Store.Changes() - c0)
 	if changed == 0 && len(events) == 0 {

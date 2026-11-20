@@ -106,6 +106,7 @@ type Syncer struct {
 	warmed         bool // warmStart ran (first Step)
 	bootRetry      int  // failed reconciles in a row with no targets (retry backoff)
 	verifyAccount  bool // resumed from the store: the first check confirms the account
+	checkErr       bool // status.LastError came from a change check: the next clean check round clears it
 	pausedUntil    time.Time
 	backoff        time.Duration
 	budgetFree     time.Time
@@ -300,6 +301,7 @@ func (s *Syncer) syncOnce(ctx context.Context, bg bool) error {
 	})
 	s.mu.Lock()
 	s.reconciledOnce = true
+	s.checkErr = false // the reconcile's own outcome replaced LastError
 	switch {
 	case errors.Is(err, provider.ErrNotSignedIn):
 		// Signed out: look again soon (sign-in also triggers a sync).

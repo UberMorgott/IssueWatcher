@@ -176,7 +176,7 @@ func TestRateLimitPausesTheSchedule(t *testing.T) {
 	clk.Add(6 * time.Minute)
 	s.Step(t.Context())
 	st := s.Status()
-	if st.RateLimitedUntil == "" {
+	if st.RateLimitedUntil == "" || st.LastError == "" {
 		t.Fatalf("not paused: %+v", st)
 	}
 	before := gh.Hits().REST
@@ -188,6 +188,10 @@ func TestRateLimitPausesTheSchedule(t *testing.T) {
 	s.Step(t.Context())
 	if gh.Hits().REST == before {
 		t.Fatal("schedule did not resume after Retry-After")
+	}
+	// The clean check round clears the rate-limit error without waiting for the next reconcile.
+	if st := s.Status(); st.LastError != "" || st.NextReconcile <= clk.Now().UTC().Format(time.RFC3339) {
+		t.Fatalf("error kept after recovery (or a reconcile ran): %+v", st)
 	}
 }
 

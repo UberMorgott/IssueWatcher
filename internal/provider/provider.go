@@ -127,6 +127,9 @@ type RateLimitError struct {
 }
 
 func (e *RateLimitError) Error() string {
+	if e.Reset.IsZero() { // no Retry-After (Steam 429/503): the syncer backs off on its own
+		return "provider: rate limited"
+	}
 	return "provider: rate limited until " + e.Reset.UTC().Format(time.RFC3339)
 }
 
